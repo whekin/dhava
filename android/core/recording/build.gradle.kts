@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.play.services.location)
     implementation(libs.okhttp)
+    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation(libs.junit)
 }

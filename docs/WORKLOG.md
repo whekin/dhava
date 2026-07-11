@@ -53,3 +53,32 @@ use imresamu/postgis locally; noted in deploy compose). openapi.yaml updated.
 - No retry queue for uploads (WorkManager later); no auth (v1.5).
 - Not yet run on a real device/emulator — next session: install, record a walk,
   upload, eyeball the JSONL.
+
+## 2026-07-11 — Phase 1.1: save flow, background upload, ARM images
+
+Owner requirements: fully offline recording + save; upload in background when the
+user saves; title/description/bike entered at save time. Also: the Coolify VPS is
+ARM — deploy compose now uses multi-arch `imresamu/postgis` everywhere.
+
+**Android:**
+- Save sheet after Stop: title (prefilled by time of day), description, bike picker
+  as horizontal selectable cards + inline "Add bike" dialog (Full-sus/Hardtail/
+  E-bike/Other); bikes persist in `bikes.json`, last-used preselected. Discard with
+  confirm deletes file + entry.
+- Upload rewritten to WorkManager: unique work per recording (KEEP), NetworkType.
+  CONNECTED, exponential backoff, 5 attempts then terminal `failed` with manual
+  Retry. Server id persisted after create → retries skip create (idempotent).
+  Repository re-enqueues `pending_upload` entries on init.
+- Recording status lifecycle persisted in the index: recorded → pending_upload →
+  uploaded / failed; unsaved recordings reopen the save sheet ("Finish saving"),
+  surviving process death. 13 unit tests green, assembleDebug green.
+
+**Backend:**
+- Migration 0003: activities.title/description/bike/bike_type (nullable, CHECK on
+  bike_type enum). finish accepts optional metadata (caps: 200/5000/100, Unicode
+  rune counts); missing == empty == NULL. 33 tests + e2e smoke on imresamu/postgis
+  (migrations up/down round-trip verified). openapi.yaml + raw-recording-format.md
+  updated.
+
+**Open:** same as above (device test pending) + WorkManager job not yet observed
+end-to-end on device with real airplane-mode toggling.

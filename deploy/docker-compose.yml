@@ -34,9 +34,10 @@ services:
         condition: service_healthy
 
   db:
-    # NOTE: postgis/postgis has no arm64 manifest; for local dev on Apple Silicon
-    # use imresamu/postgis:17-3.5 instead. Fine as-is on x86 (Coolify).
-    image: postgis/postgis:17-3.5
+    # imresamu/postgis: multi-arch PostGIS build (arm64 + amd64) — the official
+    # postgis/postgis image has no arm64 manifest, and both the dev Mac and the
+    # Coolify VPS are ARM.
+    image: imresamu/postgis:17-3.5
     environment:
       POSTGRES_USER: dhava
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dhava}

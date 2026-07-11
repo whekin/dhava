@@ -79,12 +79,25 @@ func (s *Store) AttachRawRecording(ctx context.Context, activityID, storageKey, 
 	return nil
 }
 
-// FinishActivity sets ended_at and moves the activity to status "uploaded".
-// It returns false when no activity with the given id exists.
-func (s *Store) FinishActivity(ctx context.Context, id string, endedAt time.Time) (bool, error) {
+// ActivityMetadata holds optional user-entered fields saved when an activity
+// is finished. Nil fields are stored as NULL.
+type ActivityMetadata struct {
+	Title       *string
+	Description *string
+	Bike        *string
+	BikeType    *string
+}
+
+// FinishActivity sets ended_at and user-entered metadata, and moves the
+// activity to status "uploaded". It returns false when no activity with the
+// given id exists.
+func (s *Store) FinishActivity(ctx context.Context, id string, endedAt time.Time, meta ActivityMetadata) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE activities SET ended_at = $2, status = 'uploaded' WHERE id = $1`,
-		id, endedAt,
+		`UPDATE activities
+		 SET ended_at = $2, status = 'uploaded',
+		     title = $3, description = $4, bike = $5, bike_type = $6
+		 WHERE id = $1`,
+		id, endedAt, meta.Title, meta.Description, meta.Bike, meta.BikeType,
 	)
 	if err != nil {
 		return false, fmt.Errorf("finish activity: %w", err)

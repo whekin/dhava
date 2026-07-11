@@ -41,7 +41,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingState
-import com.dhava.core.recording.RecordingSummary
+import com.dhava.core.recording.RecordingStatus
 import com.dhava.core.recording.UploadState
 import java.time.Instant
 import java.time.ZoneId
@@ -50,7 +50,8 @@ import java.util.Locale
 
 /**
  * Record screen: start/stop ride recording, glance at live sensor stats,
- * and upload finished recordings.
+ * save finished recordings (title / description / bike) and watch their
+ * background upload progress.
  */
 @Composable
 fun RecordScreen(
@@ -61,6 +62,9 @@ fun RecordScreen(
     val state by viewModel.state.collectAsState()
     val recordings by viewModel.recordings.collectAsState()
     val uploads by viewModel.uploads.collectAsState()
+    val bikes by viewModel.bikes.collectAsState()
+    val lastUsedBikeId by viewModel.lastUsedBikeId.collectAsState()
+    val reopenedSaveId by viewModel.reopenedSaveId.collectAsState()
 
     var permissionDenied by remember { mutableStateOf(false) }
 
@@ -94,6 +98,19 @@ fun RecordScreen(
         }
     }
 
+    // The save sheet target: the recording that just finished, or an unsaved
+    // entry reopened from the list ("Finish saving").
+    val saveTarget: SaveTarget? = when {
+        state is RecordingState.Finished -> {
+            val summary = (state as RecordingState.Finished).summary
+            SaveTarget(summary.id, summary.startedAtMs, summary.endedAtMs - summary.startedAtMs)
+        }
+        reopenedSaveId != null -> recordings
+            .firstOrNull { it.id == reopenedSaveId }
+            ?.let { SaveTarget(it.id, it.startedAtMs, it.endedAtMs - it.startedAtMs) }
+        else -> null
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -103,31 +120,43 @@ fun RecordScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            when (val s = state) {
-                is RecordingState.Recording -> RecordingContent(
-                    state = s,
+            when {
+                state is RecordingState.Recording -> RecordingContent(
+                    state = state as RecordingState.Recording,
                     onStop = viewModel::stopRecording,
                 )
-                is RecordingState.Finished -> FinishedContent(
-                    summary = s.summary,
-                    onDismiss = viewModel::acknowledgeFinished,
+                saveTarget != null -> SaveContent(
+                    recordingId = saveTarget.id,
+                    startedAtMs = saveTarget.startedAtMs,
+                    durationMs = saveTarget.durationMs,
+                    bikes = bikes,
+                    lastUsedBikeId = lastUsedBikeId,
+                    onAddBike = viewModel::addBike,
+                    onSave = { title, description, bike ->
+                        viewModel.save(saveTarget.id, title, description, bike)
+                    },
+                    onDiscard = { viewModel.discard(saveTarget.id) },
                 )
-                RecordingState.Idle -> IdleContent(
+                else -> IdleContent(
                     permissionDenied = permissionDenied,
                     onStart = ::startWithPermissions,
                 )
             }
         }
 
-        if (recordings.isNotEmpty() && state !is RecordingState.Recording) {
+        if (recordings.isNotEmpty() && state !is RecordingState.Recording && saveTarget == null) {
             RecordingsList(
                 recordings = recordings,
                 uploads = uploads,
-                onUpload = viewModel::upload,
+                onFinishSaving = viewModel::openSave,
+                onRetry = viewModel::retryUpload,
             )
         }
     }
 }
+
+/** What the save sheet is currently editing. */
+private data class SaveTarget(val id: String, val startedAtMs: Long, val durationMs: Long)
 
 @Composable
 private fun IdleContent(
@@ -212,35 +241,11 @@ private fun StatLabel(text: String) {
 }
 
 @Composable
-private fun FinishedContent(
-    summary: RecordingSummary,
-    onDismiss: () -> Unit,
-) {
-    Text(
-        text = "Ride saved",
-        style = MaterialTheme.typography.headlineMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-    Text(
-        text = "${formatElapsed(summary.endedAtMs - summary.startedAtMs)} · " +
-            "${formatSize(summary.sizeBytes)} · " +
-            "${summary.gpsCount} gps / ${summary.imuCount} imu / ${summary.baroCount} baro",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-    )
-    Spacer(modifier = Modifier.height(24.dp))
-    Button(onClick = onDismiss) {
-        Text("OK")
-    }
-}
-
-@Composable
 private fun RecordingsList(
     recordings: List<LocalRecording>,
     uploads: Map<String, UploadState>,
-    onUpload: (String) -> Unit,
+    onFinishSaving: (String) -> Unit,
+    onRetry: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         HorizontalDivider()
@@ -255,7 +260,8 @@ private fun RecordingsList(
                 RecordingRow(
                     recording = recording,
                     uploadState = uploads[recording.id],
-                    onUpload = { onUpload(recording.id) },
+                    onFinishSaving = { onFinishSaving(recording.id) },
+                    onRetry = { onRetry(recording.id) },
                 )
             }
         }
@@ -266,7 +272,8 @@ private fun RecordingsList(
 private fun RecordingRow(
     recording: LocalRecording,
     uploadState: UploadState?,
-    onUpload: () -> Unit,
+    onFinishSaving: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -276,40 +283,60 @@ private fun RecordingRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = formatStartTime(recording.startedAtMs),
+                text = recording.title ?: formatStartTime(recording.startedAtMs),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "${formatElapsed(recording.endedAtMs - recording.startedAtMs)} · " +
+                text = listOfNotNull(
+                    formatElapsed(recording.endedAtMs - recording.startedAtMs),
                     formatSize(recording.sizeBytes),
+                    recording.bikeName,
+                ).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (uploadState is UploadState.Failed) {
-                Text(
-                    text = "Upload failed: ${uploadState.message}",
+            when {
+                uploadState is UploadState.Retrying -> Text(
+                    text = "Upload failed, will retry: ${uploadState.message}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                recording.status == RecordingStatus.FAILED -> Text(
+                    text = "Upload failed",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
         }
         when {
-            recording.uploaded -> Icon(
+            recording.status == RecordingStatus.UPLOADED -> Icon(
                 imageVector = Icons.Filled.Check,
                 contentDescription = "Uploaded",
                 tint = MaterialTheme.colorScheme.primary,
             )
-            uploadState is UploadState.Uploading -> Text(
-                text = "Uploading…",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            else -> TextButton(onClick = onUpload) {
-                Text(if (uploadState is UploadState.Failed) "Retry" else "Upload")
+            recording.status == RecordingStatus.RECORDED -> TextButton(onClick = onFinishSaving) {
+                Text("Finish saving")
             }
+            recording.status == RecordingStatus.FAILED -> TextButton(onClick = onRetry) {
+                Text("Retry")
+            }
+            uploadState is UploadState.Uploading -> StatusLabel("Uploading…")
+            uploadState is UploadState.Retrying -> StatusLabel("Retrying…")
+            // PENDING_UPLOAD with no active attempt: WorkManager is waiting
+            // for network (offline) or for its backoff window.
+            else -> StatusLabel("Queued")
         }
     }
+}
+
+@Composable
+private fun StatusLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 // --- formatting helpers -----------------------------------------------------
@@ -317,10 +344,10 @@ private fun RecordingRow(
 private val startTimeFormatter =
     DateTimeFormatter.ofPattern("MMM d, HH:mm", Locale.US).withZone(ZoneId.systemDefault())
 
-private fun formatStartTime(epochMs: Long): String =
+internal fun formatStartTime(epochMs: Long): String =
     startTimeFormatter.format(Instant.ofEpochMilli(epochMs))
 
-private fun formatElapsed(elapsedMs: Long): String {
+internal fun formatElapsed(elapsedMs: Long): String {
     val totalSeconds = elapsedMs / 1_000
     return String.format(
         Locale.US,

@@ -29,8 +29,15 @@ data class RecordingSummary(
     val baroCount: Int,
 )
 
-/** Transient per-recording upload progress, keyed by recording id. */
+/**
+ * Transient per-recording upload progress, keyed by recording id. Persistent
+ * outcomes (pending / uploaded / failed) live in [LocalRecording.status];
+ * this flow only carries the in-flight detail on top of `pending_upload`.
+ */
 sealed interface UploadState {
+    /** The worker is actively pushing bytes right now. */
     data object Uploading : UploadState
-    data class Failed(val message: String) : UploadState
+
+    /** Last attempt failed; WorkManager will retry with backoff. */
+    data class Retrying(val message: String) : UploadState
 }

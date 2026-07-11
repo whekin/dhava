@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/whekin/dhava/backend/internal/store"
 )
 
 const testActivityID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
@@ -20,6 +22,7 @@ const testActivityID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 type fakeDatastore struct {
 	activities map[string]bool
 	finished   map[string]time.Time
+	meta       map[string]store.ActivityMetadata
 	rawKey     string
 	rawSize    int64
 }
@@ -28,6 +31,7 @@ func newFakeDatastore() *fakeDatastore {
 	return &fakeDatastore{
 		activities: map[string]bool{},
 		finished:   map[string]time.Time{},
+		meta:       map[string]store.ActivityMetadata{},
 	}
 }
 
@@ -46,11 +50,12 @@ func (f *fakeDatastore) AttachRawRecording(ctx context.Context, activityID, stor
 	return nil
 }
 
-func (f *fakeDatastore) FinishActivity(ctx context.Context, id string, endedAt time.Time) (bool, error) {
+func (f *fakeDatastore) FinishActivity(ctx context.Context, id string, endedAt time.Time, meta store.ActivityMetadata) (bool, error) {
 	if !f.activities[id] {
 		return false, nil
 	}
 	f.finished[id] = endedAt
+	f.meta[id] = meta
 	return true, nil
 }
 
@@ -280,6 +285,61 @@ func TestFinishActivity(t *testing.T) {
 	if got := db.finished[testActivityID]; !got.Equal(want) {
 		t.Errorf("ended_at = %v, want %v", got, want)
 	}
+	// The client omits empty metadata fields; all must come through as nil.
+	meta := db.meta[testActivityID]
+	if meta.Title != nil || meta.Description != nil || meta.Bike != nil || meta.BikeType != nil {
+		t.Errorf("metadata = %+v, want all nil", meta)
+	}
+}
+
+func TestFinishActivityWithMetadata(t *testing.T) {
+	db := newFakeDatastore()
+	db.activities[testActivityID] = true
+	h := newTestServer(t, db, &fakeBlobStore{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/activities/"+testActivityID+"/finish",
+		strings.NewReader(`{"ended_at_ms":1770000600000,"title":"Morning laps","description":"3 runs, dusty","bike":"Norco Range","bike_type":"full_sus"}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body)
+	}
+	meta := db.meta[testActivityID]
+	checks := []struct {
+		name string
+		got  *string
+		want string
+	}{
+		{"title", meta.Title, "Morning laps"},
+		{"description", meta.Description, "3 runs, dusty"},
+		{"bike", meta.Bike, "Norco Range"},
+		{"bike_type", meta.BikeType, "full_sus"},
+	}
+	for _, c := range checks {
+		if c.got == nil || *c.got != c.want {
+			t.Errorf("%s = %v, want %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+func TestFinishActivityEmptyMetadataFields(t *testing.T) {
+	db := newFakeDatastore()
+	db.activities[testActivityID] = true
+	h := newTestServer(t, db, &fakeBlobStore{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/activities/"+testActivityID+"/finish",
+		strings.NewReader(`{"ended_at_ms":1770000600000,"title":"","description":"","bike":"","bike_type":""}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body)
+	}
+	meta := db.meta[testActivityID]
+	if meta.Title != nil || meta.Description != nil || meta.Bike != nil || meta.BikeType != nil {
+		t.Errorf("metadata = %+v, want all nil", meta)
+	}
 }
 
 func TestFinishActivityValidation(t *testing.T) {
@@ -287,14 +347,56 @@ func TestFinishActivityValidation(t *testing.T) {
 	db.activities[testActivityID] = true
 	h := newTestServer(t, db, &fakeBlobStore{})
 
-	for _, body := range []string{`not json`, `{}`, `{"ended_at_ms":0}`} {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/activities/"+testActivityID+"/finish",
-			strings.NewReader(body))
-		h.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("body %q: status = %d, want %d", body, rec.Code, http.StatusBadRequest)
-		}
+	longField := func(n int) string { return strings.Repeat("x", n) }
+	tests := []struct {
+		name      string
+		body      string
+		wantError string
+	}{
+		{"invalid json", `not json`, "invalid_json"},
+		{"empty object", `{}`, "ended_at_ms_required"},
+		{"zero ended_at_ms", `{"ended_at_ms":0}`, "ended_at_ms_required"},
+		{"invalid bike_type", `{"ended_at_ms":1770000600000,"bike_type":"unicycle"}`, "invalid_bike_type"},
+		{"title too long", `{"ended_at_ms":1770000600000,"title":"` + longField(201) + `"}`, "title_too_long"},
+		{"description too long", `{"ended_at_ms":1770000600000,"description":"` + longField(5001) + `"}`, "description_too_long"},
+		{"bike too long", `{"ended_at_ms":1770000600000,"bike":"` + longField(101) + `"}`, "bike_too_long"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/activities/"+testActivityID+"/finish",
+				strings.NewReader(tt.body))
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("invalid JSON body: %v", err)
+			}
+			if body["error"] != tt.wantError {
+				t.Errorf("error = %q, want %q", body["error"], tt.wantError)
+			}
+		})
+	}
+}
+
+func TestFinishActivityMaxLengthMetadataAccepted(t *testing.T) {
+	db := newFakeDatastore()
+	db.activities[testActivityID] = true
+	h := newTestServer(t, db, &fakeBlobStore{})
+
+	body := `{"ended_at_ms":1770000600000,` +
+		`"title":"` + strings.Repeat("x", 200) + `",` +
+		`"description":"` + strings.Repeat("x", 5000) + `",` +
+		`"bike":"` + strings.Repeat("x", 100) + `"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/activities/"+testActivityID+"/finish",
+		strings.NewReader(body))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusNoContent, rec.Body)
 	}
 }
 

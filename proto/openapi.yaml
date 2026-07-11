@@ -131,6 +131,22 @@ components:
       required: [ended_at_ms]
       properties:
         ended_at_ms: { type: integer, format: int64, description: Unix epoch milliseconds }
+        title:
+          type: string
+          maxLength: 200
+          description: User-entered title. Omitted or empty means unset (stored as NULL).
+        description:
+          type: string
+          maxLength: 5000
+          description: User-entered description. Omitted or empty means unset (stored as NULL).
+        bike:
+          type: string
+          maxLength: 100
+          description: User-entered bike name. Omitted or empty means unset (stored as NULL).
+        bike_type:
+          type: string
+          enum: [full_sus, hardtail, ebike, other]
+          description: Bike category. Omitted or empty means unset (stored as NULL).
     Error:
       type: object
       required: [error]

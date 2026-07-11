@@ -1,0 +1,4 @@
+ALTER TABLE activities DROP COLUMN IF EXISTS bike_type;
+ALTER TABLE activities DROP COLUMN IF EXISTS bike;
+ALTER TABLE activities DROP COLUMN IF EXISTS description;
+ALTER TABLE activities DROP COLUMN IF EXISTS title;

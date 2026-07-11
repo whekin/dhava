@@ -1,0 +1,77 @@
+package com.dhava.core.recording
+
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/**
+ * Pins the on-device index entry encoding (`recordings.json`). Field and
+ * status names are persisted on disk, so renames silently orphan existing
+ * entries — if this test breaks, add a migration instead.
+ */
+class LocalRecordingTest {
+
+    /** Same settings as [IndexJson] but compact, to pin field names readably. */
+    private val json = Json { ignoreUnknownKeys = true }
+
+    @Test
+    fun `saved entry encodes all metadata fields`() {
+        val entry = LocalRecording(
+            id = "0b7f3a1e-1111-2222-3333-444455556666",
+            startedAtMs = 1770000000000,
+            endedAtMs = 1770000600000,
+            sizeBytes = 123456,
+            status = RecordingStatus.PENDING_UPLOAD,
+            title = "Morning ride",
+            description = "Loose and dusty",
+            bikeId = "bike-1",
+            bikeName = "Meta AM",
+            bikeType = BikeType.FULL_SUS,
+            savedAtMs = 1770000601000,
+            serverId = "srv-42",
+        )
+        assertEquals(
+            """{"id":"0b7f3a1e-1111-2222-3333-444455556666",""" +
+                """"started_at_ms":1770000000000,"ended_at_ms":1770000600000,""" +
+                """"size_bytes":123456,"status":"pending_upload",""" +
+                """"title":"Morning ride","description":"Loose and dusty",""" +
+                """"bike_id":"bike-1","bike_name":"Meta AM","bike_type":"full_sus",""" +
+                """"saved_at_ms":1770000601000,"server_id":"srv-42"}""",
+            json.encodeToString(entry),
+        )
+    }
+
+    @Test
+    fun `status wire names cover the whole lifecycle`() {
+        assertEquals("\"recorded\"", json.encodeToString(RecordingStatus.RECORDED))
+        assertEquals("\"pending_upload\"", json.encodeToString(RecordingStatus.PENDING_UPLOAD))
+        assertEquals("\"uploaded\"", json.encodeToString(RecordingStatus.UPLOADED))
+        assertEquals("\"failed\"", json.encodeToString(RecordingStatus.FAILED))
+    }
+
+    @Test
+    fun `legacy entry without status decodes as recorded`() {
+        // Pre-save-flow index shape (the old `uploaded` boolean is ignored).
+        val entry = json.decodeFromString<LocalRecording>(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3,"uploaded":false}""",
+        )
+        assertEquals(RecordingStatus.RECORDED, entry.status)
+        assertNull(entry.title)
+        assertNull(entry.serverId)
+    }
+
+    @Test
+    fun `bikes file round-trips`() {
+        val stored = BikesFile(
+            bikes = listOf(Bike(id = "b1", name = "Meta AM", type = BikeType.EBIKE)),
+            lastUsedId = "b1",
+        )
+        assertEquals(stored, json.decodeFromString<BikesFile>(json.encodeToString(stored)))
+        assertEquals(
+            """{"bikes":[{"id":"b1","name":"Meta AM","type":"ebike"}],"last_used_id":"b1"}""",
+            json.encodeToString(stored),
+        )
+    }
+}

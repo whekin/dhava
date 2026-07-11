@@ -23,6 +23,7 @@ kotlinxSerialization = "1.9.0"
 kotlinxCoroutines = "1.10.2"
 playServicesLocation = "21.3.0"
 okhttp = "4.12.0"
+workManager = "2.10.1"
 junit = "4.13.2"
 
 [libraries]
@@ -43,6 +44,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]

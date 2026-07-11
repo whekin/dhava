@@ -19,3 +19,9 @@ Short log of architecture/product decisions. Newest last.
 - **No auth in Phase 1** — endpoints open, device-token auth comes in v1.5. Fine while
   the API is not public.
 - **Package root** `com.dhava`, module deps: features → core, never feature → feature.
+- **PostGIS image: `imresamu/postgis`** (multi-arch) — official `postgis/postgis` has
+  no arm64 manifest; dev Mac and the Coolify VPS are both ARM.
+- **Upload model**: recording and saving are fully offline; upload is a background
+  WorkManager job enqueued at save time (network constraint, exponential backoff).
+  Activity metadata (title, description, bike) is entered at save and sent with
+  `finish`; the raw file never changes after recording stops.

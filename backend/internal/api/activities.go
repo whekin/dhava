@@ -9,9 +9,12 @@ import (
 	"mime"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/whekin/dhava/backend/internal/store"
 )
 
 // Datastore is the subset of database operations the handlers need.
@@ -20,7 +23,7 @@ type Datastore interface {
 	CreateActivity(ctx context.Context, sport string, startedAt time.Time) (string, error)
 	ActivityExists(ctx context.Context, id string) (bool, error)
 	AttachRawRecording(ctx context.Context, activityID, storageKey, format string, sizeBytes int64) error
-	FinishActivity(ctx context.Context, id string, endedAt time.Time) (bool, error)
+	FinishActivity(ctx context.Context, id string, endedAt time.Time, meta store.ActivityMetadata) (bool, error)
 }
 
 const (
@@ -125,11 +128,33 @@ func (s *Server) handleUploadRaw(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type finishActivityRequest struct {
-	EndedAtMs int64 `json:"ended_at_ms"`
+// Length caps for user-entered metadata, in Unicode code points.
+const (
+	maxTitleLen       = 200
+	maxDescriptionLen = 5000
+	maxBikeLen        = 100
+)
+
+// bikeTypes are the allowed values for the bike_type field.
+var bikeTypes = map[string]bool{
+	"full_sus": true,
+	"hardtail": true,
+	"ebike":    true,
+	"other":    true,
 }
 
-// handleFinishActivity marks the activity as fully uploaded.
+type finishActivityRequest struct {
+	EndedAtMs int64 `json:"ended_at_ms"`
+	// Optional user-entered metadata. The Android client omits empty fields,
+	// so missing and empty both mean "not set" (stored as NULL).
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Bike        string `json:"bike"`
+	BikeType    string `json:"bike_type"`
+}
+
+// handleFinishActivity marks the activity as fully uploaded and saves the
+// user-entered metadata.
 func (s *Server) handleFinishActivity(w http.ResponseWriter, r *http.Request) {
 	id, ok := activityID(w, r)
 	if !ok {
@@ -145,13 +170,35 @@ func (s *Server) handleFinishActivity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ended_at_ms_required"})
 		return
 	}
+	if utf8.RuneCountInString(req.Title) > maxTitleLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title_too_long"})
+		return
+	}
+	if utf8.RuneCountInString(req.Description) > maxDescriptionLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "description_too_long"})
+		return
+	}
+	if utf8.RuneCountInString(req.Bike) > maxBikeLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bike_too_long"})
+		return
+	}
+	if req.BikeType != "" && !bikeTypes[req.BikeType] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_bike_type"})
+		return
+	}
 
 	if s.db == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db_unavailable"})
 		return
 	}
 
-	found, err := s.db.FinishActivity(r.Context(), id, time.UnixMilli(req.EndedAtMs).UTC())
+	meta := store.ActivityMetadata{
+		Title:       optionalString(req.Title),
+		Description: optionalString(req.Description),
+		Bike:        optionalString(req.Bike),
+		BikeType:    optionalString(req.BikeType),
+	}
+	found, err := s.db.FinishActivity(r.Context(), id, time.UnixMilli(req.EndedAtMs).UTC(), meta)
 	if err != nil {
 		s.logger.Error("finish activity failed", "error", err, "activity_id", id)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db_unavailable"})
@@ -162,6 +209,14 @@ func (s *Server) handleFinishActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// optionalString maps "" to nil so empty user input becomes SQL NULL.
+func optionalString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // activityID extracts and validates the {id} URL parameter. On failure it

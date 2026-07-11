@@ -30,4 +30,9 @@ Rules:
 - `PUT /api/v1/activities/{id}/raw` — body: the `.jsonl.gz` bytes,
   `Content-Type: application/gzip` → `204`. Stored to object storage
   (`raw-recordings/{activity_id}.jsonl.gz`), row added to `raw_recordings`.
-- `POST /api/v1/activities/{id}/finish` `{"ended_at_ms":...}` → `204` (status → `uploaded`)
+- `POST /api/v1/activities/{id}/finish`
+  `{"ended_at_ms":..., "title":"...", "description":"...", "bike":"...", "bike_type":"full_sus"}`
+  → `204` (status → `uploaded`). Everything except `ended_at_ms` is optional
+  user-entered metadata; omitted or empty fields are stored as NULL.
+  `bike_type` must be one of `full_sus|hardtail|ebike|other`.
+  Length caps: title 200, description 5000, bike 100 characters.
