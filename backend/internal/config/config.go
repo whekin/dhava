@@ -15,6 +15,17 @@ type Config struct {
 	DatabaseURL string
 	// LogLevel is one of: debug, info, warn, error.
 	LogLevel string
+	// S3Endpoint is the S3/MinIO endpoint, optionally with scheme
+	// (e.g. "http://localhost:9000"). Empty means: use filesystem blob storage.
+	S3Endpoint string
+	// S3Bucket is the bucket for raw recordings.
+	S3Bucket string
+	// S3AccessKey and S3SecretKey are the S3 credentials.
+	S3AccessKey string
+	S3SecretKey string
+	// BlobDir is the base directory for the filesystem blob store,
+	// used when S3Endpoint is unset.
+	BlobDir string
 }
 
 // Load reads configuration from the environment, applying defaults.
@@ -23,6 +34,11 @@ func Load() Config {
 		Port:        getenv("PORT", "8080"),
 		DatabaseURL: getenv("DATABASE_URL", ""),
 		LogLevel:    getenv("LOG_LEVEL", "info"),
+		S3Endpoint:  getenv("S3_ENDPOINT", ""),
+		S3Bucket:    getenv("S3_BUCKET", "dhava"),
+		S3AccessKey: getenv("S3_ACCESS_KEY", ""),
+		S3SecretKey: getenv("S3_SECRET_KEY", ""),
+		BlobDir:     getenv("BLOB_DIR", "./data/blobs"),
 	}
 }
 

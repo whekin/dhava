@@ -24,6 +24,7 @@ rootProject.name = "dhava"
 
 include(":app")
 include(":core:ui")
+include(":core:recording")
 include(":feature:record")
 include(":feature:segments")
 include(":feature:feed")

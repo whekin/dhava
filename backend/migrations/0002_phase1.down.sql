@@ -1,0 +1,2 @@
+ALTER TABLE activities DROP COLUMN IF EXISTS ended_at;
+ALTER TABLE activities ALTER COLUMN user_id SET NOT NULL;

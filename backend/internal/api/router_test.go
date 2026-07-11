@@ -12,7 +12,7 @@ import (
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRouter(logger, nil)
+	return NewRouter(logger, nil, nil)
 }
 
 func TestHealthz(t *testing.T) {

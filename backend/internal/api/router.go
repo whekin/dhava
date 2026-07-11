@@ -11,18 +11,43 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/whekin/dhava/backend/internal/blob"
+	"github.com/whekin/dhava/backend/internal/store"
 )
+
+// maxRawBodyBytes caps raw recording uploads at 256 MB.
+const maxRawBodyBytes = 256 << 20
 
 // Server bundles handler dependencies.
 type Server struct {
-	logger *slog.Logger
-	pool   *pgxpool.Pool // may be nil if the database is not configured/reachable
+	logger          *slog.Logger
+	pool            *pgxpool.Pool // may be nil if the database is not configured/reachable
+	db              Datastore     // nil when the pool is nil
+	blobs           blob.Store
+	maxRawBodyBytes int64
 }
 
 // NewRouter builds the HTTP handler with all middleware and routes.
-// pool may be nil; in that case /readyz reports the service as not ready.
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
-	s := &Server{logger: logger, pool: pool}
+// pool may be nil; in that case /readyz reports the service as not ready
+// and database-backed endpoints respond 503.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, blobs blob.Store) http.Handler {
+	var db Datastore
+	if pool != nil {
+		db = store.New(pool)
+	}
+	return newRouter(logger, pool, db, blobs)
+}
+
+// newRouter is the test seam: it accepts the Datastore interface directly.
+func newRouter(logger *slog.Logger, pool *pgxpool.Pool, db Datastore, blobs blob.Store) http.Handler {
+	s := &Server{
+		logger:          logger,
+		pool:            pool,
+		db:              db,
+		blobs:           blobs,
+		maxRawBodyBytes: maxRawBodyBytes,
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -35,6 +60,9 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/me", s.handleMe)
+		r.Post("/activities", s.handleCreateActivity)
+		r.Put("/activities/{id}/raw", s.handleUploadRaw)
+		r.Post("/activities/{id}/finish", s.handleFinishActivity)
 	})
 
 	return r

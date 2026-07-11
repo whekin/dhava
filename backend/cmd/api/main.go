@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/whekin/dhava/backend/internal/api"
+	"github.com/whekin/dhava/backend/internal/blob"
 	"github.com/whekin/dhava/backend/internal/config"
 	"github.com/whekin/dhava/backend/internal/store"
 )
@@ -44,9 +45,29 @@ func main() {
 		}
 	}
 
+	// Object storage: S3/MinIO when configured, filesystem fallback otherwise.
+	var blobs blob.Store
+	if cfg.S3Endpoint != "" {
+		s3, err := blob.NewS3(ctx, blob.S3Config{
+			Endpoint:  cfg.S3Endpoint,
+			Bucket:    cfg.S3Bucket,
+			AccessKey: cfg.S3AccessKey,
+			SecretKey: cfg.S3SecretKey,
+		})
+		if err != nil {
+			logger.Error("failed to initialize s3 blob store", "error", err, "endpoint", cfg.S3Endpoint)
+			os.Exit(1)
+		}
+		blobs = s3
+		logger.Info("blob storage: s3", "endpoint", cfg.S3Endpoint, "bucket", cfg.S3Bucket)
+	} else {
+		blobs = blob.NewFS(cfg.BlobDir)
+		logger.Info("blob storage: filesystem", "dir", cfg.BlobDir)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           api.NewRouter(logger, pool),
+		Handler:           api.NewRouter(logger, pool, blobs),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

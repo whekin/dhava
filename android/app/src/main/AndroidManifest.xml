@@ -2,21 +2,28 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        Permissions for upcoming ride-recording features (not requested at
-        runtime yet — the skeleton has no recording logic):
+        Permissions for ride recording (:core:recording):
         - ACCESS_FINE_LOCATION: GPS traces of downhill runs
         - HIGH_SAMPLING_RATE_SENSORS: >200 Hz accelerometer/gyro for jump & roughness detection
         - FOREGROUND_SERVICE(_LOCATION): keep recording with the screen off
         - POST_NOTIFICATIONS: persistent "recording in progress" notification (API 33+)
+        - INTERNET: raw recording upload to the backend
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        usesCleartextTraffic: dev only — the default upload target is a plain
+        HTTP backend on the host machine (10.0.2.2). Remove once a real
+        backend URL with TLS is configured.
+    -->
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"

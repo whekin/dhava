@@ -14,8 +14,128 @@ paths:
       responses:
         "501":
           description: Not implemented yet
+  /activities:
+    post:
+      summary: Create an activity (Phase 1, no auth)
+      operationId: createActivity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateActivityRequest" }
+      responses:
+        "201":
+          description: Activity created in status `recording`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateActivityResponse" }
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Database unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /activities/{id}/raw:
+    put:
+      summary: Upload the raw recording (gzipped JSON Lines, see raw-recording-format.md)
+      operationId: uploadRawRecording
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema: { type: string, format: binary }
+      responses:
+        "204":
+          description: Stored to object storage; activity status → `raw_uploaded`
+        "400":
+          description: Invalid input (e.g. empty body)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Unknown activity
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Body exceeds 256 MB limit
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415":
+          description: Content-Type is not application/gzip
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Database unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /activities/{id}/finish:
+    post:
+      summary: Finish an activity (status → `uploaded`)
+      operationId: finishActivity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinishActivityRequest" }
+      responses:
+        "204":
+          description: Activity finished
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Unknown activity
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Database unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 components:
   schemas:
+    CreateActivityRequest:
+      type: object
+      required: [sport, started_at_ms]
+      properties:
+        sport: { type: string, examples: [downhill] }
+        started_at_ms: { type: integer, format: int64, description: Unix epoch milliseconds }
+    CreateActivityResponse:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+    FinishActivityRequest:
+      type: object
+      required: [ended_at_ms]
+      properties:
+        ended_at_ms: { type: integer, format: int64, description: Unix epoch milliseconds }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, examples: [db_unavailable] }
     GpsPoint:
       type: object
       required: [timestampMs, lat, lon]
