@@ -8,6 +8,11 @@
         - FOREGROUND_SERVICE(_LOCATION): keep recording with the screen off
         - POST_NOTIFICATIONS: persistent "recording in progress" notification (API 33+)
         - INTERNET: raw recording upload to the backend
+        - WAKE_LOCK: partial wake lock while recording; a foreground service
+          alone did not stop an OEM power manager from killing the app
+          mid-ride (2026-07 OnePlus "o-kill" incident)
+        - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: one-time prompt asking the
+          user to exempt Dhava from aggressive battery managers (same incident)
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
@@ -15,6 +20,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
         usesCleartextTraffic: dev only — the default upload target is a plain

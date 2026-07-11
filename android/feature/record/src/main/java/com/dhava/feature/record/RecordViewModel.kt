@@ -1,6 +1,8 @@
 package com.dhava.feature.record
 
 import android.app.Application
+import android.os.PowerManager
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.dhava.core.recording.Bike
 import com.dhava.core.recording.BikeType
@@ -20,6 +22,17 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class RecordViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        /**
+         * Process-scoped "asked already" latch for the battery-exemption
+         * dialog: at most one prompt per app run, asked again on the next
+         * run only while the app is still not exempt. Deliberately not
+         * persisted — a declined prompt should come back eventually, and
+         * "next app start" is the simple version of that.
+         */
+        private var batteryExemptionAskedThisRun = false
+    }
+
     private val repository = RecordingRepository.getInstance(application)
 
     val state: StateFlow<RecordingState> = repository.state
@@ -37,6 +50,22 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     val reopenedSaveId: StateFlow<String?> = _reopenedSaveId.asStateFlow()
 
     fun startRecording() = RecordingService.start(getApplication())
+
+    /**
+     * True when hitting Start should also surface the battery-optimization
+     * exemption dialog (2026-07 OnePlus incident: aggressive OEM battery
+     * managers kill recording mid-ride). Consumes the once-per-run latch,
+     * so a second Start in the same run never nags again.
+     */
+    fun shouldAskBatteryExemption(): Boolean {
+        if (batteryExemptionAskedThisRun) return false
+        val application = getApplication<Application>()
+        val powerManager = ContextCompat.getSystemService(application, PowerManager::class.java)
+        val exempt = powerManager?.isIgnoringBatteryOptimizations(application.packageName) ?: true
+        if (exempt) return false
+        batteryExemptionAskedThisRun = true
+        return true
+    }
 
     fun stopRecording() = RecordingService.stop(getApplication())
 

@@ -45,10 +45,48 @@ class LocalRecordingTest {
 
     @Test
     fun `status wire names cover the whole lifecycle`() {
+        assertEquals("\"recording\"", json.encodeToString(RecordingStatus.RECORDING))
         assertEquals("\"recorded\"", json.encodeToString(RecordingStatus.RECORDED))
         assertEquals("\"pending_upload\"", json.encodeToString(RecordingStatus.PENDING_UPLOAD))
         assertEquals("\"uploaded\"", json.encodeToString(RecordingStatus.UPLOADED))
         assertEquals("\"failed\"", json.encodeToString(RecordingStatus.FAILED))
+    }
+
+    @Test
+    fun `active entry written at Start encodes id, start and status only`() {
+        // This is the marker persisted the moment recording starts, so a
+        // system kill can never make the ride invisible. No end/size yet.
+        val entry = LocalRecording(
+            id = "live-1",
+            startedAtMs = 1770000000000,
+            status = RecordingStatus.RECORDING,
+        )
+        assertEquals(
+            """{"id":"live-1","started_at_ms":1770000000000,"status":"recording"}""",
+            json.encodeToString(entry),
+        )
+    }
+
+    @Test
+    fun `recovered flag round-trips and defaults to false`() {
+        val entry = json.decodeFromString<LocalRecording>(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3,"recovered":true}""",
+        )
+        assertEquals(true, entry.recovered)
+        // Serialized when true…
+        assertEquals(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3,"recovered":true}""",
+            json.encodeToString(entry),
+        )
+        // …omitted when false, so pre-recovery indexes stay byte-compatible.
+        val plain = json.decodeFromString<LocalRecording>(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3}""",
+        )
+        assertEquals(false, plain.recovered)
+        assertEquals(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3}""",
+            json.encodeToString(plain),
+        )
     }
 
     @Test

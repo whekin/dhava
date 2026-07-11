@@ -18,10 +18,16 @@ import kotlinx.serialization.encodeToString
  * Sensor callbacks run on hot system threads and must never block, so
  * [write] only enqueues into an unbounded [Channel]; a dedicated
  * single-thread dispatcher drains it, serializes, and writes through a
- * buffered gzip stream. The stream is flushed every ~2 s so a crash loses at
- * most a couple of seconds of data.
+ * buffered gzip stream. The stream is sync-flushed every ~2 s so a hard kill
+ * loses at most a couple of seconds of data (this is what let the 2026-07
+ * OnePlus "o-kill" incident file be recovered — see [RecordingRecovery]).
+ *
+ * [append] resumes an interrupted recording by appending a *new gzip member*
+ * to the existing (already repaired) file. Concatenated gzip members are a
+ * valid gzip stream per RFC 1952; both java's GZIPInputStream and `gzip -dc`
+ * decode multi-member files transparently.
  */
-internal class RecordingWriter(private val file: File) {
+internal class RecordingWriter(private val file: File, private val append: Boolean = false) {
 
     private companion object {
         const val FLUSH_INTERVAL_MS = 2_000L
@@ -37,7 +43,11 @@ internal class RecordingWriter(private val file: File) {
     init {
         file.parentFile?.mkdirs()
         writerJob = CoroutineScope(dispatcher).launch {
-            val output = GZIPOutputStream(BufferedOutputStream(FileOutputStream(file)))
+            // syncFlush=true: flush() emits a complete deflate block, so
+            // everything written up to the last flush is decompressable even
+            // if the process is killed before close() — without it the
+            // deflater may sit on an arbitrary amount of buffered input.
+            val output = GZIPOutputStream(BufferedOutputStream(FileOutputStream(file, append)), true)
             var lastFlushAt = System.currentTimeMillis()
             try {
                 for (line in channel) {

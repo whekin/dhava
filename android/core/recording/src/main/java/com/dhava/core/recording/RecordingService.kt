@@ -17,6 +17,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -42,8 +43,10 @@ import kotlinx.coroutines.launch
  * Foreground service that records GPS + IMU + barometer into a raw
  * `.jsonl.gz` file (see `proto/raw-recording-format.md`).
  *
- * Runs with `foregroundServiceType="location"` and a persistent notification;
- * START_STICKY so the system restarts it if the process is killed mid-ride.
+ * Runs with `foregroundServiceType="location"` and a persistent notification,
+ * plus a partial wake lock (OEM killers, see [wakeLock]); START_STICKY so the
+ * system restarts it if the process is killed mid-ride, in which case the
+ * interrupted recording is repaired and resumed ([resumeAfterRestart]).
  * Sensor callbacks are delivered on a dedicated [HandlerThread] and only
  * enqueue lines into [RecordingWriter] — no I/O or allocation-heavy work on
  * the callback path.
@@ -94,6 +97,17 @@ class RecordingService : Service() {
     private var startedElapsedMs = 0L
 
     /**
+     * Held for the whole recording. A foreground service alone is not enough:
+     * the 2026-07 OnePlus "o-kill" incident killed the app mid-ride with the
+     * foreground service alive (ApplicationExitInfo importance=125,
+     * reason=13 OTHER). A partial wake lock keeps the CPU and sensor
+     * delivery running with the screen off and signals "actively working"
+     * to aggressive OEM power managers. Released in every teardown path
+     * ([stopRecording] is the single funnel, [onDestroy] routes through it).
+     */
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
      * Anchor mapping the monotonic elapsed-realtime clock to Unix epoch,
      * computed once at recording start. Both SensorEvent.timestamp and
      * Location.elapsedRealtimeNanos are elapsed-realtime nanos, so a single
@@ -129,10 +143,11 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> startRecording()
             ACTION_STOP -> stopRecording()
-            // Null intent: restarted by the system after being killed. There
-            // is no in-memory session to resume, so just stop; the partial
-            // file (flushed every ~2 s) stays on disk for later inspection.
-            null -> if (!recording) stopSelf()
+            // Null intent: START_STICKY restart after the system killed the
+            // process mid-ride (seen in the wild: OnePlus "o-kill"). The
+            // repository has already repaired the interrupted file at index
+            // load; pick the ride back up and keep appending to it.
+            null -> if (!recording) resumeAfterRestart()
         }
         return START_STICKY
     }
@@ -143,26 +158,26 @@ class RecordingService : Service() {
 
     private fun startRecording() {
         if (recording) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (!hasLocationPermission()) {
             // UI is responsible for requesting permissions before starting.
             stopSelf()
             return
         }
         recording = true
+        // Foreground ASAP: startForegroundService() gives a short grace
+        // window, and an early promotion narrows the window in which an
+        // OEM killer sees a plain background process.
+        goForeground()
 
         activityId = UUID.randomUUID().toString()
         startedAtMs = System.currentTimeMillis()
         startedElapsedMs = SystemClock.elapsedRealtime()
         epochAnchorMs = startedAtMs - startedElapsedMs
-        gpsCount = 0
-        imuCount = 0
-        baroCount = 0
-        lastSpeedMps = null
-        lastAccuracyM = null
-        latestGyro = null
-        latestMag = null
+
+        // Persist the index entry immediately (status `recording`): if the
+        // system kills us mid-ride, the recording stays visible and gets
+        // repaired/resumed on the next start instead of silently vanishing.
+        repository.addActiveRecording(activityId, startedAtMs)
 
         writer = RecordingWriter(repository.recordingFile(activityId)).also {
             it.write(
@@ -176,17 +191,83 @@ class RecordingService : Service() {
             )
         }
 
+        startCapture()
+    }
+
+    /**
+     * Continues an interrupted ride after a START_STICKY restart: repository
+     * recovery already repaired the truncated file, so we flip its entry back
+     * to `recording` ([RecordingRepository.takeResumableRecording]) and keep
+     * appending. If nothing is resumable (no interrupted entry, file was
+     * unreadable, or the user already touched it), the entry — if any — has
+     * been finalized through the recovery path; just stop gracefully.
+     */
+    private fun resumeAfterRestart() {
+        // Foreground first: a restarted foreground service must promote
+        // itself promptly, and the resume decision below is asynchronous.
+        goForeground()
+        scope.launch {
+            val target = if (hasLocationPermission()) repository.takeResumableRecording() else null
+            if (target == null || recording) {
+                if (!recording) {
+                    ServiceCompat.stopForeground(
+                        this@RecordingService,
+                        ServiceCompat.STOP_FOREGROUND_REMOVE,
+                    )
+                    stopSelf()
+                }
+                return@launch
+            }
+            recording = true
+
+            activityId = target.id
+            startedAtMs = target.startedAtMs
+            // Elapsed time keeps counting from the ORIGINAL start: project
+            // the wall-clock start onto the current elapsed-realtime clock
+            // (also correct across a reboot, where elapsedRealtime resets).
+            startedElapsedMs =
+                SystemClock.elapsedRealtime() - (System.currentTimeMillis() - target.startedAtMs)
+            // Fresh anchor for the new samples; see the field docs.
+            epochAnchorMs = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+
+            // Append a new gzip member to the repaired file (valid per
+            // RFC 1952, see RecordingWriter). Deliberately no second meta
+            // line — samples only; epoch timestamps make ordering across the
+            // gap unambiguous.
+            writer = RecordingWriter(repository.recordingFile(activityId), append = true)
+
+            startCapture()
+        }
+    }
+
+    /** Sensor/GPS/ticker startup shared by fresh starts and resumes. */
+    private fun startCapture() {
+        gpsCount = 0
+        imuCount = 0
+        baroCount = 0
+        lastSpeedMps = null
+        lastAccuracyM = null
+        latestGyro = null
+        latestMag = null
+
+        acquireWakeLock()
+        sensorThread = HandlerThread("recording-sensors").also { it.start() }
+        registerSensors()
+        requestLocationUpdates()
+        startTicker()
+    }
+
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun goForeground() {
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
             buildNotification(elapsedMs = 0L),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
         )
-
-        sensorThread = HandlerThread("recording-sensors").also { it.start() }
-        registerSensors()
-        requestLocationUpdates()
-        startTicker()
     }
 
     private fun stopRecording() {
@@ -200,6 +281,7 @@ class RecordingService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorThread?.quitSafely()
         sensorThread = null
+        releaseWakeLock()
 
         val endedAtMs = System.currentTimeMillis()
         val finishedWriter = writer
@@ -229,8 +311,29 @@ class RecordingService : Service() {
             // best effort to release sensors and finish the file.
             stopRecording()
         }
+        releaseWakeLock()
         scope.cancel()
         super.onDestroy()
+    }
+
+    // --- wake lock ------------------------------------------------------------
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        wakeLock = powerManager
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "dhava:recording")
+            .also {
+                it.setReferenceCounted(false)
+                // No timeout on purpose: a ride has no upper bound and the
+                // lock is released in every teardown path (see field docs).
+                it.acquire()
+            }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     // --- sensors --------------------------------------------------------------

@@ -1,8 +1,11 @@
 package com.dhava.feature.record
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -67,6 +71,18 @@ fun RecordScreen(
     val reopenedSaveId by viewModel.reopenedSaveId.collectAsState()
 
     var permissionDenied by remember { mutableStateOf(false) }
+    var showBatteryDialog by remember { mutableStateOf(false) }
+
+    // The entry currently in `recording` status is the live one (owned by
+    // the service); it must not show up in the list next to finished rides.
+    val listedRecordings = recordings.filter { it.status != RecordingStatus.RECORDING }
+
+    // Recording is never blocked on the battery dialog: it starts right
+    // away, the dialog is shown on top of it.
+    fun startAndMaybeAskBattery() {
+        viewModel.startRecording()
+        if (viewModel.shouldAskBatteryExemption()) showBatteryDialog = true
+    }
 
     // ACCESS_FINE_LOCATION and POST_NOTIFICATIONS (33+) are runtime
     // permissions; HIGH_SAMPLING_RATE_SENSORS is install-time (normal
@@ -76,7 +92,7 @@ fun RecordScreen(
     ) { results ->
         val locationGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
         permissionDenied = !locationGranted
-        if (locationGranted) viewModel.startRecording()
+        if (locationGranted) startAndMaybeAskBattery()
     }
 
     fun startWithPermissions() {
@@ -86,7 +102,7 @@ fun RecordScreen(
         ) == PackageManager.PERMISSION_GRANTED
         if (hasLocation) {
             permissionDenied = false
-            viewModel.startRecording()
+            startAndMaybeAskBattery()
         } else {
             val permissions = buildList {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -144,15 +160,60 @@ fun RecordScreen(
             }
         }
 
-        if (recordings.isNotEmpty() && state !is RecordingState.Recording && saveTarget == null) {
+        if (listedRecordings.isNotEmpty() && state !is RecordingState.Recording && saveTarget == null) {
             RecordingsList(
-                recordings = recordings,
+                recordings = listedRecordings,
                 uploads = uploads,
                 onFinishSaving = viewModel::openSave,
                 onRetry = viewModel::retryUpload,
             )
         }
     }
+
+    if (showBatteryDialog) {
+        BatteryExemptionDialog(onDismiss = { showBatteryDialog = false })
+    }
+}
+
+/**
+ * One-time ask for a battery-optimization exemption. Aggressive OEM power
+ * managers (the 2026-07 OnePlus "o-kill" incident) kill even foreground
+ * services mid-ride; the exemption is the strongest signal we can request.
+ * Declining never blocks recording.
+ */
+@Composable
+private fun BatteryExemptionDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Keep recording alive") },
+        text = {
+            Text(
+                "Aggressive battery managers (OnePlus, Xiaomi…) kill recording " +
+                    "mid-ride. Allow Dhava to run unrestricted.",
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                },
+            ) {
+                Text("Allow")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Not now")
+            }
+        },
+    )
 }
 
 /** What the save sheet is currently editing. */
@@ -296,6 +357,15 @@ private fun RecordingRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (recording.recovered) {
+                // Crash-recovered ride: repaired from a truncated file, saved
+                // through the normal "Finish saving" flow like any unsaved one.
+                Text(
+                    text = "Recovered after crash",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
             when {
                 uploadState is UploadState.Retrying -> Text(
                     text = "Upload failed, will retry: ${uploadState.message}",

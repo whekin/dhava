@@ -82,3 +82,36 @@ ARM — deploy compose now uses multi-arch `imresamu/postgis` everywhere.
 
 **Open:** same as above (device test pending) + WorkManager job not yet observed
 end-to-end on device with real airplane-mode toggling.
+
+## 2026-07-11 — First real device test + crash recovery (Phase 1.2)
+
+**Field test** (OnePlus 9 Pro, Android 16): 4 short recordings saved fine. One
+13-min ride was KILLED mid-recording by OxygenOS (ApplicationExitInfo reason=13
+"o-kill", importance=125 — FGS alive when killed; OnePlus = aggressive OEM killer).
+File survived as truncated gzip, but was invisible in-app (index entry was only
+created at Stop) → user believed the ride lost.
+
+**Data quality findings (great news):**
+- IMU: 501 Hz, zero gaps >50 ms. GPS: 1.06 Hz, median accuracy 3.8 m (one 60 m
+  outlier). No barometer on this device (sensor absent) — handled gracefully.
+- Airtime concept validated on raw data: bunny hops visible as ~200 ms low-|a|
+  windows; stair-drop landing peaked at 19.8 g. Simple thresholding already works.
+
+**Fixes shipped:**
+- Index entry now created at Start (status `recording`) — active-recording marker.
+- Startup recovery: repairs truncated gzip (decompress until error, atomic rewrite),
+  recovers orphan files and stuck `recording` entries → status `recorded` +
+  `recovered: true`, "Recovered after crash" + Finish saving in UI. Never deletes
+  unrecoverable files (raw-forever principle). 7 new unit tests.
+- START_STICKY resume: null-intent restart repairs the file and CONTINUES recording,
+  appending a new gzip member (RFC 1952 multi-member; readers handle it).
+- Writer: GZIPOutputStream(syncFlush=true) — the ~2 s loss bound is now actually
+  guaranteed (before, flush() didn't force the deflater).
+- PARTIAL_WAKE_LOCK during recording; battery-optimization exemption dialog on Start
+  (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS), never blocks recording.
+
+**Open:**
+- Backend still not deployed to Coolify — uploads from the phone can't complete
+  outside the dev Wi-Fi (APK bakes the Mac's LAN IP). Deploy = next step.
+- Re-test on device: recovery of the real 12 MB orphan, kill-resilience on a long
+  ride with exemption granted, airplane-mode upload queue.
