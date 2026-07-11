@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches DarkBackground in :core:ui -->
+    <color name="window_background">#181210</color>
+    <color name="ic_launcher_background">#181210</color>
+</resources>

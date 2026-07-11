@@ -1,0 +1,37 @@
+# Dhava — Agent Guide
+
+Downhill-first ride tracking app. Android (Kotlin/Compose) + Go API + Rust fusion core.
+Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
+`docs/WORKLOG.md` for what has been done and why.
+
+## Session protocol
+
+- Before starting: read `docs/WORKLOG.md` (last entries) to pick up context.
+- After significant work: append an entry to `docs/WORKLOG.md` (date, what, decisions, open questions).
+- Architecture decisions worth remembering go to `docs/DECISIONS.md`.
+
+## Layout
+
+| Path       | Stack | Build / verify |
+|------------|-------|----------------|
+| `android/` | Kotlin 2.2, Compose, material3 1.5.0-alpha (Expressive), AGP 8.12, multi-module | `cd android && ./gradlew assembleDebug` (JDK: Android Studio JBR) |
+| `backend/` | Go 1.26, chi, pgx, PostGIS | `cd backend && make vet test build` |
+| `fusion/`  | Rust (edition 2024), workspace: `fusion-core` (lib), `fusion-worker` (bin) | `cd fusion && cargo test && cargo clippy` |
+| `proto/`   | OpenAPI spec + raw recording format | contract-first: update spec with API changes |
+| `deploy/`  | docker-compose (api, fusion-worker, postgis, minio) for Coolify | `cd deploy && docker compose up` |
+
+## Architecture principles (do not violate)
+
+1. **Raw sensor data is kept forever.** Phone uploads raw GPS + IMU + baro; results are computed from raw and can always be recomputed when algorithms improve.
+2. **Fusion logic lives in Rust only** (`fusion-core`). Same crate runs server-side (worker) and on-device (UniFFI, later). Never reimplement timing/gate logic in Kotlin or Go — live and canonical results must never diverge.
+3. **Offline-first mobile.** Recording, live timing, and segment cache must work with zero connectivity; sync is opportunistic.
+4. **Segment-first, not route-first.** The product tracks trail runs (segments), transits are secondary/gray.
+5. **Contract-first API**: `proto/openapi.yaml` and `proto/raw-recording-format.md` are the source of truth between components.
+
+## Conventions
+
+- Code, comments, commit messages: English. Chat with the user: Russian.
+- Android modules: `:core:*` shared, `:feature:*` one per screen/domain; features depend on core, never on each other.
+- Go: stdlib + chi + pgx, slog for logging, no frameworks. Migrations via golang-migrate files in `backend/migrations/`.
+- Rust: minimal deps, no geo mega-crates; the math is small and ours.
+- Android package root: `com.dhava`.

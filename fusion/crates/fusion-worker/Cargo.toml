@@ -1,0 +1,12 @@
+[package]
+name = "fusion-worker"
+description = "Dhava server-side worker: processes raw recordings through fusion-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fusion-core = { path = "../fusion-core" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

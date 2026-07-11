@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS raw_recordings;
+DROP TABLE IF EXISTS activities;
+DROP TABLE IF EXISTS users;
+
+DROP EXTENSION IF EXISTS postgis;

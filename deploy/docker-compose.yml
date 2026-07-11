@@ -1,0 +1,61 @@
+# Dhava stack — deployable on Coolify as a Docker Compose resource.
+# Coolify injects FQDN/SSL via its proxy; only `api` needs to be exposed.
+
+services:
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:-dhava}@db:5432/dhava?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: raw-recordings
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dhava}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dhava-dev-secret}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  fusion-worker:
+    build:
+      context: ../fusion
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:-dhava}@db:5432/dhava?sslmode=disable
+      RUST_LOG: ${RUST_LOG:-info}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: dhava
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dhava}
+      POSTGRES_DB: dhava
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dhava -d dhava"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dhava}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dhava-dev-secret}
+    volumes:
+      - minio-data:/data
+
+volumes:
+  db-data:
+  minio-data:

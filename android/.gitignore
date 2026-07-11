@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+
+# Local configuration (machine-specific SDK path etc.)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.kotlin/
+
+# OS
+.DS_Store
+
+# Keystores (never commit release keys)
+*.jks
+*.keystore
+!debug.keystore
+
+# Logs / captures
+captures/
+*.log

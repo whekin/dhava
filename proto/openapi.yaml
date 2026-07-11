@@ -1,0 +1,29 @@
+openapi: 3.1.0
+info:
+  title: Dhava API
+  version: 0.1.0
+  description: >
+    Contract-first spec for the Dhava backend. Skeleton — grows with each phase.
+servers:
+  - url: /api/v1
+paths:
+  /me:
+    get:
+      summary: Current user profile
+      operationId: getMe
+      responses:
+        "501":
+          description: Not implemented yet
+components:
+  schemas:
+    GpsPoint:
+      type: object
+      required: [timestampMs, lat, lon]
+      properties:
+        timestampMs: { type: integer, format: int64 }
+        lat: { type: number, format: double }
+        lon: { type: number, format: double }
+        altitudeM: { type: number, format: double }
+        accuracyM: { type: number, format: float }
+        speedMps: { type: number, format: float }
+        bearingDeg: { type: number, format: float }

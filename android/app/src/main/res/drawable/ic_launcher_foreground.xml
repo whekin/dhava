@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder launcher foreground: a downhill slope silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#D84315"
+        android:pathData="M24,38 L44,58 L52,52 L84,78 L24,78 Z" />
+    <path
+        android:fillColor="#FFB59C"
+        android:pathData="M58,42 m-5,0 a5,5 0 1,1 10,0 a5,5 0 1,1 -10,0" />
+</vector>
