@@ -32,6 +32,14 @@ Short log of architecture/product decisions. Newest last.
   batch recompute on algorithm upgrades. Server compute cost per ride is <1 s/core
   anyway — the scarce resource is DISK: raw at ~60 MB/h/rider goes MinIO now,
   Cloudflare R2 when it grows.
+- **REVISED (owner call, same day): raw stays on the device.** Server stores only:
+  corrected 1–5 Hz fused track (GPX on export), segment results with uncertainty +
+  algorithm version, per-second IMU evidence pack (variance/peaks/energy — a few KB)
+  for physics-based anti-cheat, Play Integrity attestation. Raw windows (segment
+  run ±10 s) uploaded only on server request for KOM verification. Trade-off
+  accepted: history recompute happens on-device; lost phone = lost raw (results
+  survive). Optional raw cloud backup may come later. Phase 1 raw-upload endpoints
+  stay for now (dev convenience) but are no longer the product path.
 - **Battery strategy**: recording is always full-rate (raw file, cheap IO); the
   live fusion filter consumes ~100 Hz (decimated at filter input only). Screen off →
   no UI compute + hardware sensor batching (1–2 s FIFO flushes, CPU sleeps); only a

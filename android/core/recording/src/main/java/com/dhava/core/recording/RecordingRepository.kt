@@ -9,9 +9,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -100,6 +102,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
     fun recordingsDir(): File = File(appContext.filesDir, RECORDINGS_DIR)
 
     fun recordingFile(id: String): File = File(recordingsDir(), "$id.jsonl.gz")
+
+    /** Observes a single index entry; emits null once the entry is gone (discarded). */
+    fun recording(id: String): Flow<LocalRecording?> =
+        recordings.map { list -> list.firstOrNull { it.id == id } }
 
     /** Pushed by [RecordingService]; throttled to ~4 updates/s on its side. */
     internal fun pushState(state: RecordingState) {

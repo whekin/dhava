@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/fusion-core", "crates/fusion-worker"]
+members = ["crates/fusion-core", "crates/fusion-worker", "crates/uniffi-bindgen"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,5 +11,8 @@ publish = false
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+uniffi = "0.29"
+# Pure-Rust gzip backend: no C toolchain needed when cross-compiling for Android.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,11 +56,14 @@ import java.util.Locale
 /**
  * Record screen: start/stop ride recording, glance at live sensor stats,
  * save finished recordings (title / description / bike) and watch their
- * background upload progress.
+ * background upload progress. Tapping a finished recording reports its id
+ * through [onOpenActivity]; navigation itself is wired by the app module so
+ * this feature stays free of navigation dependencies.
  */
 @Composable
 fun RecordScreen(
     modifier: Modifier = Modifier,
+    onOpenActivity: (String) -> Unit = {},
     viewModel: RecordViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -164,6 +168,7 @@ fun RecordScreen(
             RecordingsList(
                 recordings = listedRecordings,
                 uploads = uploads,
+                onOpen = onOpenActivity,
                 onFinishSaving = viewModel::openSave,
                 onRetry = viewModel::retryUpload,
             )
@@ -305,6 +310,7 @@ private fun StatLabel(text: String) {
 private fun RecordingsList(
     recordings: List<LocalRecording>,
     uploads: Map<String, UploadState>,
+    onOpen: (String) -> Unit,
     onFinishSaving: (String) -> Unit,
     onRetry: (String) -> Unit,
 ) {
@@ -321,6 +327,7 @@ private fun RecordingsList(
                 RecordingRow(
                     recording = recording,
                     uploadState = uploads[recording.id],
+                    onOpen = { onOpen(recording.id) },
                     onFinishSaving = { onFinishSaving(recording.id) },
                     onRetry = { onRetry(recording.id) },
                 )
@@ -333,12 +340,15 @@ private fun RecordingsList(
 private fun RecordingRow(
     recording: LocalRecording,
     uploadState: UploadState?,
+    onOpen: () -> Unit,
     onFinishSaving: () -> Unit,
     onRetry: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Opens the activity detail (map + stats) for this recording.
+            .clickable(onClick = onOpen)
             .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

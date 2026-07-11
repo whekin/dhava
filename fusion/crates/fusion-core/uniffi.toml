@@ -1,0 +1,7 @@
+# UniFFI binding generation config for fusion-core.
+# Read automatically by `uniffi-bindgen generate --library` (library mode).
+
+[bindings.kotlin]
+# Keep the generated Kotlin package stable regardless of crate renames.
+package_name = "com.dhava.fusion"
+cdylib_name = "fusion_core"

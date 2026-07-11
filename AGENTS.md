@@ -22,8 +22,16 @@ Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
 
 ## Architecture principles (do not violate)
 
-1. **Raw sensor data is kept forever.** Phone uploads raw GPS + IMU + baro; results are computed from raw and can always be recomputed when algorithms improve.
-2. **Fusion logic lives in Rust only** (`fusion-core`). Same crate runs server-side (worker) and on-device (UniFFI, later). Never reimplement timing/gate logic in Kotlin or Go — live and canonical results must never diverge.
+1. **Raw sensor data is kept forever — on the device.** The phone records raw GPS +
+   IMU + baro and keeps it; recomputation on algorithm upgrades happens on-device.
+   The server stores only processed artifacts: corrected track (1–5 Hz fused,
+   GPX on export), segment results (+uncertainty, +algorithm version), compact
+   IMU evidence pack for anti-cheat. Raw windows (segment run ±10 s) are uploaded
+   only on server request (KOM verification/disputes).
+2. **Fusion logic lives in Rust only** (`fusion-core`), running primarily ON-DEVICE
+   via UniFFI; the server-side worker uses the same crate for selective verification.
+   Never reimplement timing/gate logic in Kotlin or Go — live and canonical results
+   must never diverge.
 3. **Offline-first mobile.** Recording, live timing, and segment cache must work with zero connectivity; sync is opportunistic.
 4. **Segment-first, not route-first.** The product tracks trail runs (segments), transits are secondary/gray.
 5. **Contract-first API**: `proto/openapi.yaml` and `proto/raw-recording-format.md` are the source of truth between components.

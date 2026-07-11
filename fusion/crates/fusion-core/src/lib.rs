@@ -11,6 +11,40 @@
 
 use serde::{Deserialize, Serialize};
 
+uniffi::setup_scaffolding!();
+
+pub mod analysis;
+pub mod recording;
+
+pub use analysis::{
+    ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,
+    analyze_recording,
+};
+pub use recording::{ParsedRecording, RecordingMeta, parse_recording, parse_recording_file};
+
+/// Errors surfaced across the FFI boundary (Kotlin exceptions).
+#[derive(Debug, uniffi::Error)]
+pub enum FusionError {
+    /// The recording file could not be opened/read.
+    Io { msg: String },
+    /// The recording could not be interpreted at all.
+    Parse { msg: String },
+    /// The recording parsed but contains no samples to analyze.
+    EmptyRecording { msg: String },
+}
+
+impl std::fmt::Display for FusionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FusionError::Io { msg } => write!(f, "io error: {msg}"),
+            FusionError::Parse { msg } => write!(f, "parse error: {msg}"),
+            FusionError::EmptyRecording { msg } => write!(f, "empty recording: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for FusionError {}
+
 /// Mean Earth radius in meters, used for the local equirectangular projection.
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
 

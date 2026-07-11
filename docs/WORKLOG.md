@@ -115,3 +115,59 @@ created at Stop) → user believed the ride lost.
   outside the dev Wi-Fi (APK bakes the Mac's LAN IP). Deploy = next step.
 - Re-test on device: recovery of the real 12 MB orphan, kill-resilience on a long
   ride with exemption granted, airplane-mode upload queue.
+
+## 2026-07-11 — Activity detail screen with map (:feature:activity)
+
+New `:feature:activity` module: `ActivityDetailScreen(recordingId, onBack)` —
+stats header (title/start time, bike, upload-status chip; tiles for duration,
+distance, avg/max speed, `—` placeholders for Descent/Airtime pending
+fusion-core) over an interactive MapLibre map (11.11.0, OpenFreeMap Liberty
+style — free vector tiles, no API key) with the ride polyline in the theme
+accent, camera fitted to track bounds. MapView hosted via AndroidView with a
+lifecycle-forwarding bridge (`rememberMapViewWithLifecycle`).
+
+- `GpsTrackReader` in :core:recording: one streaming pass over the raw
+  `.jsonl.gz`, extracts only `gps` lines (cheap substring pre-filter before
+  JSON decode — IMU is ~500 Hz), tolerates multi-member gzip and truncated
+  tails. Loudly documented as DISPLAY-ONLY: all real stats stay in fusion-core
+  (arch principle 2); distance/speed tiles are marked TODO(fusion-core).
+- Repository: new `recording(id): Flow<LocalRecording?>` accessor.
+- Nav: recordings list rows now clickable → `onOpenActivity(id)` callback
+  (feature stays navigation-free); :app NavHost gained `activity/{id}`.
+- Verified: `:app:assembleDebug` green, :core:recording tests green; emulator
+  smoke test with a seeded synthetic ride — Liberty tiles + polyline render,
+  camera fit and back-navigation teardown OK.
+
+**Open:** map tile cache/offline behavior untested; stats tiles swap to
+fusion-core values once the UniFFI wiring lands.
+
+## 2026-07-11 — fusion-core on-device via UniFFI (device-first compute lands)
+
+Architecture pivot recorded in DECISIONS: raw stays ON DEVICE, server will get
+only processed artifacts (fused track, results+uncertainty, IMU evidence pack;
+raw windows on request for KOM verification). Phone = primary computer.
+
+- Toolchain: rustup installed user-level (~/.cargo, --no-modify-path; MacPorts
+  rust untouched), Android targets + cargo-ndk 4.1.2, NDK 27.1.
+- fusion-core: recording.rs parser (MultiGzDecoder — multi-member gzip from
+  crash-resume; tolerates truncated tails, unknown line types), analysis.rs
+  with UniFFI-exported `analyze_recording(path) -> RideAnalysis` + 
+  `algorithm_version()` (ALGORITHM_VERSION = "gps-naive-0.1", documented as
+  pre-Kalman). v0: accuracy gate >20 m, anchored haversine, moving time,
+  median+hysteresis altitude, airtime via 150 ms trailing-mean |a| < 4 m/s²
+  (window edges centered so landing_peak_g catches the spike). 12 tests incl.
+  REAL fixture testdata/forest-30s.jsonl.gz — detects the actual bunny hop
+  (t≈+23.4 s, 164 ms, 11.9 g landing).
+- Bindings: crates/uniffi-bindgen shim, uniffi.toml pins Kotlin pkg
+  com.dhava.fusion; fusion/scripts/build-android.sh (cargo-ndk arm64+x86_64 →
+  jniLibs, bindgen → Kotlin). Generated Kotlin + .so COMMITTED for now (app
+  builds without Rust toolchain; CI takes over later).
+- android :core:fusion: thin FusionCore facade (analyze from Dispatchers.IO),
+  jna dep. :feature:activity now uses it: Distance/Avg/Max/Descent/Airtime
+  tiles show fusion-core values ("1.2 s × 3" airtime format); Kotlin TrackStats
+  deleted — GPS parsing remains for the map polyline only.
+
+**Open:** GPS-altitude descent is garbage on wooded trails (fixture showed
+9.9 m ascent / 0 descent on an actual descent) — expected; Kalman + IMU next.
+Ascent/descent tiles will look wrong until then. Track from RideAnalysis
+(1 Hz decimated) could replace the Kotlin polyline pass later.

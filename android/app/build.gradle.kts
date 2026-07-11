@@ -37,6 +37,7 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":feature:record"))
+    implementation(project(":feature:activity"))
     implementation(project(":feature:segments"))
     implementation(project(":feature:feed"))
     implementation(project(":feature:profile"))

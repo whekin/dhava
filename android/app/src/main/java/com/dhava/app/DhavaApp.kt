@@ -17,10 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.dhava.feature.activity.ActivityDetailScreen
 import com.dhava.feature.feed.FeedScreen
 import com.dhava.feature.profile.ProfileScreen
 import com.dhava.feature.record.RecordScreen
@@ -81,10 +84,25 @@ fun DhavaApp() {
             startDestination = DhavaDestination.Record.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(DhavaDestination.Record.route) { RecordScreen() }
+            composable(DhavaDestination.Record.route) {
+                RecordScreen(
+                    onOpenActivity = { id -> navController.navigate("activity/$id") },
+                )
+            }
             composable(DhavaDestination.Segments.route) { SegmentsScreen() }
             composable(DhavaDestination.Feed.route) { FeedScreen() }
             composable(DhavaDestination.Profile.route) { ProfileScreen() }
+            // Detail screen for one recorded activity; pushed on top of the
+            // Record tab, so system/app back both return to the list.
+            composable(
+                route = "activity/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                ActivityDetailScreen(
+                    recordingId = entry.arguments?.getString("id").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }
