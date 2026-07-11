@@ -12,9 +12,12 @@ android {
         minSdk = libs.versions.minSdk.get().toInt()
 
         // Dev default: Android emulator loopback to a backend on the host
-        // machine. Replace with the real backend URL (HTTPS) per build type
-        // once one exists.
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8080\"")
+        // machine. Override for a physical device with the host's LAN IP:
+        //   ./gradlew installDebug -PdhavaApiBaseUrl=http://192.168.x.x:8080
+        // Replace with the real backend URL (HTTPS) per build type once one exists.
+        val apiBaseUrl = (project.findProperty("dhavaApiBaseUrl") as String?)
+            ?: "http://10.0.2.2:8080"
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
         // Written into the recording meta line. Keep in sync with the :app
         // versionName until version info is centralized in the catalog.
         buildConfigField("String", "APP_VERSION", "\"0.1.0\"")
