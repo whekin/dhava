@@ -25,3 +25,14 @@ Short log of architecture/product decisions. Newest last.
   WorkManager job enqueued at save time (network constraint, exponential backoff).
   Activity metadata (title, description, bike) is entered at save and sent with
   `finish`; the raw file never changes after recording stops.
+- **Device-first compute** (VPS is 4-core/8GB ARM; also better UX): the phone runs
+  fusion-core (UniFFI) and computes results in realtime; upload = results + raw.
+  Server accepts device results as primary (same crate, same version → identical
+  output), recomputes selectively: KOM/top claims (anti-cheat, raw is on hand) and
+  batch recompute on algorithm upgrades. Server compute cost per ride is <1 s/core
+  anyway — the scarce resource is DISK: raw at ~60 MB/h/rider goes MinIO now,
+  Cloudflare R2 when it grows.
+- **Battery strategy**: recording is always full-rate (raw file, cheap IO); the
+  live fusion filter consumes ~100 Hz (decimated at filter input only). Screen off →
+  no UI compute + hardware sensor batching (1–2 s FIFO flushes, CPU sleeps); only a
+  cheap gate-proximity geofence stays on to wake live mode near segment starts.
