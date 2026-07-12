@@ -57,6 +57,8 @@ class RecordingService : Service() {
     companion object {
         private const val ACTION_START = "com.dhava.core.recording.action.START"
         private const val ACTION_STOP = "com.dhava.core.recording.action.STOP"
+        private const val ACTION_PAUSE = "com.dhava.core.recording.action.PAUSE"
+        private const val ACTION_RESUME = "com.dhava.core.recording.action.RESUME"
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
 
@@ -64,6 +66,7 @@ class RecordingService : Service() {
         private const val GPS_MIN_INTERVAL_MS = 500L
         private const val LIVE_IMU_INTERVAL_MS = 20L
         private const val MAX_LIVE_TRACK_POINTS = 10_800 // ~3 h at 1 Hz
+        private const val PREPARE_TIMEOUT_MS = 5_000L
 
         /** How often live state is pushed to the repository (~4/s). */
         private const val STATE_PUSH_INTERVAL_MS = 250L
@@ -77,6 +80,14 @@ class RecordingService : Service() {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_STOP)
             context.startService(intent)
         }
+
+        fun pause(context: Context) = context.startService(
+            Intent(context, RecordingService::class.java).setAction(ACTION_PAUSE),
+        )
+
+        fun resume(context: Context) = context.startService(
+            Intent(context, RecordingService::class.java).setAction(ACTION_RESUME),
+        )
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -136,6 +147,13 @@ class RecordingService : Service() {
     @Volatile private var latestMag: FloatArray? = null
 
     private var recording = false
+    @Volatile private var preparing = false
+    @Volatile private var paused = false
+    private var prepareStartedElapsedMs = 0L
+    private var warmImuCount = 0
+    private var warmGpsReady = false
+    private var pausedAtElapsedMs = 0L
+    private var totalPausedMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -150,11 +168,13 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> startRecording()
             ACTION_STOP -> stopRecording()
+            ACTION_PAUSE -> pauseRecording()
+            ACTION_RESUME -> resumeRecording()
             // Null intent: START_STICKY restart after the system killed the
             // process mid-ride (seen in the wild: OnePlus "o-kill"). The
             // repository has already repaired the interrupted file at index
             // load; pick the ride back up and keep appending to it.
-            null -> if (!recording) resumeAfterRestart()
+            null -> if (!recording && !preparing) resumeAfterRestart()
         }
         return START_STICKY
     }
@@ -164,28 +184,31 @@ class RecordingService : Service() {
     // --- recording lifecycle ------------------------------------------------
 
     private fun startRecording() {
-        if (recording) return
+        if (recording || preparing) return
         if (!hasLocationPermission()) {
             // UI is responsible for requesting permissions before starting.
             stopSelf()
             return
         }
-        recording = true
+        preparing = true
         // Foreground ASAP: startForegroundService() gives a short grace
         // window, and an early promotion narrows the window in which an
         // OEM killer sees a plain background process.
         goForeground()
 
+        prepareStartedElapsedMs = SystemClock.elapsedRealtime()
+        startCapture()
+    }
+
+    private fun beginRecording() {
+        if (!preparing || recording) return
+        preparing = false
+        recording = true
         activityId = UUID.randomUUID().toString()
         startedAtMs = System.currentTimeMillis()
         startedElapsedMs = SystemClock.elapsedRealtime()
         epochAnchorMs = startedAtMs - startedElapsedMs
-
-        // Persist the index entry immediately (status `recording`): if the
-        // system kills us mid-ride, the recording stays visible and gets
-        // repaired/resumed on the next start instead of silently vanishing.
         repository.addActiveRecording(activityId, startedAtMs)
-
         writer = RecordingWriter(repository.recordingFile(activityId)).also {
             it.write(
                 RecordLine.Meta(
@@ -197,8 +220,6 @@ class RecordingService : Service() {
                 ),
             )
         }
-
-        startCapture()
     }
 
     /**
@@ -260,6 +281,10 @@ class RecordingService : Service() {
         lastLiveImuMs = Long.MIN_VALUE
         latestGyro = null
         latestMag = null
+        warmImuCount = 0
+        warmGpsReady = false
+        paused = false
+        totalPausedMs = 0L
 
         acquireWakeLock()
         sensorThread = HandlerThread("recording-sensors").also { it.start() }
@@ -282,17 +307,21 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
+        if (preparing && !recording) {
+            preparing = false
+            tearDownCapture()
+            repository.pushState(RecordingState.Idle)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         if (!recording) {
             stopSelf()
             return
         }
         recording = false
 
-        sensorManager.unregisterListener(sensorListener)
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        sensorThread?.quitSafely()
-        sensorThread = null
-        releaseWakeLock()
+        tearDownCapture()
 
         val endedAtMs = System.currentTimeMillis()
         val finishedWriter = writer
@@ -316,8 +345,32 @@ class RecordingService : Service() {
         }
     }
 
+    private fun tearDownCapture() {
+        sensorManager.unregisterListener(sensorListener)
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        sensorThread?.quitSafely()
+        sensorThread = null
+        releaseWakeLock()
+    }
+
+    private fun pauseRecording() {
+        if (!recording || paused) return
+        writer?.write(RecordLine.Event(System.currentTimeMillis(), "pause"))
+        paused = true
+        pausedAtElapsedMs = SystemClock.elapsedRealtime()
+        lastSpeedMps = 0f
+    }
+
+    private fun resumeRecording() {
+        if (!recording || !paused) return
+        writer?.write(RecordLine.Event(System.currentTimeMillis(), "resume"))
+        totalPausedMs += SystemClock.elapsedRealtime() - pausedAtElapsedMs
+        paused = false
+        lastSpeedMps = null
+    }
+
     override fun onDestroy() {
-        if (recording) {
+        if (recording || preparing) {
             // Torn down without an explicit stop (e.g. task removed): make a
             // best effort to release sensors and finish the file.
             stopRecording()
@@ -373,7 +426,8 @@ class RecordingService : Service() {
 
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent) {
-            val writer = writer ?: return
+            if (preparing && event.sensor.type == Sensor.TYPE_ACCELEROMETER) warmImuCount++
+            val writer = writer
             when (event.sensor.type) {
                 // Pairing choice: the accelerometer is the master clock of the
                 // `imu` line. Gyro and mag callbacks only stash their latest
@@ -383,6 +437,7 @@ class RecordingService : Service() {
                 // within one sample period — good enough for fusion, which
                 // re-interpolates anyway, and far simpler than a merge queue.
                 Sensor.TYPE_ACCELEROMETER -> {
+                    if (writer == null || paused) return
                     imuCount++
                     val timestampMs = epochAnchorMs + event.timestamp / 1_000_000
                     // JNI at raw 500 Hz would waste battery. 50 Hz retains
@@ -417,6 +472,7 @@ class RecordingService : Service() {
                 Sensor.TYPE_GYROSCOPE -> latestGyro = event.values.clone()
                 Sensor.TYPE_MAGNETIC_FIELD -> latestMag = event.values.clone()
                 Sensor.TYPE_PRESSURE -> {
+                    if (writer == null || paused) return
                     baroCount++
                     writer.write(
                         RecordLine.Baro(
@@ -448,10 +504,12 @@ class RecordingService : Service() {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            val writer = writer ?: return
             for (location in result.locations) {
-                gpsCount++
+                if (preparing && location.hasAccuracy() && location.accuracy <= 25f) warmGpsReady = true
                 lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
+                val writer = writer
+                if (writer == null || paused) continue
+                gpsCount++
                 val timestampMs = epochAnchorMs + location.elapsedRealtimeNanos / 1_000_000
                 liveFusion?.pushGps(
                     timestampMs = timestampMs,
@@ -493,8 +551,18 @@ class RecordingService : Service() {
     private fun startTicker() {
         scope.launch {
             var lastNotifiedSecond = -1L
-            while (isActive && recording) {
-                val elapsedMs = SystemClock.elapsedRealtime() - startedElapsedMs
+            while (isActive && (recording || preparing)) {
+                if (preparing) {
+                    val preparingMs = SystemClock.elapsedRealtime() - prepareStartedElapsedMs
+                    val imuReady = warmImuCount >= 10
+                    repository.pushState(RecordingState.Preparing(preparingMs, warmGpsReady, imuReady, lastAccuracyM))
+                    if ((warmGpsReady && imuReady) || preparingMs >= PREPARE_TIMEOUT_MS) beginRecording()
+                    delay(STATE_PUSH_INTERVAL_MS)
+                    continue
+                }
+                val now = SystemClock.elapsedRealtime()
+                val currentPause = if (paused) now - pausedAtElapsedMs else 0L
+                val elapsedMs = now - startedElapsedMs - totalPausedMs - currentPause
                 // ~4 state pushes per second; IMU samples only bump counters,
                 // they never touch the StateFlow directly.
                 repository.pushState(
@@ -508,6 +576,7 @@ class RecordingService : Service() {
                         gpsCount = gpsCount,
                         imuCount = imuCount,
                         baroCount = baroCount,
+                        paused = paused,
                     ),
                 )
                 val second = elapsedMs / 1_000
@@ -543,7 +612,11 @@ class RecordingService : Service() {
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_recording)
-            .setContentTitle("Recording ride — ${formatElapsed(elapsedMs)}")
+            .setContentTitle(
+                if (paused) "Ride paused — ${formatElapsed(elapsedMs)}"
+                else "Recording ride — ${formatElapsed(elapsedMs)}",
+            )
+            .setContentText(if (paused) "Open Dhava to resume or finish" else "GPS and motion capture active")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)

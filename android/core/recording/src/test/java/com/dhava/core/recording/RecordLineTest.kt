@@ -96,4 +96,12 @@ class RecordLineTest {
             encode(line),
         )
     }
+
+    @Test
+    fun `pause event matches spec`() {
+        assertEquals(
+            """{"type":"event","timestamp_ms":1770000002000,"action":"pause"}""",
+            encode(RecordLine.Event(1770000002000, "pause")),
+        )
+    }
 }

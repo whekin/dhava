@@ -54,6 +54,13 @@ sealed interface RecordLine {
         @SerialName("timestamp_ms") val timestampMs: Long,
         @SerialName("pressure_hpa") val pressureHpa: Float,
     ) : RecordLine
+
+    @Serializable
+    @SerialName("event")
+    data class Event(
+        @SerialName("timestamp_ms") val timestampMs: Long,
+        val action: String,
+    ) : RecordLine
 }
 
 /** JSON codec for recording lines: `type` discriminator, optional fields omitted. */

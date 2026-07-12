@@ -1,5 +1,6 @@
 package com.dhava.feature.activity
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,11 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.content.FileProvider
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingStatus
 import com.dhava.fusion.RideAnalysis
@@ -52,9 +55,29 @@ fun ActivityDetailScreen(
     val recording by viewModel.recording.collectAsState()
     val track by viewModel.track.collectAsState()
     val analysis by viewModel.analysis.collectAsState()
+    val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxSize()) {
-        Header(recording = recording, onBack = onBack)
+        Header(
+            recording = recording,
+            onBack = onBack,
+            canExport = track is TrackState.Loaded,
+            onExport = {
+                viewModel.exportGpx { file ->
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                type = "application/gpx+xml"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            },
+                            "Share GPX",
+                        ),
+                    )
+                }
+            },
+        )
         StatTiles(recording = recording, analysis = analysis)
         Box(
             modifier = Modifier
@@ -82,7 +105,7 @@ fun ActivityDetailScreen(
 }
 
 @Composable
-private fun Header(recording: LocalRecording?, onBack: () -> Unit) {
+private fun Header(recording: LocalRecording?, onBack: () -> Unit, canExport: Boolean, onExport: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -124,6 +147,7 @@ private fun Header(recording: LocalRecording?, onBack: () -> Unit) {
             }
         }
         recording?.let { StatusChip(it.status, Modifier.padding(horizontal = 12.dp)) }
+        androidx.compose.material3.TextButton(onClick = onExport, enabled = canExport) { Text("GPX") }
     }
 }
 

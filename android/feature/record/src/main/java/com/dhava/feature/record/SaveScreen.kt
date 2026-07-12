@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,30 +76,45 @@ internal fun SaveContent(
     var showAddBike by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surface,
     ) {
-        Text(
-            text = "Save ride",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "${formatElapsed(durationMs)} · started ${formatStartTime(startedAtMs)}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(24.dp))
+      Column(
+          modifier = Modifier
+              .fillMaxSize()
+              .verticalScroll(rememberScrollState())
+              .imePadding()
+              .navigationBarsPadding()
+              .padding(horizontal = 24.dp, vertical = 24.dp),
+      ) {
+        Text("RIDE COMPLETE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(8.dp))
+        Text("Keep the good one.", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(18.dp))
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+          Row(
+              Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            RideSummaryMetric(formatElapsed(durationMs), "DURATION")
+            RideSummaryMetric(formatStartTime(startedAtMs), "STARTED")
+            RideSummaryMetric("LOCAL", "STORAGE")
+          }
+        }
+        Spacer(modifier = Modifier.height(28.dp))
+
+        Text("DETAILS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(10.dp))
 
         OutlinedTextField(
             value = title,
             onValueChange = { title = it },
-            label = { Text("Title") },
+            label = { Text("Ride title") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -103,15 +122,16 @@ internal fun SaveContent(
         OutlinedTextField(
             value = description,
             onValueChange = { description = it },
-            label = { Text("Description (optional)") },
-            minLines = 3,
+            label = { Text("Notes (optional)") },
+            minLines = 2,
+            maxLines = 4,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "Bike",
-            style = MaterialTheme.typography.titleSmall,
+            text = "BIKE",
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .fillMaxWidth()
@@ -123,24 +143,28 @@ internal fun SaveContent(
             onSelect = { pickedBikeId = it },
             onAddBike = { showAddBike = true },
         )
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Button(
+            onClick = {
+                onSave(title, description, bikes.firstOrNull { it.id == selectedBikeId })
+            },
+            enabled = title.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
         ) {
-            TextButton(onClick = { confirmDiscard = true }) {
-                Text("Discard", color = MaterialTheme.colorScheme.error)
-            }
-            Button(
-                onClick = {
-                    onSave(title, description, bikes.firstOrNull { it.id == selectedBikeId })
-                },
-            ) {
-                Text("Save")
-            }
+            Text("Save activity", style = MaterialTheme.typography.titleMedium)
         }
+        TextButton(onClick = { confirmDiscard = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("Discard recording", color = MaterialTheme.colorScheme.error)
+        }
+        Text(
+            "The raw recording remains on this phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+      }
     }
 
     if (showAddBike) {
@@ -170,6 +194,14 @@ internal fun SaveContent(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun RideSummaryMetric(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.Start) {
+        Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

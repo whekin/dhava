@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import android.util.Log
 import com.dhava.core.fusion.FusionCore
 import com.dhava.core.recording.GpsTrackReader
+import com.dhava.core.recording.GpxExporter
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordLine
 import com.dhava.core.recording.RecordingRepository
@@ -20,6 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /** GPS polyline load progress for the detail map. */
 sealed interface TrackState {
@@ -40,7 +43,7 @@ sealed interface TrackState {
  */
 class ActivityDetailViewModel(
     application: Application,
-    recordingId: String,
+    private val recordingId: String,
 ) : AndroidViewModel(application) {
 
     private val repository = RecordingRepository.getInstance(application)
@@ -59,6 +62,16 @@ class ActivityDetailViewModel(
      */
     private val _analysis = MutableStateFlow<RideAnalysis?>(null)
     val analysis: StateFlow<RideAnalysis?> = _analysis.asStateFlow()
+
+    fun exportGpx(onReady: (File) -> Unit) {
+        val points = (_track.value as? TrackState.Loaded)?.points ?: return
+        val title = recording.value?.title ?: "Dhava ride"
+        viewModelScope.launch(Dispatchers.IO) {
+            val output = File(getApplication<Application>().cacheDir, "exports/dhava-${recordingId.take(8)}.gpx")
+            val file = GpxExporter.write(points, title, output)
+            withContext(Dispatchers.Main) { onReady(file) }
+        }
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {

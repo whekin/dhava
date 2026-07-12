@@ -1,39 +1,45 @@
-# Roadmap
+# Roadmap — recorder first
 
-## Phase 0 — Foundation ✅ (2026-07-11)
-Monorepo, Android multi-module Compose skeleton (M3 Expressive), Go API skeleton
-(chi/pgx/PostGIS migrations), Rust fusion workspace (gate-crossing detection with
-tests), docker-compose for Coolify.
+Dhava is currently a high-quality, offline-first MTB recorder that will export
+activities to Strava. Segments, leaderboards and social features are frozen until
+the recorder is trustworthy enough to replace a dedicated bike computer.
 
-## Phase 1 — Recording (in progress)
-The riskiest part — start collecting real ride data ASAP.
-- Android foreground service: GPS (FusedLocation) + IMU (accel/gyro/mag, 100 Hz+) +
-  barometer → local per-activity files (gzip JSONL, see proto/raw-recording-format.md)
-- Record screen with live data (speed, duration, GPS accuracy, sample counts)
-- Backend: create activity, upload raw recording (→ object storage), finish activity
-- Upload from phone (opportunistic, manual retry OK for now)
+## Phase 0 — Foundation ✅
 
-## Phase 2 — Segments & timing
-- Data model: segments, gates, combo segments, segmented trails
-- fusion-core: gate crossings on real data (GPS-only first, Kalman later)
-- Segment creation from recordings (incl. slow registration ride), server recompute
-- fusion-worker: pipeline raw → results
+Monorepo, Android multi-module app, Rust fusion-core shared through UniFFI, Go API
+skeleton and deployment scaffolding.
 
-## Phase 3 — Leaderboards & Strava
-- Leaderboards: bike class filter (default), gender, resets on trail change + archive
-- Combo time stat
-- Strava OAuth, import own activities, export
+## Phase 1 — Field-ready recording (in progress)
 
-## Phase 4 — Live & social
-- Offline segment/leaderboard cache, live timing, on-trail KOM notification
-- Kudos, comments, feed, memories
+- Foreground GPS + full-rate IMU + barometer raw capture with crash recovery ✅
+- Five-second-bounded sensor warm-up, live fused telemetry and map ✅
+- Manual pause/resume with explicit raw events and guarded Finish ✅
+- Screen-off/background survival, wake lock and battery exemption ✅
+- Real settings: keep-screen-awake, sensor diagnostics, offline-only save ✅
+- Automated lifecycle tests: prepare → record → pause → resume → finish
+- Storage/free-space guard and a 1–2 hour physical-device field test
 
-## v1.5
-Airtime, ± uncertainty on results, trail conditions + per-condition boards,
-auth (device tokens → accounts), power-save geofencing.
+## Phase 2 — Complete local activity
 
-## v2
-Race mode, e-bike boards, snowboarding (lift exclusion), Wear OS, web app (view/social).
+- Canonical on-device fusion immediately after Finish
+- Active time, fused distance/speed/track, elevation quality and GPS quality
+- Reliable activity detail, rename/edit/delete and raw diagnostics export
+- Local storage management and offline map/cache behavior
 
-## v3
-Betting (virtual points), trailbuilder crypto tips.
+## Phase 3 — Export
+
+- GPX export through Android Share ✅
+- FIT export with pause semantics and sport metadata
+- Strava OAuth and direct export; backend remains optional
+
+## Phase 4 — Recorder polish
+
+- Configurable recording fields, optional auto-pause, accidental-touch lock
+- Audio/haptic preferences and actionable recording notification
+- Tested stationary sampling reduction without losing motion onset evidence
+
+## Frozen future work
+
+Segments and gates, uncertainty/anti-cheat evidence, leaderboards, live deltas,
+social features and server verification remain part of the long-term vision but
+are deliberately out of the current product path.

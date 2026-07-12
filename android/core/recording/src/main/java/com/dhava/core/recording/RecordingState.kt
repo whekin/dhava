@@ -5,6 +5,13 @@ sealed interface RecordingState {
 
     data object Idle : RecordingState
 
+    data class Preparing(
+        val elapsedMs: Long,
+        val gpsReady: Boolean,
+        val imuReady: Boolean,
+        val lastAccuracyM: Float?,
+    ) : RecordingState
+
     data class Recording(
         val startedAtMs: Long,
         val elapsedMs: Long,
@@ -15,6 +22,7 @@ sealed interface RecordingState {
         val gpsCount: Int,
         val imuCount: Int,
         val baroCount: Int,
+        val paused: Boolean = false,
     ) : RecordingState
 
     data class Finished(val summary: RecordingSummary) : RecordingState

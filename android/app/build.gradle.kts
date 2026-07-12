@@ -38,9 +38,6 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":feature:record"))
     implementation(project(":feature:activity"))
-    implementation(project(":feature:segments"))
-    implementation(project(":feature:feed"))
-    implementation(project(":feature:profile"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

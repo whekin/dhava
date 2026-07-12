@@ -277,6 +277,9 @@ class RecordingRepository private constructor(private val appContext: Context) {
      * waits for network.
      */
     fun saveActivity(id: String, title: String, description: String, bike: Bike?) {
+        val offline = appContext
+            .getSharedPreferences("recorder_settings", Context.MODE_PRIVATE)
+            .getBoolean("offline_mode", true)
         scope.launch {
             updateEntry(id) {
                 it.copy(
@@ -286,7 +289,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     bikeName = bike?.name,
                     bikeType = bike?.type,
                     savedAtMs = System.currentTimeMillis(),
-                    status = RecordingStatus.PENDING_UPLOAD,
+                    status = if (offline) RecordingStatus.RECORDED else RecordingStatus.PENDING_UPLOAD,
                 )
             }
             if (bike != null) {
@@ -295,7 +298,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     saveBikes()
                 }
             }
-            UploadWorker.enqueue(appContext, id)
+            if (!offline) UploadWorker.enqueue(appContext, id)
         }
     }
 

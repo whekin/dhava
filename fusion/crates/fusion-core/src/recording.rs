@@ -34,6 +34,12 @@ pub struct RecordingMeta {
     pub started_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RecordingEvent {
+    pub timestamp_ms: i64,
+    pub action: String,
+}
+
 /// One line of the recording file, discriminated by `type`.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -42,6 +48,7 @@ enum RecordLine {
     Gps(GpsPoint),
     Imu(ImuSample),
     Baro(BaroSample),
+    Event(RecordingEvent),
     /// Forward compatibility: any line type this version does not know.
     #[serde(other)]
     Unknown,
@@ -57,6 +64,7 @@ pub struct ParsedRecording {
     pub gps: Vec<GpsPoint>,
     pub imu: Vec<ImuSample>,
     pub baro: Vec<BaroSample>,
+    pub events: Vec<RecordingEvent>,
     /// Lines that were present but not parseable/known (diagnostics only).
     pub skipped_lines: u64,
 }
@@ -98,6 +106,7 @@ pub fn parse_recording<R: Read>(reader: R) -> Result<ParsedRecording, FusionErro
             Ok(RecordLine::Gps(p)) => out.gps.push(p),
             Ok(RecordLine::Imu(s)) => out.imu.push(s),
             Ok(RecordLine::Baro(b)) => out.baro.push(b),
+            Ok(RecordLine::Event(e)) => out.events.push(e),
             // Unknown line type or malformed/truncated line: skip.
             Ok(RecordLine::Unknown) | Err(_) => out.skipped_lines += 1,
         }

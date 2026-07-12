@@ -52,3 +52,14 @@ the live pipeline may downsample IMU input (currently 50 Hz) and publish UI
 snapshots at display/GPS rate. Map rendering is foreground-UI-only; background
 recording keeps raw capture and low-cost fusion state without rendering. Final
 activity results are always recomputed canonically from the raw on-device file.
+
+## 2026-07-12 — Recorder-first field-test policy
+
+- Product work is frozen around segments/social until the local recorder and
+  Strava export are dependable; `docs/ROADMAP.md` is now recorder-first.
+- Manual pause/resume is part of the raw contract via explicit `event` lines.
+  Sensor samples are absent during a manual pause, and analysis must not bridge it.
+- `STILL` is not a recording pause. Full-rate IMU remains captured while stationary
+  during the calibration/field-test period because it is required to validate
+  stationarity, preserve motion-onset evidence and tune device-specific noise.
+  Adaptive stationary sampling is allowed later only with heartbeat plus pre-roll.

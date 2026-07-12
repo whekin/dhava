@@ -156,7 +156,8 @@ pub fn analyze(recording: &ParsedRecording) -> Result<RideAnalysis, FusionError>
 
     let accepted = accuracy_filter(&gps);
 
-    let (distance_m, moving_time_ms, max_derived_mps) = distance_and_moving_time(&accepted);
+    let (distance_m, moving_time_ms, max_derived_mps) =
+        distance_and_moving_time(&accepted, &recording.events);
     let moving_time_s = moving_time_ms as f64 / 1000.0;
 
     let max_reported_mps = accepted
@@ -239,7 +240,10 @@ fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
 /// *accepted* fix is jitter and does not move the anchor, so creeping
 /// movement still accumulates. Moving time sums inter-fix intervals whose
 /// speed (reported, else derived) exceeds 0.7 m/s, skipping gaps > 10 s.
-fn distance_and_moving_time(gps: &[GpsPoint]) -> (f64, i64, f64) {
+fn distance_and_moving_time(
+    gps: &[GpsPoint],
+    events: &[crate::recording::RecordingEvent],
+) -> (f64, i64, f64) {
     let mut distance_m = 0.0;
     let mut moving_time_ms = 0i64;
     let mut max_derived_mps = 0.0f64;
@@ -248,6 +252,10 @@ fn distance_and_moving_time(gps: &[GpsPoint]) -> (f64, i64, f64) {
         return (0.0, 0, 0.0);
     };
     for point in &gps[1..] {
+        if crosses_manual_pause(anchor.timestamp_ms, point.timestamp_ms, events) {
+            anchor = point;
+            continue;
+        }
         let step = haversine_m(anchor, point);
         if step >= MIN_MOVE_M {
             distance_m += step;
@@ -257,6 +265,9 @@ fn distance_and_moving_time(gps: &[GpsPoint]) -> (f64, i64, f64) {
 
     for pair in gps.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
+        if crosses_manual_pause(a.timestamp_ms, b.timestamp_ms, events) {
+            continue;
+        }
         let dt_ms = b.timestamp_ms - a.timestamp_ms;
         if dt_ms <= 0 || dt_ms > MAX_MOVING_GAP_MS {
             continue;
@@ -274,6 +285,29 @@ fn distance_and_moving_time(gps: &[GpsPoint]) -> (f64, i64, f64) {
     }
 
     (distance_m, moving_time_ms, max_derived_mps)
+}
+
+fn crosses_manual_pause(
+    from_ms: i64,
+    to_ms: i64,
+    events: &[crate::recording::RecordingEvent],
+) -> bool {
+    let mut paused = false;
+    for event in events {
+        if event.timestamp_ms > to_ms {
+            break;
+        }
+        match event.action.as_str() {
+            "pause" => paused = true,
+            "resume" => {
+                if paused && event.timestamp_ms > from_ms { return true; }
+                paused = false;
+            }
+            _ => {}
+        }
+        if paused && event.timestamp_ms > from_ms { return true; }
+    }
+    paused
 }
 
 /// Centered median filter over a series (window must be odd).
@@ -423,6 +457,22 @@ fn decimate_track(gps: &[GpsPoint]) -> Vec<TrackPoint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_pause_does_not_bridge_distance() {
+        let point = |timestamp_ms, lon| GpsPoint {
+            timestamp_ms, lat: 41.7, lon, altitude_m: None,
+            accuracy_m: Some(3.0), speed_mps: Some(5.0), bearing_deg: None,
+        };
+        let gps = vec![point(0, 44.8), point(1_000, 44.8001), point(61_000, 44.81)];
+        let events = vec![
+            crate::recording::RecordingEvent { timestamp_ms: 2_000, action: "pause".into() },
+            crate::recording::RecordingEvent { timestamp_ms: 60_000, action: "resume".into() },
+        ];
+        let (distance, moving_ms, _) = distance_and_moving_time(&gps, &events);
+        assert!(distance < 20.0, "paused jump leaked into distance: {distance}");
+        assert_eq!(moving_ms, 1_000);
+    }
 
     #[test]
     fn median_filter_kills_single_spike() {

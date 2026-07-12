@@ -22,8 +22,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -32,15 +34,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -70,17 +76,18 @@ fun RecordScreen(
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val recordings by viewModel.recordings.collectAsState()
-    val uploads by viewModel.uploads.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val lastUsedBikeId by viewModel.lastUsedBikeId.collectAsState()
     val reopenedSaveId by viewModel.reopenedSaveId.collectAsState()
+    val startError by viewModel.startError.collectAsState()
+    val diagnosticsEnabled = remember {
+        context.getSharedPreferences("recorder_settings", 0).getBoolean("sensor_diagnostics", false)
+    }
 
     var permissionDenied by remember { mutableStateOf(false) }
     var showBatteryDialog by remember { mutableStateOf(false) }
-
-    // The entry currently in `recording` status is the live one (owned by
-    // the service); it must not show up in the list next to finished rides.
-    val listedRecordings = recordings.filter { it.status != RecordingStatus.RECORDING }
+    var mapFollowing by remember { mutableStateOf(true) }
+    var recenterRequest by remember { mutableIntStateOf(0) }
 
     // Recording is never blocked on the battery dialog: it starts right
     // away, the dialog is shown on top of it.
@@ -132,19 +139,37 @@ fun RecordScreen(
         else -> null
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            when {
+    Box(modifier = modifier.fillMaxSize()) {
+        LiveTrackMap(
+            points = (state as? RecordingState.Recording)?.liveTrack.orEmpty(),
+            trackColor = MaterialTheme.colorScheme.primary,
+            following = mapFollowing,
+            recenterRequest = recenterRequest,
+            onUserMovedMap = { mapFollowing = false },
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (!mapFollowing && saveTarget == null) {
+            Button(
+                onClick = {
+                    mapFollowing = true
+                    recenterRequest++
+                },
+                shape = CircleShape,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp).size(56.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+            ) { Text("◎", style = MaterialTheme.typography.headlineSmall) }
+        }
+        when {
+                state is RecordingState.Preparing -> PreparingContent(
+                    state = state as RecordingState.Preparing,
+                    onCancel = viewModel::stopRecording,
+                )
                 state is RecordingState.Recording -> RecordingContent(
                     state = state as RecordingState.Recording,
                     onStop = viewModel::stopRecording,
+                    onPause = viewModel::pauseRecording,
+                    onResume = viewModel::resumeRecording,
+                    showDiagnostics = diagnosticsEnabled,
                 )
                 saveTarget != null -> SaveContent(
                     recordingId = saveTarget.id,
@@ -159,20 +184,9 @@ fun RecordScreen(
                     onDiscard = { viewModel.discard(saveTarget.id) },
                 )
                 else -> IdleContent(
-                    permissionDenied = permissionDenied,
+                    errorMessage = startError ?: if (permissionDenied) "Dhava needs precise location. Grant location access in system settings." else null,
                     onStart = ::startWithPermissions,
                 )
-            }
-        }
-
-        if (listedRecordings.isNotEmpty() && state !is RecordingState.Recording && saveTarget == null) {
-            RecordingsList(
-                recordings = listedRecordings,
-                uploads = uploads,
-                onOpen = onOpenActivity,
-                onFinishSaving = viewModel::openSave,
-                onRetry = viewModel::retryUpload,
-            )
         }
     }
 
@@ -227,28 +241,61 @@ private data class SaveTarget(val id: String, val startedAtMs: Long, val duratio
 
 @Composable
 private fun IdleContent(
-    permissionDenied: Boolean,
+    errorMessage: String?,
     onStart: () -> Unit,
 ) {
-    Button(
-        onClick = onStart,
-        shape = CircleShape,
-        modifier = Modifier.size(160.dp),
-    ) {
-        Text(
-            text = "Start",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-    }
-    if (permissionDenied) {
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Dhava needs precise location to time your runs. " +
-                "Grant location access in system settings to start recording.",
+    val haptics = LocalHapticFeedback.current
+    Box(Modifier.fillMaxSize()) {
+      Surface(
+          color = MaterialTheme.colorScheme.surface,
+          shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+          shadowElevation = 14.dp,
+          modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+      ) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+              Text("MOUNTAIN BIKE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+              Text("Ready to record", style = MaterialTheme.typography.titleLarge)
+            }
+            Button(onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onStart() }, shape = CircleShape, modifier = Modifier.size(88.dp)) {
+              Icon(Icons.Filled.PlayArrow, "Start recording", modifier = Modifier.size(42.dp))
+            }
+          }
+          Text("GPS and motion sensors will warm up before capture starts.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+        }
+      }
+    if (errorMessage != null) {
+        Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(18.dp), modifier = Modifier.align(Alignment.TopCenter).padding(16.dp)) { Text(
+            text = errorMessage,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
+            color = MaterialTheme.colorScheme.onErrorContainer,
             textAlign = TextAlign.Center,
-        )
+            modifier = Modifier.padding(16.dp),
+        ) }
+    }
+    }
+}
+
+@Composable
+private fun PreparingContent(state: RecordingState.Preparing, onCancel: () -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+      Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(24.dp), shadowElevation = 12.dp, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("PREPARING · ${((5_000 - state.elapsedMs).coerceAtLeast(0) + 999) / 1000}s", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            ReadinessRow("GPS lock", state.gpsReady, state.lastAccuracyM?.let { "±${it.toInt()} m" } ?: "searching")
+            ReadinessRow("Motion sensors", state.imuReady, if (state.imuReady) "stable" else "warming up")
+            TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.End)) { Text("Cancel") }
+        }
+      }
+    }
+}
+
+@Composable
+private fun ReadinessRow(label: String, ready: Boolean, detail: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.titleMedium)
+        Text(if (ready) "●  $detail" else "○  $detail", color = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -256,54 +303,60 @@ private fun IdleContent(
 private fun RecordingContent(
     state: RecordingState.Recording,
     onStop: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    showDiagnostics: Boolean,
 ) {
+    val haptics = LocalHapticFeedback.current
+    var confirmFinish by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize()) {
-        if (state.liveTrack.isNotEmpty()) {
-            LiveTrackMap(
-                points = state.liveTrack,
-                trackColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(formatElapsed(state.elapsedMs), style = MaterialTheme.typography.headlineLarge)
-            Text(
-                text = state.lastSpeedMps?.let {
-                    String.format(Locale.US, "%.1f km/h", it * 3.6f)
-                } ?: "— km/h",
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                if (state.stationary) "STILL" else "MOVING",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatLabel(state.lastAccuracyM?.let { String.format(Locale.US, "±%.0f m", it) } ?: "no fix")
-                StatLabel("gps ${state.gpsCount}")
-                StatLabel("imu ${state.imuCount}")
-            }
-        }
-        Button(
-            onClick = onStop,
-            shape = CircleShape,
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(24.dp),
+            shadowElevation = 12.dp,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp)
-                .size(96.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 124.dp),
         ) {
-            Text("Stop", style = MaterialTheme.typography.titleLarge)
+          Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            Metric(formatElapsed(state.elapsedMs), "TIME")
+            Metric(
+                text = state.lastSpeedMps?.let {
+                    String.format(Locale.US, "%.1f", it * 3.6f)
+                } ?: "—",
+                label = "KM/H",
+            )
+            if (showDiagnostics) Metric(state.lastAccuracyM?.let { "±${it.toInt()}" } ?: "—", "GPS M")
+          }
         }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            if (state.paused) Button(onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); confirmFinish = true }, shape = CircleShape, modifier = Modifier.size(88.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)) { Text("■", style = MaterialTheme.typography.headlineSmall) }
+            Button(onClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); if (state.paused) onResume() else onPause() }, shape = CircleShape, modifier = Modifier.size(88.dp)) {
+                if (state.paused) Icon(Icons.Filled.PlayArrow, "Resume", modifier = Modifier.size(36.dp))
+                else Text("Ⅱ", style = MaterialTheme.typography.headlineMedium)
+            }
+        }
+    }
+    if (confirmFinish) AlertDialog(
+        onDismissRequest = { confirmFinish = false },
+        title = { Text("Finish this ride?") },
+        text = { Text("Recording will stop and the activity will be ready to save.") },
+        confirmButton = { TextButton(onClick = { confirmFinish = false; onStop() }) { Text("Finish ride") } },
+        dismissButton = { TextButton(onClick = { confirmFinish = false }) { Text("Keep paused") } },
+    )
+}
+
+@Composable
+private fun Metric(text: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text, style = MaterialTheme.typography.headlineMedium)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -346,12 +399,42 @@ private fun RecordingsList(
     }
 }
 
+/** Recorder-first library used by the top-level Activities destination. */
+@Composable
+fun ActivitiesScreen(
+    onOpenActivity: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: RecordViewModel = viewModel(),
+) {
+    val recordings by viewModel.recordings.collectAsState()
+    val uploads by viewModel.uploads.collectAsState()
+    Column(modifier.fillMaxSize().padding(top = 28.dp)) {
+        Text("ACTIVITIES", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 24.dp))
+        Text("Ride archive", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+        if (recordings.none { it.status != RecordingStatus.RECORDING }) {
+            Text("Your finished rides will live here — on this device.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(recordings.filter { it.status != RecordingStatus.RECORDING }, key = { it.id }) { recording ->
+                    RecordingRow(
+                        recording = recording,
+                        uploadState = uploads[recording.id],
+                        onOpen = { onOpenActivity(recording.id) },
+                        onFinishSaving = null,
+                        onRetry = { viewModel.retryUpload(recording.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun RecordingRow(
     recording: LocalRecording,
     uploadState: UploadState?,
     onOpen: () -> Unit,
-    onFinishSaving: () -> Unit,
+    onFinishSaving: (() -> Unit)?,
     onRetry: () -> Unit,
 ) {
     Row(
@@ -405,9 +488,9 @@ private fun RecordingRow(
                 contentDescription = "Uploaded",
                 tint = MaterialTheme.colorScheme.primary,
             )
-            recording.status == RecordingStatus.RECORDED -> TextButton(onClick = onFinishSaving) {
-                Text("Finish saving")
-            }
+            recording.status == RecordingStatus.RECORDED && onFinishSaving != null ->
+                TextButton(onClick = onFinishSaving) { Text("Finish saving") }
+            recording.status == RecordingStatus.RECORDED -> StatusLabel("Local")
             recording.status == RecordingStatus.FAILED -> TextButton(onClick = onRetry) {
                 Text("Retry")
             }

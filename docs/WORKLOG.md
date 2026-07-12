@@ -243,3 +243,64 @@ never advanced — every IMU sample was rejected forever. Rust diagnostics showe
 handled explicitly before subtraction. Automated physical-device UI test after
 install: `STILL`, `0.0 km/h`; Rust log showed accel mean 0.009, gyro mean 0.0014,
 calm for 5.4 s. Test recording stopped cleanly.
+## 2026-07-12 — recorder-first product shell and sensor warm-up
+
+Reframed the Android prototype around a standalone, Strava-export-oriented
+ride recorder. Top-level navigation is now Record / Activities / Settings;
+the empty Segments, Feed and Profile features are no longer included in the
+app build. Record opens directly onto the map/control surface, Activities is
+the on-device ride archive, and Settings adds a persisted offline mode plus
+sensor-diagnostics and keep-screen-awake development toggles.
+
+Recording now has an explicit preparation phase. GPS and IMU capture start for
+calibration without creating or writing a raw file; capture begins once IMU is
+warm and GPS accuracy is at most 25 m, with a hard five-second deadline so the
+button always produces a recording promptly. Cancelling during preparation
+leaves no empty activity. Added pause/resume service actions: paused time is
+excluded from the displayed timer and raw GPS/IMU/barometer samples are not
+written until resume. The recording surface was restyled as a compact field
+instrument with map backdrop, large telemetry, readiness feedback, and separate
+pause/finish controls. Offline mode now keeps saved rides local and does not
+enqueue upload work.
+
+Verified: `:app:assembleDebug` and `:core:recording:test` green.
+
+Follow-up visual correction after reviewing the result on the OnePlus: removed
+the full-screen translucent surface that obscured the map. Record now uses the
+map as the actual screen with only an opaque bottom instrument card. Idle shows
+Start; active recording shows Pause only; paused recording exposes Resume and
+Finish. Enabled MapLibre's native location puck, tracking camera and immediate
+16.5× zoom. Built, installed and visually checked on the physical OnePlus 9 Pro.
+
+MapLibre's tracking zoom did not apply when the first location arrived after
+style activation, leaving the idle screen at globe scale. The record feature
+now asks Fused Location for the last/current fix and explicitly performs one
+initial 16.5× camera animation before recording starts; subsequent map gestures
+remain user-controlled.
+
+Map follow mode now yields immediately to a user pan/zoom gesture: the native
+location camera switches to NONE and incoming live-track points stop moving the
+camera. A floating recenter control appears and restores tracking/16.5× zoom;
+opening the Record destination starts in follow mode again. Paused-state Finish
+and Resume controls now share the same 88 dp touch target and visual weight.
+
+Redesigned the broken transparent post-ride save state as a fully opaque,
+full-screen workspace. It now has a clear completion heading, compact duration /
+start / local-storage summary, restrained title and notes fields, bike cards,
+and a full-width primary Save Activity action. Discard is subordinate and still
+requires confirmation. The form scrolls, respects the IME/navigation insets,
+and no longer lets the live map interfere visually with metadata entry.
+
+Pre-field-test hardening: pause/resume now emit explicit raw `event` lines;
+notification text distinguishes PAUSED from RECORDING; Finish requires confirmation;
+start/pause/resume/finish controls provide haptic acknowledgement. Keep-screen-awake
+now controls the Activity window flag and sensor diagnostics controls whether GPS
+accuracy is shown in the live card. Updated the raw format contract, rewrote ROADMAP
+around recorder-first milestones, and documented the decision to retain full-rate
+stationary IMU through field calibration.
+
+Added GPX 1.1 export from Activity Detail through Android's share sheet (timestamps,
+elevation where present, escaped title, FileProvider URI) with a contract test. Start
+now refuses when less than 250 MB is free and the service ignores duplicate Start
+during sensor preparation. Added a Rust regression proving a manual pause cannot
+bridge distance/moving time. Marked GPX complete in the recorder-first roadmap.

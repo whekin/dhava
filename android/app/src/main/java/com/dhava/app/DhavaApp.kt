@@ -3,8 +3,7 @@ package com.dhava.app
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -24,10 +23,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.dhava.feature.activity.ActivityDetailScreen
-import com.dhava.feature.feed.FeedScreen
-import com.dhava.feature.profile.ProfileScreen
 import com.dhava.feature.record.RecordScreen
-import com.dhava.feature.segments.SegmentsScreen
+import com.dhava.feature.record.ActivitiesScreen
 
 /** Top-level bottom-navigation destinations. */
 private enum class DhavaDestination(
@@ -36,9 +33,8 @@ private enum class DhavaDestination(
     val icon: ImageVector,
 ) {
     Record("record", "Record", Icons.Filled.PlayArrow),
-    Segments("segments", "Segments", Icons.Filled.Place),
-    Feed("feed", "Feed", Icons.AutoMirrored.Filled.List),
-    Profile("profile", "Profile", Icons.Filled.Person),
+    Activities("activities", "Activities", Icons.AutoMirrored.Filled.List),
+    Settings("settings", "Settings", Icons.Filled.Settings),
 }
 
 /** App scaffold: bottom navigation bar plus the navigation host. */
@@ -89,9 +85,10 @@ fun DhavaApp() {
                     onOpenActivity = { id -> navController.navigate("activity/$id") },
                 )
             }
-            composable(DhavaDestination.Segments.route) { SegmentsScreen() }
-            composable(DhavaDestination.Feed.route) { FeedScreen() }
-            composable(DhavaDestination.Profile.route) { ProfileScreen() }
+            composable(DhavaDestination.Activities.route) {
+                ActivitiesScreen(onOpenActivity = { id -> navController.navigate("activity/$id") })
+            }
+            composable(DhavaDestination.Settings.route) { SettingsScreen() }
             // Detail screen for one recorded activity; pushed on top of the
             // Record tab, so system/app back both return to the list.
             composable(

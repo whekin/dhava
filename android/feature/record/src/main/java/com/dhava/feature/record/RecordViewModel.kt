@@ -49,7 +49,18 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     private val _reopenedSaveId = MutableStateFlow<String?>(null)
     val reopenedSaveId: StateFlow<String?> = _reopenedSaveId.asStateFlow()
 
-    fun startRecording() = RecordingService.start(getApplication())
+    private val _startError = MutableStateFlow<String?>(null)
+    val startError: StateFlow<String?> = _startError.asStateFlow()
+
+    fun startRecording() {
+        val free = getApplication<Application>().filesDir.usableSpace
+        if (free < 250L * 1024 * 1024) {
+            _startError.value = "Not enough free storage. Keep at least 250 MB available."
+            return
+        }
+        _startError.value = null
+        RecordingService.start(getApplication())
+    }
 
     /**
      * True when hitting Start should also surface the battery-optimization
@@ -68,6 +79,10 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopRecording() = RecordingService.stop(getApplication())
+
+    fun pauseRecording() = RecordingService.pause(getApplication())
+
+    fun resumeRecording() = RecordingService.resume(getApplication())
 
     fun openSave(id: String) {
         _reopenedSaveId.value = id
