@@ -44,3 +44,11 @@ Short log of architecture/product decisions. Newest last.
   live fusion filter consumes ~100 Hz (decimated at filter input only). Screen off →
   no UI compute + hardware sensor batching (1–2 s FIFO flushes, CPU sleeps); only a
   cheap gate-proximity geofence stays on to wake live mode near segment starts.
+## 2026-07-12 — Live telemetry uses fusion-core at reduced input rate
+
+Real-time values shown during recording are Rust fusion results, never direct
+Android GPS-derived metrics. Raw sensors remain recorded at hardware rate, while
+the live pipeline may downsample IMU input (currently 50 Hz) and publish UI
+snapshots at display/GPS rate. Map rendering is foreground-UI-only; background
+recording keeps raw capture and low-cost fusion state without rendering. Final
+activity results are always recomputed canonically from the raw on-device file.

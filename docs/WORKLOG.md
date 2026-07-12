@@ -171,3 +171,75 @@ raw windows on request for KOM verification). Phone = primary computer.
 9.9 m ascent / 0 descent on an actual descent) — expected; Kalman + IMU next.
 Ascent/descent tiles will look wrong until then. Track from RideAnalysis
 (1 Hz decimated) could replace the Kotlin polyline pass later.
+## 2026-07-12 — Rust live fusion + recording map
+
+Finished the previously uncommitted fusion foundation (`linalg`, `orientation`,
+`ekf`) and wired it into fusion-core. Added `LiveFusion`, a stateful UniFFI API
+that consumes reduced-rate IMU plus GPS and emits display-rate fused snapshots:
+Mahony attitude, 6-state ENU EKF, accuracy/Mahalanobis GPS gates and IMU
+stationarity-driven ZUPT. Android-reported GPS speed is deliberately ignored
+while stationary, fixing the observed ~10 km/h chair-speed. Two live-specific
+tests plus the existing math tests pass (30 fusion-core tests total including
+the forest fixture).
+
+RecordingService now preserves raw ~500 Hz sensor capture but feeds live fusion
+at 50 Hz to avoid JNI/battery waste. RecordingState exposes bounded fused track
+points, fused speed and STILL/MOVING. RecordScreen now renders a MapLibre live
+map with a growing fused polyline/current-position marker and follows the rider;
+map rendering only exists while the recording UI is composed. Generated UniFFI
+Kotlin and arm64/x86_64 native libraries were refreshed.
+
+Verified: `cargo test -p fusion-core` and strict clippy green; recording unit
+tests and `:app:assembleDebug` green. Installed on the x86_64 emulator and
+started a recording: native LiveFusion loaded, recording service/UI ran without
+crashes. Physical-device install subsequently completed on the OnePlus 9 Pro
+(LE2123, arm64); app launch produced no native/MapLibre crashes. Manual
+stationary-speed and outdoor-track validation remain the next field checks.
+
+**OnePlus stationary calibration:** first field test still showed 0.8 km/h.
+Pulled the live raw recording from the device: stationary accel error median
+0.056 / p95 0.244 m/s², but gyro had isolated spikes up to 0.31 rad/s despite
+median 0.028. The original all-samples-below-0.12 rule could therefore never
+enter ZUPT. Stationarity now gates on 700 ms window means (accel <0.45 m/s²,
+gyro <0.15 rad/s), with a regression test proving sustained 0.5 rad/s rotation
+is still classified moving. Rust tests/clippy green; rebuilt and reinstalled on
+the OnePlus for another stationary check.
+
+Second field check converged only to 0.2 km/h. The new raw file confirmed IMU
+was calm and GPS itself continuously reported 0.27–0.36 km/h drift. Added a
+Rust low-speed rest guard: fused <0.35 m/s plus reported GPS <0.5 m/s collapses
+velocity via ZUPT and emits `0.0 / STILL` (well below the existing canonical
+0.7 m/s moving threshold). Regression test added; 31 unit tests + forest fixture
+and strict clippy green; rebuilt and reinstalled on OnePlus.
+
+Walking regression found immediately: low-speed guard could emit `MOVING` with
+0.0 km/h indoors. Device trace proved strong motion (gyro 0.5–2.9 rad/s) and
+GPS walking speed up to 2.9 km/h, so a speed-only floor is invalid. Removed the
+guard entirely: only confirmed IMU stationarity may zero speed. Added assertion
+that sustained rotation preserves nonzero speed; tests/clippy green and corrected
+native build installed on OnePlus.
+
+Third cycle exposed `MOVING` persisting after a stop. Full 80 s device trace
+showed long calm periods punctuated by brief IMU bursts; a stateless window can
+flip at an unlucky GPS snapshot. Replaced direct classification with hysteretic
+state transitions: 500 ms sustained calm enters STILL, 250 ms sustained motion
+exits. Added a stop→move→stop regression test proving speed returns to zero;
+31 tests + fixture and strict clippy green, installed on OnePlus.
+
+Runtime/offline mismatch root-caused: the short failing recording had no usable
+GPS callback, and Android only copied Rust's `stationary` flag when a GPS
+snapshot arrived. IMU correctly entered STILL offline but UI remained at its
+initial MOVING state indefinitely. `push_imu` now returns the live stationarity
+state on every 50 Hz update; service immediately publishes STILL/0 without GPS.
+On transition to MOVING it clears stale zero speed until a fresh GPS snapshot
+exists (`— km/h` is honest when indoor GPS cannot estimate speed). Tests/clippy
+green; rebuilt and installed on OnePlus.
+
+Final runtime root cause: live IMU downsampling initialized
+`lastLiveImuMs = Long.MIN_VALUE`; Kotlin's first `timestamp - MIN_VALUE`
+overflowed negative, so the first IMU sample was rejected and the sentinel was
+never advanced — every IMU sample was rejected forever. Rust diagnostics showed
+`accelMean/gyroMean = Infinity`, making the issue unambiguous. Sentinel is now
+handled explicitly before subtraction. Automated physical-device UI test after
+install: `STILL`, `0.0 km/h`; Rust log showed accel mean 0.009, gyro mean 0.0014,
+calm for 5.4 s. Test recording stopped cleanly.

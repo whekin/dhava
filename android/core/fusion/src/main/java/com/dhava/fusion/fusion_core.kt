@@ -30,6 +30,7 @@ import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 // This is a helper for safely working with byte buffers returned from the Rust code.
 // A rust-owned buffer is represented by its capacity, its current length, and a
@@ -715,17 +716,25 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
-// N.B. the name of the extension is very misleading, since it is 
-// rather `InterfaceTooLargeException`, caused by too many methods 
+// N.B. the name of the extension is very misleading, since it is
+// rather `InterfaceTooLargeException`, caused by too many methods
 // in the interface for large crates.
 //
 // By splitting the otherwise huge interface into two parts
-// * UniffiLib 
+// * UniffiLib
 // * IntegrityCheckingUniffiLib (this)
 // we allow for ~2x as many methods in the UniffiLib interface.
-// 
-// The `ffi_uniffi_contract_version` method and all checksum methods are put 
+//
+// The `ffi_uniffi_contract_version` method and all checksum methods are put
 // into `IntegrityCheckingUniffiLib` and these methods are called only once,
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
@@ -733,6 +742,12 @@ internal interface IntegrityCheckingUniffiLib : Library {
     fun uniffi_fusion_core_checksum_func_algorithm_version(
 ): Short
 fun uniffi_fusion_core_checksum_func_analyze_recording(
+): Short
+fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
+): Short
+fun uniffi_fusion_core_checksum_method_livefusion_push_imu(
+): Short
+fun uniffi_fusion_core_checksum_constructor_livefusion_new(
 ): Short
 fun ffi_fusion_core_uniffi_contract_version(
 ): Int
@@ -746,8 +761,8 @@ internal interface UniffiLib : Library {
         internal val INSTANCE: UniffiLib by lazy {
             val componentName = "fusion_core"
             // For large crates we prevent `MethodTooLargeException` (see #2340)
-            // N.B. the name of the extension is very misleading, since it is 
-            // rather `InterfaceTooLargeException`, caused by too many methods 
+            // N.B. the name of the extension is very misleading, since it is
+            // rather `InterfaceTooLargeException`, caused by too many methods
             // in the interface for large crates.
             //
             // By splitting the otherwise huge interface into two parts
@@ -755,7 +770,7 @@ internal interface UniffiLib : Library {
             // * IntegrityCheckingUniffiLib
             // And all checksum methods are put into `IntegrityCheckingUniffiLib`
             // we allow for ~2x as many methods in the UniffiLib interface.
-            // 
+            //
             // Thus we first load the library with `loadIndirect` as `IntegrityCheckingUniffiLib`
             // so that we can (optionally!) call `uniffiCheckApiChecksums`...
             loadIndirect<IntegrityCheckingUniffiLib>(componentName)
@@ -770,26 +785,40 @@ internal interface UniffiLib : Library {
             // to trigger this issue, the performance impact is negligible, running on
             // a macOS M1 machine the `loadIndirect` call takes ~50ms.
             val lib = loadIndirect<UniffiLib>(componentName)
-            // No need to check the contract version and checksums, since 
+            // No need to check the contract version and checksums, since
             // we already did that with `IntegrityCheckingUniffiLib` above.
             // Loading of library with integrity check done.
             lib
         }
-        
+
+        // The Cleaner for the whole library
+        internal val CLEANER: UniffiCleaner by lazy {
+            UniffiCleaner.create()
+        }
     }
 
     // FFI functions
-    fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun ffi_fusion_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-fun ffi_fusion_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_fusion_core_fn_clone_livefusion(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_fusion_core_fn_free_livefusion(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
-fun ffi_fusion_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_fusion_core_fn_constructor_livefusion_new(uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_fusion_core_fn_method_livefusion_push_gps(`ptr`: Pointer,`timestampMs`: Long,`lat`: Double,`lon`: Double,`altitudeM`: RustBuffer.ByValue,`accuracyM`: RustBuffer.ByValue,`speedMps`: RustBuffer.ByValue,`bearingDeg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_method_livefusion_push_imu(`ptr`: Pointer,`timestampMs`: Long,`accel`: RustBuffer.ByValue,`gyro`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_fusion_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun ffi_fusion_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun ffi_fusion_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -797,7 +826,7 @@ fun ffi_fusion_core_rust_future_cancel_u8(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_u8(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 fun ffi_fusion_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -805,7 +834,7 @@ fun ffi_fusion_core_rust_future_cancel_i8(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_i8(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
 fun ffi_fusion_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -813,7 +842,7 @@ fun ffi_fusion_core_rust_future_cancel_u16(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_u16(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 fun ffi_fusion_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -821,7 +850,7 @@ fun ffi_fusion_core_rust_future_cancel_i16(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_i16(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Short
 fun ffi_fusion_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -829,7 +858,7 @@ fun ffi_fusion_core_rust_future_cancel_u32(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_u32(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 fun ffi_fusion_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -837,7 +866,7 @@ fun ffi_fusion_core_rust_future_cancel_i32(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_i32(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Int
 fun ffi_fusion_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -845,7 +874,7 @@ fun ffi_fusion_core_rust_future_cancel_u64(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_u64(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 fun ffi_fusion_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -853,7 +882,7 @@ fun ffi_fusion_core_rust_future_cancel_i64(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_i64(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Long
 fun ffi_fusion_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -861,7 +890,7 @@ fun ffi_fusion_core_rust_future_cancel_f32(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_f32(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Float
 fun ffi_fusion_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -869,7 +898,7 @@ fun ffi_fusion_core_rust_future_cancel_f64(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_f64(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Double
 fun ffi_fusion_core_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -877,7 +906,7 @@ fun ffi_fusion_core_rust_future_cancel_pointer(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_pointer(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun ffi_fusion_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -885,7 +914,7 @@ fun ffi_fusion_core_rust_future_cancel_rust_buffer(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_rust_buffer(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -893,7 +922,7 @@ fun ffi_fusion_core_rust_future_cancel_void(`handle`: Long,
 ): Unit
 fun ffi_fusion_core_rust_future_free_void(`handle`: Long,
 ): Unit
-fun ffi_fusion_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+fun ffi_fusion_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
 
 }
@@ -913,6 +942,15 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_analyze_recording() != 175.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_method_livefusion_push_gps() != 56011.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_method_livefusion_push_imu() != 38537.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_constructor_livefusion_new() != 22083.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -987,12 +1025,76 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/** 
+/**
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
  * */
 object NoPointer
+/**
+ * The cleaner interface for Object finalization code to run.
+ * This is the entry point to any implementation that we're using.
+ *
+ * The cleaner registers objects and returns cleanables, so now we are
+ * defining a `UniffiCleaner` with a `UniffiClenaer.Cleanable` to abstract the
+ * different implmentations available at compile time.
+ *
+ * @suppress
+ */
+interface UniffiCleaner {
+    interface Cleanable {
+        fun clean()
+    }
+
+    fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable
+
+    companion object
+}
+
+// The fallback Jna cleaner, which is available for both Android, and the JVM.
+private class UniffiJnaCleaner : UniffiCleaner {
+    private val cleaner = com.sun.jna.internal.Cleaner.getCleaner()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        UniffiJnaCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class UniffiJnaCleanable(
+    private val cleanable: com.sun.jna.internal.Cleaner.Cleanable,
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
+
+
+// We decide at uniffi binding generation time whether we were
+// using Android or not.
+// There are further runtime checks to chose the correct implementation
+// of the cleaner.
+private fun UniffiCleaner.Companion.create(): UniffiCleaner =
+    try {
+        // For safety's sake: if the library hasn't been run in android_cleaner = true
+        // mode, but is being run on Android, then we still need to think about
+        // Android API versions.
+        // So we check if java.lang.ref.Cleaner is there, and use that…
+        java.lang.Class.forName("java.lang.ref.Cleaner")
+        JavaLangRefCleaner()
+    } catch (e: ClassNotFoundException) {
+        // … otherwise, fallback to the JNA cleaner.
+        UniffiJnaCleaner()
+    }
+
+private class JavaLangRefCleaner : UniffiCleaner {
+    val cleaner = java.lang.ref.Cleaner.create()
+
+    override fun register(value: Any, cleanUpTask: Runnable): UniffiCleaner.Cleanable =
+        JavaLangRefCleanable(cleaner.register(value, cleanUpTask))
+}
+
+private class JavaLangRefCleanable(
+    val cleanable: java.lang.ref.Cleaner.Cleanable
+) : UniffiCleaner.Cleanable {
+    override fun clean() = cleanable.clean()
+}
 
 /**
  * @suppress
@@ -1066,6 +1168,29 @@ public object FfiConverterDouble: FfiConverter<Double, Double> {
 /**
  * @suppress
  */
+public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
+    override fun lift(value: Byte): Boolean {
+        return value.toInt() != 0
+    }
+
+    override fun read(buf: ByteBuffer): Boolean {
+        return lift(buf.get())
+    }
+
+    override fun lower(value: Boolean): Byte {
+        return if (value) 1.toByte() else 0.toByte()
+    }
+
+    override fun allocationSize(value: Boolean) = 1UL
+
+    override fun write(value: Boolean, buf: ByteBuffer) {
+        buf.put(lower(value))
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
     // Note: we don't inherit from FfiConverterRustBuffer, because we use a
     // special encoding when lowering/lifting.  We can use `RustBuffer.len` to
@@ -1121,6 +1246,263 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 }
 
 
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface LiveFusionInterface {
+
+    fun `pushGps`(`timestampMs`: kotlin.Long, `lat`: kotlin.Double, `lon`: kotlin.Double, `altitudeM`: kotlin.Double?, `accuracyM`: kotlin.Double?, `speedMps`: kotlin.Double?, `bearingDeg`: kotlin.Double?): LiveSnapshot?
+
+    fun `pushImu`(`timestampMs`: kotlin.Long, `accel`: List<kotlin.Double>, `gyro`: List<kotlin.Double>): kotlin.Boolean
+
+    companion object
+}
+
+open class LiveFusion: Disposable, AutoCloseable, LiveFusionInterface
+{
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+    constructor() :
+        this(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_constructor_livefusion_new(
+        _status)
+}
+    )
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_fusion_core_fn_free_livefusion(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_fusion_core_fn_clone_livefusion(pointer!!, status)
+        }
+    }
+
+    override fun `pushGps`(`timestampMs`: kotlin.Long, `lat`: kotlin.Double, `lon`: kotlin.Double, `altitudeM`: kotlin.Double?, `accuracyM`: kotlin.Double?, `speedMps`: kotlin.Double?, `bearingDeg`: kotlin.Double?): LiveSnapshot? {
+            return FfiConverterOptionalTypeLiveSnapshot.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_method_livefusion_push_gps(
+        it, FfiConverterLong.lower(`timestampMs`),FfiConverterDouble.lower(`lat`),FfiConverterDouble.lower(`lon`),FfiConverterOptionalDouble.lower(`altitudeM`),FfiConverterOptionalDouble.lower(`accuracyM`),FfiConverterOptionalDouble.lower(`speedMps`),FfiConverterOptionalDouble.lower(`bearingDeg`),_status)
+}
+    }
+    )
+    }
+
+
+    override fun `pushImu`(`timestampMs`: kotlin.Long, `accel`: List<kotlin.Double>, `gyro`: List<kotlin.Double>): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_method_livefusion_push_imu(
+        it, FfiConverterLong.lower(`timestampMs`),FfiConverterSequenceDouble.lower(`accel`),FfiConverterSequenceDouble.lower(`gyro`),_status)
+}
+    }
+    )
+    }
+
+
+
+
+
+
+    companion object
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLiveFusion: FfiConverter<LiveFusion, Pointer> {
+
+    override fun lower(value: LiveFusion): Pointer {
+        return value.uniffiClonePointer()
+    }
+
+    override fun lift(value: Pointer): LiveFusion {
+        return LiveFusion(value)
+    }
+
+    override fun read(buf: ByteBuffer): LiveFusion {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: LiveFusion) = 8UL
+
+    override fun write(value: LiveFusion, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
 
 /**
  * One detected airborne window (jump / drop).
@@ -1129,17 +1511,17 @@ data class AirtimeWindow (
     /**
      * Window start, Unix epoch milliseconds.
      */
-    var `startMs`: kotlin.Long, 
+    var `startMs`: kotlin.Long,
     /**
      * Airborne duration, milliseconds.
      */
-    var `durationMs`: kotlin.Long, 
+    var `durationMs`: kotlin.Long,
     /**
      * Peak |accel| within 300 ms after landing, in g (9.81 m/s^2).
      */
     var `landingPeakG`: kotlin.Double
 ) {
-    
+
     companion object
 }
 
@@ -1170,6 +1552,58 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
 
 
 
+data class LiveSnapshot (
+    var `timestampMs`: kotlin.Long,
+    var `lat`: kotlin.Double,
+    var `lon`: kotlin.Double,
+    var `altitudeM`: kotlin.Double?,
+    var `speedMps`: kotlin.Double,
+    var `stationary`: kotlin.Boolean,
+    var `accuracyM`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot> {
+    override fun read(buf: ByteBuffer): LiveSnapshot {
+        return LiveSnapshot(
+            FfiConverterLong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LiveSnapshot) = (
+            FfiConverterLong.allocationSize(value.`timestampMs`) +
+            FfiConverterDouble.allocationSize(value.`lat`) +
+            FfiConverterDouble.allocationSize(value.`lon`) +
+            FfiConverterOptionalDouble.allocationSize(value.`altitudeM`) +
+            FfiConverterDouble.allocationSize(value.`speedMps`) +
+            FfiConverterBoolean.allocationSize(value.`stationary`) +
+            FfiConverterDouble.allocationSize(value.`accuracyM`)
+    )
+
+    override fun write(value: LiveSnapshot, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`timestampMs`, buf)
+            FfiConverterDouble.write(value.`lat`, buf)
+            FfiConverterDouble.write(value.`lon`, buf)
+            FfiConverterOptionalDouble.write(value.`altitudeM`, buf)
+            FfiConverterDouble.write(value.`speedMps`, buf)
+            FfiConverterBoolean.write(value.`stationary`, buf)
+            FfiConverterDouble.write(value.`accuracyM`, buf)
+    }
+}
+
+
+
 /**
  * Full analysis of one raw recording.
  */
@@ -1177,61 +1611,61 @@ data class RideAnalysis (
     /**
      * Recording start (meta line if present, else earliest sample), epoch ms.
      */
-    var `startedAtMs`: kotlin.Long, 
+    var `startedAtMs`: kotlin.Long,
     /**
      * Latest sample timestamp, epoch ms.
      */
-    var `endedAtMs`: kotlin.Long, 
+    var `endedAtMs`: kotlin.Long,
     /**
      * Time spent moving (speed > 0.7 m/s), seconds.
      */
-    var `movingTimeS`: kotlin.Double, 
+    var `movingTimeS`: kotlin.Double,
     /**
      * Total horizontal distance, meters.
      */
-    var `distanceM`: kotlin.Double, 
+    var `distanceM`: kotlin.Double,
     /**
      * Total ascent, meters (hysteresis-filtered GPS altitude).
      */
-    var `ascentM`: kotlin.Double, 
+    var `ascentM`: kotlin.Double,
     /**
      * Total descent, meters (hysteresis-filtered GPS altitude).
      */
-    var `descentM`: kotlin.Double, 
+    var `descentM`: kotlin.Double,
     /**
      * Maximum speed, m/s.
      */
-    var `maxSpeedMps`: kotlin.Double, 
+    var `maxSpeedMps`: kotlin.Double,
     /**
      * Average speed while moving, m/s.
      */
-    var `avgMovingSpeedMps`: kotlin.Double, 
+    var `avgMovingSpeedMps`: kotlin.Double,
     /**
      * Sum of all airtime window durations, milliseconds.
      */
-    var `airtimeTotalMs`: kotlin.Long, 
+    var `airtimeTotalMs`: kotlin.Long,
     /**
      * Detected airborne windows, chronological.
      */
-    var `airtimeWindows`: List<AirtimeWindow>, 
+    var `airtimeWindows`: List<AirtimeWindow>,
     /**
      * Accuracy-filtered track decimated to ~1 Hz for map display.
      */
-    var `track`: List<TrackPoint>, 
+    var `track`: List<TrackPoint>,
     /**
      * Raw GPS fix count in the file (before filtering).
      */
-    var `gpsCount`: kotlin.UInt, 
+    var `gpsCount`: kotlin.UInt,
     /**
      * Raw IMU sample count in the file.
      */
-    var `imuCount`: kotlin.UInt, 
+    var `imuCount`: kotlin.UInt,
     /**
      * Algorithm version tag ([`ALGORITHM_VERSION`]).
      */
     var `algorithmVersion`: kotlin.String
 ) {
-    
+
     companion object
 }
 
@@ -1302,25 +1736,25 @@ data class TrackPoint (
     /**
      * Unix epoch milliseconds.
      */
-    var `timestampMs`: kotlin.Long, 
+    var `timestampMs`: kotlin.Long,
     /**
      * Latitude, degrees (WGS84).
      */
-    var `lat`: kotlin.Double, 
+    var `lat`: kotlin.Double,
     /**
      * Longitude, degrees (WGS84).
      */
-    var `lon`: kotlin.Double, 
+    var `lon`: kotlin.Double,
     /**
      * Altitude, meters, if the fix had one.
      */
-    var `altitudeM`: kotlin.Double?, 
+    var `altitudeM`: kotlin.Double?,
     /**
      * Ground speed, m/s, if the fix had one.
      */
     var `speedMps`: kotlin.Double?
 ) {
-    
+
     companion object
 }
 
@@ -1363,46 +1797,46 @@ public object FfiConverterTypeTrackPoint: FfiConverterRustBuffer<TrackPoint> {
  * Errors surfaced across the FFI boundary (Kotlin exceptions).
  */
 sealed class FusionException: kotlin.Exception() {
-    
+
     /**
      * The recording file could not be opened/read.
      */
     class Io(
-        
+
         val `msg`: kotlin.String
         ) : FusionException() {
         override val message
             get() = "msg=${ `msg` }"
     }
-    
+
     /**
      * The recording could not be interpreted at all.
      */
     class Parse(
-        
+
         val `msg`: kotlin.String
         ) : FusionException() {
         override val message
             get() = "msg=${ `msg` }"
     }
-    
+
     /**
      * The recording parsed but contains no samples to analyze.
      */
     class EmptyRecording(
-        
+
         val `msg`: kotlin.String
         ) : FusionException() {
         override val message
             get() = "msg=${ `msg` }"
     }
-    
+
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<FusionException> {
         override fun lift(error_buf: RustBuffer.ByValue): FusionException = FfiConverterTypeFusionError.lift(error_buf)
     }
 
-    
+
 }
 
 /**
@@ -1410,7 +1844,7 @@ sealed class FusionException: kotlin.Exception() {
  */
 public object FfiConverterTypeFusionError : FfiConverterRustBuffer<FusionException> {
     override fun read(buf: ByteBuffer): FusionException {
-        
+
 
         return when(buf.getInt()) {
             1 -> FusionException.Io(
@@ -1506,6 +1940,66 @@ public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot?> {
+    override fun read(buf: ByteBuffer): LiveSnapshot? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeLiveSnapshot.read(buf)
+    }
+
+    override fun allocationSize(value: LiveSnapshot?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeLiveSnapshot.allocationSize(value)
+        }
+    }
+
+    override fun write(value: LiveSnapshot?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeLiveSnapshot.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceDouble: FfiConverterRustBuffer<List<kotlin.Double>> {
+    override fun read(buf: ByteBuffer): List<kotlin.Double> {
+        val len = buf.getInt()
+        return List<kotlin.Double>(len) {
+            FfiConverterDouble.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.Double>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterDouble.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.Double>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterDouble.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeAirtimeWindow: FfiConverterRustBuffer<List<AirtimeWindow>> {
     override fun read(buf: ByteBuffer): List<AirtimeWindow> {
         val len = buf.getInt()
@@ -1566,7 +2060,7 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
 }
     )
     }
-    
+
 
         /**
          * Parses and analyzes a raw recording file (`.jsonl.gz`).
@@ -1582,6 +2076,6 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
 }
     )
     }
-    
+
 
 

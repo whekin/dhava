@@ -14,7 +14,13 @@ use serde::{Deserialize, Serialize};
 uniffi::setup_scaffolding!();
 
 pub mod analysis;
+pub mod ekf;
+pub mod linalg;
+pub mod live;
+pub mod orientation;
 pub mod recording;
+
+pub use live::{LiveFusion, LiveSnapshot};
 
 pub use analysis::{
     ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,

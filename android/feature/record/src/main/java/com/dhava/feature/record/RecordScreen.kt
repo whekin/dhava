@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -256,44 +257,53 @@ private fun RecordingContent(
     state: RecordingState.Recording,
     onStop: () -> Unit,
 ) {
-    Text(
-        text = formatElapsed(state.elapsedMs),
-        style = MaterialTheme.typography.displayLarge,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-    Spacer(modifier = Modifier.height(16.dp))
-    Text(
-        text = state.lastSpeedMps?.let {
-            String.format(Locale.US, "%.1f km/h", it * 3.6f)
-        } ?: "— km/h",
-        style = MaterialTheme.typography.displaySmall,
-        color = MaterialTheme.colorScheme.primary,
-    )
-    Spacer(modifier = Modifier.height(24.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        StatLabel(
-            text = state.lastAccuracyM?.let {
-                String.format(Locale.US, "±%.0f m", it)
-            } ?: "no fix",
-        )
-        StatLabel(text = "gps ${state.gpsCount}")
-        StatLabel(text = "imu ${state.imuCount}")
-        StatLabel(text = "baro ${state.baroCount}")
-    }
-    Spacer(modifier = Modifier.height(40.dp))
-    Button(
-        onClick = onStop,
-        shape = CircleShape,
-        modifier = Modifier.size(120.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
-    ) {
-        Text(
-            text = "Stop",
-            style = MaterialTheme.typography.headlineSmall,
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (state.liveTrack.isNotEmpty()) {
+            LiveTrackMap(
+                points = state.liveTrack,
+                trackColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(formatElapsed(state.elapsedMs), style = MaterialTheme.typography.headlineLarge)
+            Text(
+                text = state.lastSpeedMps?.let {
+                    String.format(Locale.US, "%.1f km/h", it * 3.6f)
+                } ?: "— km/h",
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                if (state.stationary) "STILL" else "MOVING",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatLabel(state.lastAccuracyM?.let { String.format(Locale.US, "±%.0f m", it) } ?: "no fix")
+                StatLabel("gps ${state.gpsCount}")
+                StatLabel("imu ${state.imuCount}")
+            }
+        }
+        Button(
+            onClick = onStop,
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp)
+                .size(96.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ),
+        ) {
+            Text("Stop", style = MaterialTheme.typography.titleLarge)
+        }
     }
 }
 

@@ -10,6 +10,8 @@ sealed interface RecordingState {
         val elapsedMs: Long,
         val lastSpeedMps: Float?,
         val lastAccuracyM: Float?,
+        val stationary: Boolean,
+        val liveTrack: List<LiveTrackPoint>,
         val gpsCount: Int,
         val imuCount: Int,
         val baroCount: Int,
@@ -17,6 +19,14 @@ sealed interface RecordingState {
 
     data class Finished(val summary: RecordingSummary) : RecordingState
 }
+
+/** A display-rate point from Rust live fusion, never a raw GPS fix. */
+data class LiveTrackPoint(
+    val timestampMs: Long,
+    val lat: Double,
+    val lon: Double,
+    val speedMps: Double,
+)
 
 /** Summary of a just-finished recording. */
 data class RecordingSummary(

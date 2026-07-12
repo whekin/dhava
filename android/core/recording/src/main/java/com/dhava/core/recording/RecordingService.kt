@@ -29,6 +29,7 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.dhava.fusion.LiveFusion
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,8 @@ class RecordingService : Service() {
 
         private const val GPS_INTERVAL_MS = 1_000L
         private const val GPS_MIN_INTERVAL_MS = 500L
+        private const val LIVE_IMU_INTERVAL_MS = 20L
+        private const val MAX_LIVE_TRACK_POINTS = 10_800 // ~3 h at 1 Hz
 
         /** How often live state is pushed to the repository (~4/s). */
         private const val STATE_PUSH_INTERVAL_MS = 250L
@@ -123,6 +126,10 @@ class RecordingService : Service() {
     @Volatile private var baroCount = 0
     @Volatile private var lastSpeedMps: Float? = null
     @Volatile private var lastAccuracyM: Float? = null
+    @Volatile private var stationary = false
+    @Volatile private var liveTrack: List<LiveTrackPoint> = emptyList()
+    private var liveFusion: LiveFusion? = null
+    private var lastLiveImuMs = Long.MIN_VALUE
 
     // Latest gyro/mag samples, paired with accelerometer events (see below).
     @Volatile private var latestGyro: FloatArray? = null
@@ -247,6 +254,10 @@ class RecordingService : Service() {
         baroCount = 0
         lastSpeedMps = null
         lastAccuracyM = null
+        stationary = false
+        liveTrack = emptyList()
+        liveFusion = LiveFusion()
+        lastLiveImuMs = Long.MIN_VALUE
         latestGyro = null
         latestMag = null
 
@@ -373,9 +384,28 @@ class RecordingService : Service() {
                 // re-interpolates anyway, and far simpler than a merge queue.
                 Sensor.TYPE_ACCELEROMETER -> {
                     imuCount++
+                    val timestampMs = epochAnchorMs + event.timestamp / 1_000_000
+                    // JNI at raw 500 Hz would waste battery. 50 Hz retains
+                    // more than enough bandwidth for attitude/EKF and ZUPT.
+                    if (
+                        lastLiveImuMs == Long.MIN_VALUE ||
+                        timestampMs - lastLiveImuMs >= LIVE_IMU_INTERVAL_MS
+                    ) {
+                        lastLiveImuMs = timestampMs
+                        val wasStationary = stationary
+                        stationary = liveFusion?.pushImu(
+                            timestampMs,
+                            event.values.map { it.toDouble() },
+                            (latestGyro ?: floatArrayOf(0f, 0f, 0f)).map { it.toDouble() },
+                        ) ?: false
+                        when {
+                            stationary -> lastSpeedMps = 0f
+                            wasStationary -> lastSpeedMps = null
+                        }
+                    }
                     writer.write(
                         RecordLine.Imu(
-                            timestampMs = epochAnchorMs + event.timestamp / 1_000_000,
+                            timestampMs = timestampMs,
                             accel = listOf(event.values[0], event.values[1], event.values[2]),
                             // Devices without a gyroscope report a zero rate
                             // (the field is required by the format spec).
@@ -421,13 +451,31 @@ class RecordingService : Service() {
             val writer = writer ?: return
             for (location in result.locations) {
                 gpsCount++
-                lastSpeedMps = if (location.hasSpeed()) location.speed else null
                 lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
+                val timestampMs = epochAnchorMs + location.elapsedRealtimeNanos / 1_000_000
+                liveFusion?.pushGps(
+                    timestampMs = timestampMs,
+                    lat = location.latitude,
+                    lon = location.longitude,
+                    altitudeM = if (location.hasAltitude()) location.altitude else null,
+                    accuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else null,
+                    speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
+                    bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
+                )?.let { snapshot ->
+                    lastSpeedMps = snapshot.speedMps.toFloat()
+                    stationary = snapshot.stationary
+                    liveTrack = (liveTrack + LiveTrackPoint(
+                        timestampMs = snapshot.timestampMs,
+                        lat = snapshot.lat,
+                        lon = snapshot.lon,
+                        speedMps = snapshot.speedMps,
+                    )).takeLast(MAX_LIVE_TRACK_POINTS)
+                }
                 writer.write(
                     RecordLine.Gps(
                         // elapsedRealtimeNanos is on the same monotonic clock
                         // as SensorEvent.timestamp — one anchor for everything.
-                        timestampMs = epochAnchorMs + location.elapsedRealtimeNanos / 1_000_000,
+                        timestampMs = timestampMs,
                         lat = location.latitude,
                         lon = location.longitude,
                         altitudeM = if (location.hasAltitude()) location.altitude else null,
@@ -455,6 +503,8 @@ class RecordingService : Service() {
                         elapsedMs = elapsedMs,
                         lastSpeedMps = lastSpeedMps,
                         lastAccuracyM = lastAccuracyM,
+                        stationary = stationary,
+                        liveTrack = liveTrack,
                         gpsCount = gpsCount,
                         imuCount = imuCount,
                         baroCount = baroCount,
