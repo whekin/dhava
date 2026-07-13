@@ -68,4 +68,9 @@ class TrackMapTest {
         assertNotNull(features)
         assertEquals(3, features!!.size)
     }
+
+    @Test
+    fun `diagnostic lines disable MapLibre coordinate simplification`() {
+        assertEquals(0f, diagnosticLineOptions()["tolerance"])
+    }
 }

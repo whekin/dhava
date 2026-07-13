@@ -179,3 +179,7 @@ activity results are always recomputed canonically from the raw on-device file.
   computed points are smaller, light-centered, below the accuracy-colored GPS layer and
   visible only at useful detailed zoom. Scale GPS dots with zoom as well so overview
   mode communicates the line rather than collapsing into a chain of overlapping dots.
+- Diagnostic line and point layers must preserve the same coordinates. Disable
+  MapLibre GeoJSON line simplification for raw and fusion sources; otherwise maximum
+  zoom can reveal a false visual offset even though both layers originate from the same
+  track. Keep 5 Hz fusion points hidden below zoom 18.

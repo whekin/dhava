@@ -37,6 +37,7 @@ import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.sources.GeoJsonOptions
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -62,7 +63,7 @@ private const val FINISH_IMAGE_ID = "track-finish-image"
 private const val MARKER_SIZE_PX = 48
 private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 15.0
-private const val FUSION_POINTS_MIN_ZOOM = 16.5f
+private const val FUSION_POINTS_MIN_ZOOM = 18f
 
 internal enum class TrackMode(val label: String) {
     Gps("GPS"),
@@ -102,9 +103,11 @@ internal fun TrackMap(
             map.configureDhavaMapChrome(palette, overlayBottomPx, mapChromeMarginPx)
             map.setStyle(Style.Builder().fromUri(DHAVA_MAP_STYLE_URI)) { style ->
                 style.applyDhavaMapPalette(palette)
-                style.addSource(GeoJsonSource(RAW_SOURCE_ID).also { source ->
-                    rawPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
-                })
+                style.addSource(
+                    GeoJsonSource(RAW_SOURCE_ID, diagnosticLineOptions()).also { source ->
+                        rawPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
+                    },
+                )
                 style.addLayer(
                     LineLayer(RAW_LAYER_ID, RAW_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(rawColor.toArgb()),
@@ -117,9 +120,11 @@ internal fun TrackMap(
                 style.addSource(GeoJsonSource(RAW_POINTS_SOURCE_ID).also { source ->
                     rawPoints.toAccuracyFeatureCollectionOrNull()?.let(source::setGeoJson)
                 })
-                style.addSource(GeoJsonSource(FUSED_SOURCE_ID).also { source ->
-                    fusedPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
-                })
+                style.addSource(
+                    GeoJsonSource(FUSED_SOURCE_ID, diagnosticLineOptions()).also { source ->
+                        fusedPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
+                    },
+                )
                 style.addLayer(
                     LineLayer(FUSED_CASING_LAYER_ID, FUSED_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(palette.roadCasing),
@@ -266,10 +271,16 @@ private fun fusionPointRadiusExpression(): Expression =
     Expression.interpolate(
         Expression.linear(),
         Expression.zoom(),
-        Expression.stop(FUSION_POINTS_MIN_ZOOM.toDouble(), 0.45),
-        Expression.stop(18.0, 0.9),
+        Expression.stop(FUSION_POINTS_MIN_ZOOM.toDouble(), 0.6),
+        Expression.stop(19.0, 1.0),
         Expression.stop(20.0, 1.5),
     )
+
+internal fun diagnosticLineOptions(): GeoJsonOptions =
+    // GeoJSON-VT simplifies line geometry by default, while our separate point
+    // sources retain every coordinate. Diagnostics must render both from the
+    // exact same vertices even at maximum zoom.
+    GeoJsonOptions().withTolerance(0f)
 
 private fun gpsPointRadiusExpression(): Expression =
     Expression.interpolate(

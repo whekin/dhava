@@ -672,3 +672,19 @@ ride overview so the orange line remains readable. Regenerated UniFFI bindings a
 both Android native libraries. All 48 core unit tests, the real forest fixture, strict
 clippy, Activity tests and debug assembly pass. The final APK is installed on the
 OnePlus; overview presentation was visually checked there without modifying ride data.
+
+## 2026-07-14 — Diagnostic lines preserve every rendered sample
+
+Fixed a maximum-zoom mismatch where fusion points were very close to, but not exactly
+centered on, the orange line. The data was identical; MapLibre simplified each
+LineString source with its default GeoJSON tolerance while the separate point source
+retained every 5 Hz coordinate. Raw and fusion diagnostic line sources now explicitly
+use zero simplification tolerance, so their rendered polylines pass through the exact
+same vertices as their point layers at every zoom.
+
+Raised the fusion-point visibility threshold from zoom 16.5 to 18 and kept their radius
+zoom-dependent. Ride overview and medium-distance views therefore show a clean fusion
+line; individual computed samples appear only when the map has enough space to inspect
+them. Added a regression for the zero-tolerance source option. Activity tests and the
+complete debug assembly pass, and the APK was updated on the OnePlus without forcing
+Dhava over the app currently in the foreground.
