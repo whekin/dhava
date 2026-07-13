@@ -227,7 +227,12 @@ private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
         Expression.stop(0.0, Expression.color(colors.good.toArgb())),
         Expression.stop(5.0, Expression.color(colors.good.toArgb())),
         Expression.stop(10.0, Expression.color(colors.fair.toArgb())),
-        Expression.stop(20.0, Expression.color(colors.poor.toArgb())),
+        Expression.stop(15.0, Expression.color(colors.weak.toArgb())),
+        Expression.stop(20.0, Expression.color(colors.weak.toArgb())),
+        // Fusion rejects fixes above 20 m, but Compare still shows every raw
+        // sample. Use a sharp red boundary only for those rejected fixes so
+        // the accepted accuracy scale stays distinct from the orange track.
+        Expression.stop(20.0001, Expression.color(colors.rejected.toArgb())),
     )
 
 private fun applyMode(

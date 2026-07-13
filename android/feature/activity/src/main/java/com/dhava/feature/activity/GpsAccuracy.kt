@@ -31,7 +31,8 @@ internal const val UNKNOWN_GPS_ACCURACY_STYLE_VALUE = -1.0
 internal data class GpsAccuracyColors(
     val good: Color,
     val fair: Color,
-    val poor: Color,
+    val weak: Color,
+    val rejected: Color,
     val unknown: Color,
 )
 
@@ -42,8 +43,9 @@ internal fun rememberGpsAccuracyColors(): GpsAccuracyColors {
     return remember(colors, dark) {
         GpsAccuracyColors(
             good = colors.tertiary,
-            fair = if (dark) Color(0xFFFFC857) else Color(0xFF8A5A00),
-            poor = colors.error,
+            fair = if (dark) Color(0xFFFFE082) else Color(0xFF8A6400),
+            weak = if (dark) Color(0xFFD7A928) else Color(0xFFA06F00),
+            rejected = colors.error,
             unknown = colors.onSurfaceVariant,
         )
     }
@@ -57,7 +59,7 @@ internal fun GpsAccuracyLegend(
     Surface(
         modifier = modifier.semantics {
             contentDescription =
-                "GPS accuracy scale: green 5 meters or better, amber 10 meters, red 20 meters or worse"
+                "GPS accuracy scale: green 5 meters or better, yellow 10 meters, gold 20 meters, red above 20 meters"
         },
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
@@ -85,7 +87,9 @@ internal fun GpsAccuracyLegend(
                                 0f to colors.good,
                                 0.25f to colors.good,
                                 0.5f to colors.fair,
-                                1f to colors.poor,
+                                0.85f to colors.weak,
+                                0.96f to colors.weak,
+                                1f to colors.rejected,
                             ),
                         ),
                         shape = CircleShape,
@@ -95,9 +99,10 @@ internal fun GpsAccuracyLegend(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                AccuracyLegendLabel("≤5 m", colors.good)
-                AccuracyLegendLabel("10 m", colors.fair)
-                AccuracyLegendLabel("20+ m", colors.poor)
+                AccuracyLegendLabel("≤5", colors.good)
+                AccuracyLegendLabel("10", colors.fair)
+                AccuracyLegendLabel("20", colors.weak)
+                AccuracyLegendLabel(">20 m", colors.rejected)
             }
         }
     }

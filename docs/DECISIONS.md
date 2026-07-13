@@ -95,6 +95,13 @@ activity results are always recomputed canonically from the raw on-device file.
   acceleration. Vertical/orientation processing remains available. This is a safety
   constraint against plausible-looking but unbounded live zigzags, not a permanent
   abandonment of GPS+IMU fusion.
+- An accepted exact-zero GPS fix is an immediate horizontal stop anchor: the preceding
+  displacement describes arrival and must not carry velocity beyond that fix. Hold the
+  fused position while subsequent fixes remain inside the root-sum-square accuracy of
+  the anchor, then re-seat position and velocity together when Earth-relative movement
+  clears the gate. If repeated zero reports are disproved by continued movement, keep a
+  rearm anchor so transport cannot alternate STILL/MOVING every other sample; trust zero
+  again only after its coordinates stabilize.
 
 ## 2026-07-14 — Recorder screen pre-warms foreground GPS
 
@@ -146,6 +153,7 @@ activity results are always recomputed canonically from the raw on-device file.
   fresh-GPS accuracy envelope and prefer recovery to a plausible-looking loop.
 - In post-ride GPS/Compare diagnostics, keep the raw line neutral and color individual
   GPS fixes continuously by their stored horizontal accuracy: good/leaf-green at 5 m
-  or better, amber around 10 m and error-red at 20 m or worse. Always show a numeric
+  or better, yellow around 10 m, gold through the accepted 20 m boundary and error-red
+  only above 20 m. Always show a numeric
   legend and preserve point casing/layer order so quality is not communicated by color
   alone and GPS remains distinguishable from the primary-orange fusion line.

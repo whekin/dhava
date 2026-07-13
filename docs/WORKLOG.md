@@ -588,3 +588,35 @@ at 5–10 m, and two are above 10 m. Verified legend contrast and layout in ligh
 the Pixel 9 Pro AVD, plus the Fusion/GPS/Compare visibility transitions on the OnePlus.
 Activity tests, feature lint and the complete debug assembly pass. The final APK is
 installed and launched on the OnePlus.
+
+## 2026-07-14 — Accuracy-aware stop anchors remove fusion loops
+
+Revisited every stationary interval in the saved `udzo 1` ride after the first
+stop-loop fix still left large triangular excursions in Compare. The remaining bug
+was temporal: the first exact-zero GPS fix at an arrival was overridden by derived
+velocity from the previous moving fix. That displacement described the approach to
+the point, not velocity after it, so fusion carried approach speed beyond an already
+reported stop.
+
+Live Rust fusion now treats an accepted exact-zero fix as an immediate horizontal
+position/velocity anchor. Subsequent GPS jitter and false non-zero device speed are
+ignored while fixes remain within the root-sum-square uncertainty of the anchor. Real
+earth-relative displacement beyond that accuracy-aware gate releases position and
+velocity atomically. A separate rearm anchor remembers when a zero-speed claim was
+disproved, preventing a bus that repeatedly reports zero from alternating between
+STILL and MOVING every other fix; zero becomes trustworthy again once coordinates
+stabilize. Invalid or >20 m fixes are rejected before they can mutate fusion state.
+
+Added regressions for arrival at a stop, stationary jitter plus the OnePlus's observed
+2.8 m/s false speed, repeated zero reports on a moving vehicle, re-arming at its later
+stop and bad-accuracy rejection. On exact `udzo 1` replay, each of the five detected
+stationary runs has 0.00 m of internal fused path; total fusion length is 1683.3 m
+against 1686.6 m raw. The large stop triangles are gone in Compare on the physical
+OnePlus; remaining smoothing stays inside the accepted GPS envelope.
+
+Refined GPS accuracy presentation so accepted fixes no longer approach the same orange
+as fusion: ≤5 m is green, 10 m yellow and 15–20 m gold. Only raw fixes strictly above
+the fusion acceptance limit of 20 m turn red. Updated the four-anchor numeric legend
+and accessibility description. Rebuilt both native Android libraries, ran all Rust
+tests and strict clippy plus Activity unit tests/debug assembly, installed the APK and
+visually verified `udzo 1` on the OnePlus.
