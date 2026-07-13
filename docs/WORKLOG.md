@@ -688,3 +688,16 @@ line; individual computed samples appear only when the map has enough space to i
 them. Added a regression for the zero-tolerance source option. Activity tests and the
 complete debug assembly pass, and the APK was updated on the OnePlus without forcing
 Dhava over the app currently in the foreground.
+
+## 2026-07-14 — One-tap Strava export specified for later
+
+Documented the deferred Strava export path without starting implementation. After a
+one-time mobile OAuth connection, Activity Detail will provide one-tap export with an
+offline WorkManager queue, retries, persisted status and duplicate protection. The
+first upload artifact will be the canonical finalized GPX with explicit pause sections
+and `MountainBikeRide`; FIT remains a compatible later upgrade.
+
+Because Strava requires a client secret for code exchange and refresh, direct export
+uses a minimal Go OAuth/upload broker rather than shipping the secret in Android. The
+broker receives only the processed GPX/FIT artifact and never the device's raw sensor
+recording. Recorder and local activity functionality remain fully backend-optional.

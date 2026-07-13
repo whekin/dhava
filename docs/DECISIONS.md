@@ -183,3 +183,20 @@ activity results are always recomputed canonically from the raw on-device file.
   MapLibre GeoJSON line simplification for raw and fusion sources; otherwise maximum
   zoom can reveal a false visual offset even though both layers originate from the same
   track. Keep 5 Hz fusion points hidden below zoom 18.
+
+## 2026-07-14 — Strava export is one tap after one-time connection
+
+- The rider connects Strava once through its mobile OAuth flow. Each saved activity
+  then exposes one `Export to Strava` action with queued, exporting, uploaded and
+  retryable-failure states. Offline taps enqueue network-constrained WorkManager work.
+- Strava requires the application client secret for authorization-code exchange and
+  token refresh, so never embed that secret in the APK. A minimal Go backend broker
+  owns the secret and latest refresh token and performs or proxies the asynchronous
+  Strava upload. Core recording and local activities remain backend-optional.
+- Only the processed canonical GPX/FIT artifact may pass through the broker; raw GPS,
+  IMU and barometer recordings remain on the phone. Use a stable external id derived
+  from recording id plus algorithm version, persist the returned Strava upload/activity
+  ids and prevent accidental duplicate submissions.
+- Ship canonical finalized GPX first, including separate pause sections, ride title,
+  description and `MountainBikeRide` sport type. Move to FIT later for richer pause,
+  device and sport metadata without changing the one-button UX.

@@ -29,8 +29,14 @@ skeleton and deployment scaffolding.
 ## Phase 3 — Export
 
 - GPX export through Android Share ✅
+- Canonical finalized GPX with explicit pause sections
+- One-time `Connect with Strava`, then one-tap per-activity export with offline queue,
+  retry and duplicate protection
+- Minimal Go OAuth/upload broker for Strava credentials; the recorder itself remains
+  fully usable without Dhava backend connectivity
 - FIT export with pause semantics and sport metadata
-- Strava OAuth and direct export; backend remains optional
+- Upgrade Strava uploads from GPX to FIT once canonical pause and device metadata are
+  stable
 
 ## Phase 4 — Recorder polish
 
