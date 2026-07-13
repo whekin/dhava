@@ -129,3 +129,18 @@ activity results are always recomputed canonically from the raw on-device file.
 - Completed tracks mark start with a green play glyph and finish with a primary-orange
   checkered flag, both inside dark-cased circular badges. Use raw endpoints in GPS mode
   and fused endpoints in Fusion/Compare when available.
+
+## 2026-07-14 — GPS owns horizontal position; IMU supports dynamics and timing
+
+- Off a known segment, GPS is the absolute horizontal reference. Phone IMU must not
+  freely dead-reckon an XY path: uncontrolled mounting, yaw ambiguity and downhill
+  vibration make the resulting position drift structurally unsafe. IMU remains useful
+  for movement state, motion onset, short gate-crossing interpolation, airtime and
+  other dynamics; barometer/vertical inertial evidence remains separate.
+- On a trusted segment, constrain the ride to a versioned multi-pass centerline using
+  continuity-, direction- and uncertainty-aware map matching rather than nearest-point
+  snapping. Build the centerline robustly from several quality-gated rides and retain
+  a spatial uncertainty corridor. A ride may contribute only to a later geometry
+  version, never the version used to match or score itself.
+- Until segment matching exists, live horizontal smoothing must stay within a tight
+  fresh-GPS accuracy envelope and prefer recovery to a plausible-looking loop.

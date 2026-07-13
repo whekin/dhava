@@ -254,6 +254,15 @@ impl Ekf {
         self.vel_rejects = 0;
     }
 
+    /// Clears horizontal velocity after a pause or sensor-clock gap while
+    /// leaving position untouched. The next accepted GPS fix will re-seat the
+    /// complete horizontal state; the generous variance admits real motion if
+    /// normal prediction resumes before that fix arrives.
+    pub fn reset_horizontal_velocity(&mut self) {
+        self.reseat([3, 4], [0.0; 2], INIT_VEL_SIGMA * INIT_VEL_SIGMA);
+        self.vel_rejects = 0;
+    }
+
     /// Zero-velocity update: the IMU says the device is stationary.
     /// Ungated — the stationarity detector is the gate.
     pub fn update_zupt(&mut self) {
@@ -511,6 +520,21 @@ mod tests {
         let v = ekf.velocity();
         let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         assert!(speed < 0.05, "speed after ZUPTs: {speed}");
+    }
+
+    #[test]
+    fn reset_horizontal_velocity_preserves_position_and_vertical_state() {
+        let mut ekf = Ekf::new(4.0, Some([5.0, -2.0]));
+        ekf.predict([0.0, 0.0, 1.0], 1.0);
+        let position = ekf.position();
+        let vertical_velocity = ekf.velocity()[2];
+
+        ekf.reset_horizontal_velocity();
+
+        assert_eq!(ekf.position(), position);
+        assert_eq!(ekf.velocity()[0], 0.0);
+        assert_eq!(ekf.velocity()[1], 0.0);
+        assert_eq!(ekf.velocity()[2], vertical_velocity);
     }
 
     #[test]

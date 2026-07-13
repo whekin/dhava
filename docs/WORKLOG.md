@@ -539,3 +539,30 @@ Activity map test, recording tests and debug assembly pass. Visually verified th
 markers on the real paused `udzo 1` recording on the OnePlus; its 3.8 s pause occurred
 while stationary, so the real geographic gap is under one metre. The final APK is
 installed on the device.
+
+## 2026-07-14 — Stop, pause and sharp-turn fusion loops bounded
+
+Traced the large Compare-mode loops in `udzo 1` through the raw recording and the
+exact Rust live replay. Android commonly emitted an exact `speed_mps: 0` without a
+bearing at the stop; `velocity_en` rejected that pair, leaving the pre-stop velocity
+inside the EKF. The velocity gate could then reject the abrupt real stop, and a long
+manual-pause/sensor gap cleared motion classification without clearing horizontal
+velocity. Tight corners exposed a separate overshoot bounded only by the former loose
+2.5-sigma/12 m live GPS envelope.
+
+Zero speed is now a valid directionless `[0, 0]` measurement. Corroborated geographic
+displacement still overrides a false zero from a smooth bus, while an uncorroborated
+zero clears stale horizontal velocity without waiting for the normal gate. A sensor
+gap resets horizontal velocity immediately; derived velocity is not calculated across
+that discontinuity, and the first accepted GPS fix re-seats position and velocity
+together. Tightened the live GPS envelope to 1.5 times reported accuracy with a 6 m
+floor so corner prediction cannot make the wide former triangles.
+
+Added regressions for directionless zero speed, abrupt stop recovery, pause/gap
+re-seating and preserving vertical state during a horizontal reset. On the exact
+`udzo 1` replay, fused path length changed from 1741.1 m to 1695.7 m against 1686.6 m
+raw, and maximum fused-to-current-fix offset fell from about 20.5 m to 13.0 m. A still
+window around the manual pause remains within 0.6 m of its GPS fixes. All 42 core unit
+tests, the real forest fixture, workspace strict clippy, Android recording/activity
+tests and debug assembly pass. Rebuilt both Android native libraries and installed and
+launched the verified APK on the physical OnePlus.

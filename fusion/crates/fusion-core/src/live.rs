@@ -33,8 +33,8 @@ const GPS_MOTION_HOLD_MS: i64 = 2_500;
 const HORIZONTAL_ACCEL_GAIN: f64 = 0.0;
 /// A fused output may smooth within the GPS uncertainty region, never escape
 /// hundreds of meters from a fresh fix.
-const MIN_LIVE_GPS_ENVELOPE_M: f64 = 12.0;
-const LIVE_GPS_ENVELOPE_SIGMA: f64 = 2.5;
+const MIN_LIVE_GPS_ENVELOPE_M: f64 = 6.0;
+const LIVE_GPS_ENVELOPE_SIGMA: f64 = 1.5;
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LiveSnapshot {
@@ -75,6 +75,7 @@ struct State {
     gps_motion_hold_until_ms: i64,
     last_gps_fix: Option<GpsFix>,
     still_gps_anchor: Option<GpsFix>,
+    horizontal_reseat_pending: bool,
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -99,6 +100,7 @@ impl LiveFusion {
                 gps_motion_hold_until_ms: i64::MIN,
                 last_gps_fix: None,
                 still_gps_anchor: None,
+                horizontal_reseat_pending: false,
             }),
         }
     }
@@ -123,6 +125,13 @@ impl LiveFusion {
             s.calm_since_ms = None;
             s.motion_since_ms = None;
             s.stationary = false;
+            if let Some(ekf) = &mut s.ekf {
+                // Do not let the next normal-rate IMU samples propagate the
+                // pre-pause velocity before GPS has had a chance to re-anchor
+                // the horizontal state.
+                ekf.reset_horizontal_velocity();
+                s.horizontal_reseat_pending = true;
+            }
             return false;
         }
 
@@ -197,7 +206,13 @@ impl LiveFusion {
         }
         let mut s = self.state.lock().expect("live fusion mutex poisoned");
         let reported_velocity = velocity_en(speed_mps, bearing_deg);
-        let motion_anchor = if s.stationary {
+        let horizontal_reseat_pending = s.horizontal_reseat_pending;
+        let motion_anchor = if horizontal_reseat_pending {
+            // Samples on opposite sides of a manual pause or sensor stall do
+            // not describe continuous motion and must never produce a
+            // derived velocity.
+            None
+        } else if s.stationary {
             s.still_gps_anchor.or(s.last_gps_fix)
         } else {
             s.last_gps_fix
@@ -219,6 +234,7 @@ impl LiveFusion {
         // distinguishes a smooth bus from a drifting chair.
         let gps_reports_motion = derived_velocity
             .is_some_and(|velocity| velocity[0].hypot(velocity[1]) >= GPS_DERIVED_MOVING_SPEED_MPS);
+        let gps_reports_zero_speed = reported_velocity == Some([0.0, 0.0]);
         let gps_released_stationary = gps_reports_motion && s.stationary;
         if gps_reports_motion {
             s.gps_motion_hold_until_ms = timestamp_ms.saturating_add(GPS_MOTION_HOLD_MS);
@@ -236,7 +252,15 @@ impl LiveFusion {
             accuracy_m: accuracy,
         };
         s.last_gps_fix = Some(current_fix);
-        let measured_velocity = reported_velocity.or(derived_velocity);
+        // Android may report an exact zero speed without a bearing at a real
+        // stop. It may also briefly report zero on a smoothly moving vehicle.
+        // Earth-relative displacement wins in the latter case; otherwise the
+        // zero measurement must clear stale pre-stop velocity.
+        let measured_velocity = match (reported_velocity, derived_velocity) {
+            (Some([0.0, 0.0]), Some(derived)) if gps_reports_motion => Some(derived),
+            (Some(reported), _) => Some(reported),
+            (None, derived) => derived,
+        };
         if s.ekf.is_none() {
             let vel = if s.stationary {
                 Some([0.0, 0.0])
@@ -249,8 +273,15 @@ impl LiveFusion {
             let anchor = s.anchor.expect("EKF has anchor");
             let en = project(lat, lon, anchor.0, anchor.1);
             let stationary = s.stationary;
+            s.horizontal_reseat_pending = false;
             let ekf = s.ekf.as_mut().expect("checked above");
-            if stationary {
+            if horizontal_reseat_pending {
+                // The first accepted GPS fix after a pause/process stall is
+                // authoritative. Position and velocity must recover together
+                // so a stale velocity cannot draw a loop before the normal
+                // measurement gates converge again.
+                ekf.reseat_horizontal(en, measured_velocity, accuracy);
+            } else if stationary {
                 // True earth-relative STILL: GPS jitter is a noisy
                 // measurement of a position we already know. Holding the
                 // state prevents the live map drawing flowers around a stop.
@@ -267,7 +298,14 @@ impl LiveFusion {
                 if let (Some(alt), Some(anchor_alt)) = (altitude_m, anchor.2) {
                     ekf.update_gps_altitude(alt - anchor_alt, accuracy);
                 }
-                if let Some(vel) = measured_velocity {
+                if gps_reports_zero_speed && !gps_reports_motion {
+                    // A real stop is a discontinuous velocity change, so a
+                    // Kalman gate tuned to reject GPS outliers can reject it
+                    // for several seconds. Position corroboration above has
+                    // already ruled out smooth vehicle motion; clear the stale
+                    // velocity immediately instead of drawing a stop loop.
+                    ekf.reset_horizontal_velocity();
+                } else if let Some(vel) = measured_velocity {
                     ekf.update_gps_velocity(vel);
                 }
                 let p = ekf.position();
@@ -336,8 +374,15 @@ fn norm(v: [f64; 3]) -> f64 {
 }
 
 fn velocity_en(speed: Option<f64>, bearing: Option<f64>) -> Option<[f64; 2]> {
-    let (speed, bearing) = (speed?, bearing?);
-    if !speed.is_finite() || !bearing.is_finite() {
+    let speed = speed?;
+    if !speed.is_finite() || speed < 0.0 {
+        return None;
+    }
+    if speed == 0.0 {
+        return Some([0.0, 0.0]);
+    }
+    let bearing = bearing?;
+    if !bearing.is_finite() {
         return None;
     }
     let r = bearing.to_radians();
@@ -496,6 +541,87 @@ mod tests {
         assert!(jittered.stationary);
         assert_eq!(jittered.lat, first.lat);
         assert_eq!(jittered.lon, first.lon);
+    }
+
+    #[test]
+    fn zero_speed_without_bearing_stops_horizontal_prediction() {
+        let fusion = LiveFusion::new();
+        fusion.push_imu(0, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        fusion
+            .push_gps(0, 41.7, 44.8, None, Some(4.0), Some(8.0), Some(90.0))
+            .unwrap();
+
+        let stopped_lon =
+            44.8 + (8.0 / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees();
+        for step in 1..=50 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        // This first zero is contradicted by the 8 m displacement and must
+        // not hide real motion (for example, a smooth bus).
+        let arrival = fusion
+            .push_gps(1_000, 41.7, stopped_lon, None, Some(4.0), Some(0.0), None)
+            .unwrap();
+        assert!(arrival.speed_mps > 3.0);
+
+        for step in 51..=100 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        let stopped = fusion
+            .push_gps(2_000, 41.7, stopped_lon, None, Some(4.0), Some(0.0), None)
+            .unwrap();
+        assert!(
+            stopped.speed_mps < 1.0,
+            "stale speed: {}",
+            stopped.speed_mps
+        );
+
+        for step in 101..=150 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        let held = fusion
+            .push_gps(3_000, 41.7, stopped_lon, None, Some(4.0), Some(0.0), None)
+            .unwrap();
+        let offset = project(held.lat, held.lon, 41.7, stopped_lon);
+        assert!(
+            offset[0].hypot(offset[1]) < 4.0,
+            "stationary prediction escaped by {offset:?}"
+        );
+    }
+
+    #[test]
+    fn long_imu_gap_reseats_position_and_velocity_on_next_gps() {
+        let fusion = LiveFusion::new();
+        fusion.push_imu(0, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        fusion
+            .push_gps(0, 41.7, 44.8, None, Some(4.0), Some(10.0), Some(90.0))
+            .unwrap();
+        for step in 1..=25 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+
+        // Simulates a manual pause or a sensor stall. Normal IMU samples may
+        // resume before GPS, but they must not propagate the old 10 m/s state.
+        assert!(!fusion.push_imu(2_000, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]));
+        for step in 101..=125 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        let resumed_lon =
+            44.8 + (6.0 / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees();
+        let resumed = fusion
+            .push_gps(2_500, 41.7, resumed_lon, None, Some(4.0), Some(0.0), None)
+            .unwrap();
+        let offset = project(resumed.lat, resumed.lon, 41.7, resumed_lon);
+        assert!(
+            offset[0].hypot(offset[1]) < 0.01,
+            "not re-seated: {offset:?}"
+        );
+        assert_eq!(resumed.speed_mps, 0.0);
+    }
+
+    #[test]
+    fn exact_zero_speed_does_not_require_bearing() {
+        assert_eq!(velocity_en(Some(0.0), None), Some([0.0, 0.0]));
+        assert_eq!(velocity_en(Some(-1.0), Some(90.0)), None);
     }
 
     #[test]
