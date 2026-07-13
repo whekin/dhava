@@ -19,6 +19,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -66,7 +67,8 @@ class RecordingService : Service() {
         private const val GPS_MIN_INTERVAL_MS = 500L
         private const val LIVE_IMU_INTERVAL_MS = 20L
         private const val MAX_LIVE_TRACK_POINTS = 10_800 // ~3 h at 1 Hz
-        private const val PREPARE_TIMEOUT_MS = 5_000L
+        private const val PREPARE_TIMEOUT_MS = 10_000L
+        private const val LOG_TAG = "RecordingService"
 
         /** How often live state is pushed to the repository (~4/s). */
         private const val STATE_PUSH_INTERVAL_MS = 250L
@@ -176,7 +178,7 @@ class RecordingService : Service() {
             // load; pick the ride back up and keep appending to it.
             null -> if (!recording && !preparing) resumeAfterRestart()
         }
-        return START_STICKY
+        return if (recording || preparing) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -194,7 +196,12 @@ class RecordingService : Service() {
         // Foreground ASAP: startForegroundService() gives a short grace
         // window, and an early promotion narrows the window in which an
         // OEM killer sees a plain background process.
-        goForeground()
+        if (!goForeground()) {
+            preparing = false
+            repository.pushState(RecordingState.Idle)
+            stopSelf()
+            return
+        }
 
         prepareStartedElapsedMs = SystemClock.elapsedRealtime()
         startCapture()
@@ -233,7 +240,14 @@ class RecordingService : Service() {
     private fun resumeAfterRestart() {
         // Foreground first: a restarted foreground service must promote
         // itself promptly, and the resume decision below is asynchronous.
-        goForeground()
+        if (!goForeground()) {
+            // Android 14+ rejects a background-created location FGS when the
+            // user granted only while-in-use location. The repository has
+            // already repaired the interrupted file; stop without a crash
+            // loop and leave that recovered activity visible to the user.
+            stopSelf()
+            return
+        }
         scope.launch {
             val target = if (hasLocationPermission()) repository.takeResumableRecording() else null
             if (target == null || recording) {
@@ -297,13 +311,22 @@ class RecordingService : Service() {
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
-    private fun goForeground() {
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            buildNotification(elapsedMs = 0L),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
-        )
+    private fun goForeground(): Boolean {
+        return try {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(elapsedMs = 0L),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            )
+            true
+        } catch (error: SecurityException) {
+            Log.e(LOG_TAG, "Location foreground promotion denied", error)
+            false
+        } catch (error: IllegalStateException) {
+            Log.e(LOG_TAG, "Foreground restart not allowed from background", error)
+            false
+        }
     }
 
     private fun stopRecording() {
@@ -505,7 +528,7 @@ class RecordingService : Service() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             for (location in result.locations) {
-                if (preparing && location.hasAccuracy() && location.accuracy <= 25f) warmGpsReady = true
+                if (preparing && location.hasAccuracy() && location.accuracy <= 15f) warmGpsReady = true
                 lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
                 val writer = writer
                 if (writer == null || paused) continue

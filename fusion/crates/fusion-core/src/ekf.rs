@@ -88,6 +88,7 @@ pub struct Ekf {
     p: Mat<6, 6>,
     pos_rejects: u32,
     alt_rejects: u32,
+    vel_rejects: u32,
 }
 
 impl Ekf {
@@ -112,6 +113,7 @@ impl Ekf {
             ]),
             pos_rejects: 0,
             alt_rejects: 0,
+            vel_rejects: 0,
         }
     }
 
@@ -215,12 +217,41 @@ impl Ekf {
 
     /// GPS speed+bearing as a horizontal velocity measurement (ENU m/s).
     pub fn update_gps_velocity(&mut self, vel_en: [f64; 2]) -> UpdateOutcome {
-        self.update::<2>(
+        let out = self.update::<2>(
             [3, 4],
             vel_en,
             [GPS_VEL_SIGMA_MPS * GPS_VEL_SIGMA_MPS; 2],
             Some(GATE_VEL),
-        )
+        );
+        match out {
+            UpdateOutcome::Accepted => self.vel_rejects = 0,
+            UpdateOutcome::Rejected => {
+                self.vel_rejects += 1;
+                if self.vel_rejects >= MAX_CONSECUTIVE_REJECTS {
+                    self.reseat([3, 4], vel_en, GPS_VEL_SIGMA_MPS * GPS_VEL_SIGMA_MPS * 9.0);
+                    self.vel_rejects = 0;
+                    return UpdateOutcome::Reseated;
+                }
+            }
+            UpdateOutcome::Reseated => unreachable!(),
+        }
+        out
+    }
+
+    /// Hard recovery used by the live safety envelope when inertial
+    /// prediction has escaped the current GPS uncertainty region. Position
+    /// and velocity are reset together; resetting only position leaves a
+    /// runaway velocity that immediately launches the state away again.
+    pub fn reseat_horizontal(&mut self, pos_en: [f64; 2], vel_en: Option<[f64; 2]>, h_acc_m: f64) {
+        let pos_sigma = h_acc_m.max(GPS_H_ACC_FLOOR_M);
+        self.reseat([0, 1], pos_en, pos_sigma * pos_sigma * 4.0);
+        self.reseat(
+            [3, 4],
+            vel_en.unwrap_or([0.0; 2]),
+            GPS_VEL_SIGMA_MPS * GPS_VEL_SIGMA_MPS * 4.0,
+        );
+        self.pos_rejects = 0;
+        self.vel_rejects = 0;
     }
 
     /// Zero-velocity update: the IMU says the device is stationary.
@@ -439,6 +470,21 @@ mod tests {
         assert!(saw_reseat);
         let [pe, _, _] = ekf.position();
         assert!((pe - 100.0).abs() < 5.0, "position not re-seated: {pe}");
+    }
+
+    #[test]
+    fn prolonged_velocity_rejection_reseats_velocity() {
+        let mut ekf = Ekf::new(4.0, Some([0.0, 0.0]));
+        let mut saw_reseat = false;
+        for _ in 0..MAX_CONSECUTIVE_REJECTS {
+            if ekf.update_gps_velocity([20.0, 0.0]) == UpdateOutcome::Reseated {
+                saw_reseat = true;
+            }
+        }
+        assert!(saw_reseat);
+        let [ve, vn, _] = ekf.velocity();
+        assert!((ve - 20.0).abs() < f64::EPSILON);
+        assert!(vn.abs() < f64::EPSILON);
     }
 
     #[test]

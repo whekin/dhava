@@ -8,12 +8,18 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -25,6 +31,7 @@ import androidx.navigation.navArgument
 import com.dhava.feature.activity.ActivityDetailScreen
 import com.dhava.feature.record.RecordScreen
 import com.dhava.feature.record.ActivitiesScreen
+import com.dhava.feature.record.SaveRecordingScreen
 
 /** Top-level bottom-navigation destinations. */
 private enum class DhavaDestination(
@@ -43,10 +50,19 @@ fun DhavaApp() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
+    var recordImmersive by remember { mutableStateOf(false) }
+    val isTopLevelDestination = DhavaDestination.entries.any { destination ->
+        currentDestination?.hierarchy?.any { it.route == destination.route } == true
+    }
+    val showBottomBar = isTopLevelDestination && !recordImmersive
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+          if (showBottomBar) {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+            ) {
                 DhavaDestination.entries.forEach { destination ->
                     val selected = currentDestination?.hierarchy
                         ?.any { it.route == destination.route } == true
@@ -70,9 +86,17 @@ fun DhavaApp() {
                             )
                         },
                         label = { Text(destination.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                 }
             }
+          }
         },
     ) { innerPadding ->
         NavHost(
@@ -82,11 +106,14 @@ fun DhavaApp() {
         ) {
             composable(DhavaDestination.Record.route) {
                 RecordScreen(
-                    onOpenActivity = { id -> navController.navigate("activity/$id") },
+                    onImmersiveChanged = { recordImmersive = it },
                 )
             }
             composable(DhavaDestination.Activities.route) {
-                ActivitiesScreen(onOpenActivity = { id -> navController.navigate("activity/$id") })
+                ActivitiesScreen(
+                    onOpenActivity = { id -> navController.navigate("activity/$id") },
+                    onFinishSaving = { id -> navController.navigate("save/$id") },
+                )
             }
             composable(DhavaDestination.Settings.route) { SettingsScreen() }
             // Detail screen for one recorded activity; pushed on top of the
@@ -97,6 +124,16 @@ fun DhavaApp() {
             ) { entry ->
                 ActivityDetailScreen(
                     recordingId = entry.arguments?.getString("id").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = "save/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SaveRecordingScreen(
+                    recordingId = entry.arguments?.getString("id").orEmpty(),
+                    onFinished = { navController.popBackStack() },
                     onBack = { navController.popBackStack() },
                 )
             }

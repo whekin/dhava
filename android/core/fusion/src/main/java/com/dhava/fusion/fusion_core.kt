@@ -724,6 +724,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -742,6 +744,8 @@ internal interface IntegrityCheckingUniffiLib : Library {
     fun uniffi_fusion_core_checksum_func_algorithm_version(
 ): Short
 fun uniffi_fusion_core_checksum_func_analyze_recording(
+): Short
+fun uniffi_fusion_core_checksum_func_replay_recording(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
 ): Short
@@ -811,6 +815,8 @@ fun uniffi_fusion_core_fn_method_livefusion_push_imu(`ptr`: Pointer,`timestampMs
 fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -942,6 +948,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_analyze_recording() != 175.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_replay_recording() != 45909.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_push_gps() != 56011.toShort()) {
@@ -1552,6 +1561,50 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
 
 
 
+data class DiagnosticTrackPoint (
+    var `timestampMs`: kotlin.Long,
+    var `lat`: kotlin.Double,
+    var `lon`: kotlin.Double,
+    var `accuracyM`: kotlin.Double?,
+    var `stationary`: kotlin.Boolean?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<DiagnosticTrackPoint> {
+    override fun read(buf: ByteBuffer): DiagnosticTrackPoint {
+        return DiagnosticTrackPoint(
+            FfiConverterLong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DiagnosticTrackPoint) = (
+            FfiConverterLong.allocationSize(value.`timestampMs`) +
+            FfiConverterDouble.allocationSize(value.`lat`) +
+            FfiConverterDouble.allocationSize(value.`lon`) +
+            FfiConverterOptionalDouble.allocationSize(value.`accuracyM`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`stationary`)
+    )
+
+    override fun write(value: DiagnosticTrackPoint, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`timestampMs`, buf)
+            FfiConverterDouble.write(value.`lat`, buf)
+            FfiConverterDouble.write(value.`lon`, buf)
+            FfiConverterOptionalDouble.write(value.`accuracyM`, buf)
+            FfiConverterOptionalBoolean.write(value.`stationary`, buf)
+    }
+}
+
+
+
 data class LiveSnapshot (
     var `timestampMs`: kotlin.Long,
     var `lat`: kotlin.Double,
@@ -1599,6 +1652,38 @@ public object FfiConverterTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot>
             FfiConverterDouble.write(value.`speedMps`, buf)
             FfiConverterBoolean.write(value.`stationary`, buf)
             FfiConverterDouble.write(value.`accuracyM`, buf)
+    }
+}
+
+
+
+data class RecordingReplay (
+    var `rawTrack`: List<DiagnosticTrackPoint>,
+    var `fusedTrack`: List<DiagnosticTrackPoint>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRecordingReplay: FfiConverterRustBuffer<RecordingReplay> {
+    override fun read(buf: ByteBuffer): RecordingReplay {
+        return RecordingReplay(
+            FfiConverterSequenceTypeDiagnosticTrackPoint.read(buf),
+            FfiConverterSequenceTypeDiagnosticTrackPoint.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RecordingReplay) = (
+            FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`rawTrack`) +
+            FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`fusedTrack`)
+    )
+
+    override fun write(value: RecordingReplay, buf: ByteBuffer) {
+            FfiConverterSequenceTypeDiagnosticTrackPoint.write(value.`rawTrack`, buf)
+            FfiConverterSequenceTypeDiagnosticTrackPoint.write(value.`fusedTrack`, buf)
     }
 }
 
@@ -1940,6 +2025,38 @@ public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalBoolean: FfiConverterRustBuffer<kotlin.Boolean?> {
+    override fun read(buf: ByteBuffer): kotlin.Boolean? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterBoolean.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Boolean?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterBoolean.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Boolean?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterBoolean.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot?> {
     override fun read(buf: ByteBuffer): LiveSnapshot? {
         if (buf.get().toInt() == 0) {
@@ -2028,6 +2145,34 @@ public object FfiConverterSequenceTypeAirtimeWindow: FfiConverterRustBuffer<List
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeDiagnosticTrackPoint: FfiConverterRustBuffer<List<DiagnosticTrackPoint>> {
+    override fun read(buf: ByteBuffer): List<DiagnosticTrackPoint> {
+        val len = buf.getInt()
+        return List<DiagnosticTrackPoint>(len) {
+            FfiConverterTypeDiagnosticTrackPoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DiagnosticTrackPoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDiagnosticTrackPoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DiagnosticTrackPoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDiagnosticTrackPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<TrackPoint>> {
     override fun read(buf: ByteBuffer): List<TrackPoint> {
         val len = buf.getInt()
@@ -2072,6 +2217,16 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
             return FfiConverterTypeRideAnalysis.lift(
     uniffiRustCallWithError(FusionException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_analyze_recording(
+        FfiConverterString.lower(`path`),_status)
+}
+    )
+    }
+
+
+    @Throws(FusionException::class) fun `replayRecording`(`path`: kotlin.String): RecordingReplay {
+            return FfiConverterTypeRecordingReplay.lift(
+    uniffiRustCallWithError(FusionException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_replay_recording(
         FfiConverterString.lower(`path`),_status)
 }
     )

@@ -63,3 +63,35 @@ activity results are always recomputed canonically from the raw on-device file.
   during the calibration/field-test period because it is required to validate
   stationarity, preserve motion-onset evidence and tune device-specific noise.
   Adaptive stationary sampling is allowed later only with heartbeat plus pre-roll.
+
+## 2026-07-13 — Dhava design system wraps Material 3
+
+- Keep Material 3 Expressive as the behavior/accessibility foundation, but expose
+  Dhava product components and tokens from `:core:ui` for visually significant UI.
+  Feature screens may still use low-level Compose primitives and appropriate Material
+  controls, but ride controls, panels, metrics, headers, status pills, spacing, shapes
+  and palette must remain coherent through the shared layer.
+- The visual direction is a dark-first downhill field instrument: map-led recording,
+  vivid dirt-orange action/state accent, tabular live numerals, glove-sized controls,
+  restrained flat activity surfaces and complete explicit recording states.
+- Hide top-level navigation during preparation, active recording, pause/save workspaces
+  and pushed detail screens so chrome never competes with the ride or data-loss actions.
+- Do not adopt the experimental Compose Styles API solely for theming. Revisit only if
+  its stable API materially reduces custom-component maintenance.
+
+## 2026-07-13 — STILL is earth-relative; transport is classified after recording
+
+- `STILL` means stationary relative to the Earth, not merely low IMU variance. A
+  smoothly moving bus can have calm accelerometer/gyroscope data and must remain
+  `MOVING` when GPS displacement corroborates motion. While genuinely still, live
+  fusion holds a stable map position instead of drawing GPS-noise patterns.
+- Never stop recording or discard raw samples solely because a ride appears to be in
+  motorized transport. Shuttle/bus speeds can overlap riding, walking and trail
+  transitions, while raw data must remain available for recomputation. A later Rust
+  post-processing classifier may label and exclude motorized intervals from processed
+  activity statistics and segments, with uncertainty; Kotlin must not own this rule.
+- Until horizontal inertial prediction is validated against vibration-heavy downhill
+  recordings, live horizontal output stays GPS-bounded and does not integrate phone
+  acceleration. Vertical/orientation processing remains available. This is a safety
+  constraint against plausible-looking but unbounded live zigzags, not a permanent
+  abandonment of GPS+IMU fusion.

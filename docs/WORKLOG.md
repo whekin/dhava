@@ -304,3 +304,170 @@ elevation where present, escaped title, FileProvider URI) with a contract test. 
 now refuses when less than 250 MB is free and the service ignores duplicate Start
 during sensor preparation. Added a Rust regression proving a manual pause cannot
 bridge distance/moving time. Marked GPX complete in the recorder-first roadmap.
+
+## 2026-07-13 — Android agent tooling and project UI guardrails
+
+Installed Google's `android-cli`, `testing-setup`, and `edge-to-edge` skills globally
+for reuse across Android projects. Added the repository-local `dhava-ui-design` skill
+under `.agents/skills/` so Dhava-specific visual direction travels with the codebase.
+The skill codifies the recorder as a dark-first field instrument, map-first layout,
+glove-friendly controls, complete recording/save state coverage, shared Compose
+tokens, accessibility, and rendered device/screenshot verification. Deliberately did
+not adopt the experimental Compose Styles API (`compileSdk 37+`) or migrate to
+Navigation 3 merely to enable adaptive guidance. Skill metadata and structure were
+validated with the standard skill validator.
+
+## 2026-07-13 — full Android UI refactor onto the Dhava design system
+
+Reworked the complete current prototype rather than leaving a mixed transitional UI.
+`:core:ui` now owns the dirt-orange/earth palette, tabular telemetry typography,
+spacing, sizes, shapes and shared screen header, panel, metric, ride control, status,
+divider and empty-state components. Material 3 Expressive remains underneath for
+behavior and accessibility; the feature layer now speaks in Dhava product concepts.
+
+Record remains map-first but has a tighter idle instrument, explicit preparing
+readiness, prominent speed/state/time hierarchy, Material pause/stop/recenter icons
+and 88 dp ride controls. Bottom navigation disappears during preparing, recording,
+pause and save. Save became an opaque, IME-safe workspace with compact summary, bike
+picker and one dominant action. Activities is now a restrained flat archive rather
+than a generic card dashboard; Detail uses the map as the hero with a single overlaid
+stats instrument. Settings uses grouped field-kit surfaces. Added dark Compose
+previews for idle/preparing/recording, save, activities and detail, and set
+`adjustResize` for keyboard correctness.
+
+Verified `:core:recording:test` and `:app:assembleDebug`; installed the final APK on
+the OnePlus 9 Pro and a freshly wiped Pixel 9 Pro AVD. Exercised the emulator journey
+start → battery dialog → record → pause → guarded finish → save, plus Activities,
+Detail and Settings. Visually inspected light/dark renders, save with the IME open,
+and Record/Settings at system font scale 1.5. OnePlus rendered the new idle surface
+before its thermal protection locked the screen; final APK installation succeeded.
+
+Follow-up UX correction from the first review: normalized existing-bike and Add bike
+cards to the same 148×112 dp footprint. Removed the confirmation dialog from the
+paused Stop action; Stop now finalizes immediately into the Save workspace. Save has
+both app and system Back handling, which acknowledges `Finished` without deleting the
+raw file. The ride remains `RECORDED`, and Activities now exposes a working `Save`
+action that reopens the workspace through a dedicated route, so postponing metadata
+never creates a dead end. Verified the complete stop → save → back → Activities →
+reopen-save journey and visually compared Capra / Add bike side by side on the AVD.
+
+Second bike-picker pass replaced the equal but visually empty tiles: an existing bike
+is now a compact 196×92 dp content card with bike icon and name/type hierarchy, while
+Add bike is a lighter 136×92 dp outlined action. Equal height preserves rhythm without
+pretending the two items have equal semantic weight. Visually verified with Capra and
+Add bike together on the Save screen.
+
+Tightened the Save workspace after review: reduced stacked screen/section/panel
+padding, compacted the summary and bike cards, and kept the 56 dp primary action and
+all touch targets intact. The same content now fits as one denser field workspace
+without the previous oversized vertical gaps; visually verified on the AVD.
+
+## 2026-07-13 — GPS preparation timeout increased
+
+Extended the pre-recording GPS warm-up fallback from 5 to 10 seconds and synchronized
+the Preparing countdown. A clean fix (≤15 m accuracy plus ready IMU) may still begin
+early; the longer fallback prevents a cold ±70 m fix from anchoring a crooked start
+merely because five seconds elapsed.
+
+## 2026-07-13 — first full trail field dataset diagnosis
+
+Pulled all 30 recordings (105 MB compressed) plus the local activity index from the
+OnePlus after a mixed field session: riding and walking on trails, stairs, stationary
+periods and a final bus control. All gzip files passed integrity checks. The ten new
+long recordings contain up to ~496k IMU samples and ~989 GPS fixes each; rider-entered
+titles were used as ground truth during replay. Raw remains on the phone; the pulled
+copy was used only as a temporary local diagnostic dataset.
+
+Screen-off recording failure is confirmed as a lifecycle/process problem, not an
+empty writer. Entries titled `weird, didn't record`, `nothing recorded again` and
+`again did not recorded` contain 5.4–12.5 MB of valid raw data but are marked
+`recovered`, with 250–377 s GPS/sample gaps. `ApplicationExitInfo` shows OnePlus
+`o-kill` terminating the process at foreground-service importance 125 repeatedly
+(16:59, 17:21, 17:37, 18:30 and 18:44), despite battery whitelist and the partial wake
+lock. A sticky null-intent restart then crashes in `resumeAfterRestart` because Android
+16 forbids promoting a background-started location FGS with foreground-only location
+permission. Current idle UI memory is also high (~344 MB PSS / 444 MB RSS), dominated
+by MapLibre/native/graphics, while Dalvik is small; retaining the map when the screen
+is off is therefore a likely contributor worth fixing before blaming the writer.
+
+Replayed the exact live path through Rust `LiveFusion` with Android's 50 Hz IMU
+downsampling and compared each emitted snapshot with the simultaneous raw GPS fix.
+The severe trail zigzags are generated by fusion, not by raw GPS: `udzo 1` is 1.69 km
+raw versus 28.8 km fused, `1000 lines` 1.70 km versus 17.4 km, and `Stairs` 1.29 km
+versus 8.37 km. Raw steps are normally 11–16 m while fused steps reach 186–495 m.
+The implementation feeds full horizontal IMU acceleration into prediction despite
+comments describing it as a weak hint; after divergence, position re-seats every five
+rejections but runaway velocity is not re-seated and velocity updates can reject
+forever. This creates the repeating long out-and-back sawtooth.
+
+`STILL` correctly zeroes velocity but continues accepting noisy GPS position updates,
+so the live map draws small stationary patterns. Dedicated static captures measured
+15.1 m raw / 6.2 m fused accumulated path within a 5.3 m / 2.9 m radius even though
+98% of snapshots were classified still. The UI should hold/coalesce the displayed
+position while still; canonical analysis may retain the measurements with explicit
+uncertainty.
+
+The current offline airtime detector found ten short windows (156–364 ms) across four
+trail recordings, none on the stairs or bus control. The rider reported almost no
+intentional airtime, so these are calibration candidates (micro-unweighting versus
+false positives), not validated jumps.
+
+**Open, in priority order:** make screen-off recording survive without a forbidden
+sticky location-FGS restart (including releasing the map/native memory when UI is
+hidden and deciding whether background-location permission is justified); add a
+fusion fail-safe so live output can never run hundreds of meters away from fresh GPS
+and recover both position and velocity; freeze/coalesce live position during confirmed
+STILL; then add post-ride Activity Detail diagnostics for raw GPS / fusion / compare
+and time-scrubbing rather than crowding the ride screen.
+
+## 2026-07-13 — field failures fixed and raw/fusion diagnostics added
+
+Reworked Rust live fusion around the field dataset. `STILL` is now earth-relative:
+calm IMU may enter stationarity only when GPS does not show corroborated displacement,
+so a smooth bus leaves ZUPT even if Android's/our motion state initially looks still.
+Confirmed stationary state holds its GPS anchor rather than accepting every noisy fix.
+Leaving ZUPT re-seats position and velocity together; prolonged velocity-gate rejection
+also re-seats velocity. Long IMU gaps reset motion prediction, live horizontal inertial
+integration is temporarily disabled, and a GPS-accuracy envelope is the final fail-safe
+against an unbounded live track. Raw capture remains untouched.
+
+Replayed the four representative field recordings through the exact Android-rate Rust
+path. The former 5–17× distance inflation is gone: `udzo 1` is 1.687 km raw versus
+1.741 km fused, `1000 lines` 1.705/1.728 km, `Stairs` 1.291/1.333 km, and the bus
+control 0.701/0.704 km. Maximum fused-to-current-GPS deviation is 16–33 m rather than
+hundreds of metres. A static capture now accumulates about 3 m fused path versus 15 m
+raw GPS path while remaining still for 98% of snapshots. Added regressions for smooth
+vehicle motion, stationary jitter, vibration spikes and velocity-filter recovery.
+
+Hardened screen-off recording. The foreground service now handles a denied location
+FGS promotion without a crash/restart loop and uses sticky restart only while an
+active recording is recoverable. Recorder startup explains optional background
+location access; on Android 11+ it opens the app settings because the system permission
+dialog cannot grant `Allow all the time` directly, while `Record anyway` remains
+available. The live MapLibre composition is removed whenever the activity is not
+`STARTED`, including screen-off and save flow. On the OnePlus this reduced app memory
+from roughly 302 MB to 201 MB PSS (EGL allocation removed), kept the same process and
+foreground service alive, and the raw file continued growing after an immediate
+screen-off during GPS preparation. A Pixel forced-kill test restarted into the same
+file (4.0 KB to 9.2 KB) without an AndroidRuntime crash.
+
+Added Activity Detail diagnostics backed entirely by `fusion-core`: Rust replays a raw
+recording in timestamp order and returns raw GPS and live-fused tracks. The map now has
+`GPS`, `Fusion` and `Compare` modes; compare draws neutral raw GPS beneath the primary
+fused line. This deliberately lives post-ride rather than adding recorder-map clutter.
+Time scrubbing and a dedicated motorized-transport classifier remain follow-ups.
+
+Verification: 37 fusion-core unit tests plus the real forest fixture pass; the complete
+fusion workspace passes strict clippy; Android recording tests and debug assembly pass.
+Android arm64-v8a and x86_64 native libraries and generated UniFFI bindings were rebuilt
+from the verified Rust source. The final APK was installed on the physical OnePlus;
+the background-location education dialog was then exercised and visually verified on
+that device. Android reports foreground precise location granted and background
+location still denied, as expected until the rider chooses `Open settings` and changes
+Location to `Allow all the time`.
+
+**Next field check:** grant background location on the OnePlus if reliable OEM-kill
+recovery is desired, then test immediate screen-off, rough trail, a true stationary
+stop and a short bus/shuttle control. Transport must stay recorded as raw data; a later
+Rust analysis stage will label/exclude it instead of treating it as `STILL` or silently
+dropping it.

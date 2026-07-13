@@ -11,8 +11,8 @@ import com.dhava.core.recording.RecordingRepository
 import com.dhava.core.recording.RecordingService
 import com.dhava.core.recording.RecordingState
 import com.dhava.core.recording.UploadState
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
@@ -40,14 +40,6 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     val uploads: StateFlow<Map<String, UploadState>> = repository.uploads
     val bikes: StateFlow<List<Bike>> = repository.bikes
     val lastUsedBikeId: StateFlow<String?> = repository.lastUsedBikeId
-
-    /**
-     * Recording id whose save sheet was reopened from the list ("Finish
-     * saving" on an unsaved entry). The just-stopped recording opens the
-     * sheet through [RecordingState.Finished] instead.
-     */
-    private val _reopenedSaveId = MutableStateFlow<String?>(null)
-    val reopenedSaveId: StateFlow<String?> = _reopenedSaveId.asStateFlow()
 
     private val _startError = MutableStateFlow<String?>(null)
     val startError: StateFlow<String?> = _startError.asStateFlow()
@@ -84,10 +76,6 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
 
     fun resumeRecording() = RecordingService.resume(getApplication())
 
-    fun openSave(id: String) {
-        _reopenedSaveId.value = id
-    }
-
     fun save(id: String, title: String, description: String, bike: Bike?) {
         repository.saveActivity(id, title, description, bike)
         closeSave()
@@ -102,8 +90,10 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
 
     fun retryUpload(id: String) = repository.retryUpload(id)
 
+    /** Leave the save workspace without deleting the finalized raw recording. */
+    fun dismissSave() = closeSave()
+
     private fun closeSave() {
-        _reopenedSaveId.value = null
         repository.acknowledgeFinished()
     }
 }

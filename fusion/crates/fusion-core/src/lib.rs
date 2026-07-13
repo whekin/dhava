@@ -19,8 +19,10 @@ pub mod linalg;
 pub mod live;
 pub mod orientation;
 pub mod recording;
+pub mod replay;
 
 pub use live::{LiveFusion, LiveSnapshot};
+pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
 
 pub use analysis::{
     ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,

@@ -1,8 +1,10 @@
 package com.dhava.core.fusion
 
 import com.dhava.fusion.RideAnalysis
+import com.dhava.fusion.RecordingReplay
 import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
+import com.dhava.fusion.replayRecording as ffiReplayRecording
 
 /**
  * Thin facade over the Rust `fusion-core` crate (UniFFI bindings in
@@ -32,4 +34,13 @@ object FusionCore {
      *   or contains no analyzable samples.
      */
     fun analyze(path: String): RideAnalysis = ffiAnalyzeRecording(path)
+
+    /**
+     * Replays a raw recording through the exact live Rust pipeline and
+     * returns raw/fused tracks for post-ride diagnostics.
+     *
+     * Blocking and intentionally separate from canonical [analyze]: this is
+     * an engineering comparison surface, never the source of saved stats.
+     */
+    fun replay(path: String): RecordingReplay = ffiReplayRecording(path)
 }

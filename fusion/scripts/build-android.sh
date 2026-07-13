@@ -45,6 +45,10 @@ cargo run -q -p uniffi-bindgen -- generate \
     --language kotlin \
     --out-dir "$KOTLIN_OUT_DIR"
 
+# uniffi-bindgen emits trailing spaces in generated Kotlin. Keep committed
+# bindings diff-clean so `git diff --check` remains useful after every build.
+find "$KOTLIN_OUT_DIR" -name '*.kt' -exec perl -pi -e 's/[ \t]+$//' {} +
+
 echo "==> Done"
 find "$JNILIBS_DIR" -name '*.so' -exec ls -lh {} +
 find "$KOTLIN_OUT_DIR" -name '*.kt' -path '*com/dhava/fusion*' -exec ls -lh {} +

@@ -15,6 +15,10 @@
           user to exempt Dhava from aggressive battery managers (same incident)
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Optional but strongly recommended: lets Android restart the location
+         foreground service after an OEM process kill while the screen/app is
+         backgrounded. A normal user-started ride still works without it. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
@@ -49,6 +53,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Dhava">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

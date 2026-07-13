@@ -1,5 +1,6 @@
 package com.dhava.feature.record
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,21 +12,25 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -33,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,11 +46,55 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.recording.Bike
 import com.dhava.core.recording.BikeType
+import com.dhava.core.ui.DhavaMetric
+import com.dhava.core.ui.DhavaPanel
+import com.dhava.core.ui.DhavaScreenHeader
+import com.dhava.core.ui.DhavaSectionLabel
+import com.dhava.core.ui.DhavaSizes
+import com.dhava.core.ui.DhavaSpacing
+import com.dhava.core.ui.DhavaTheme
 import java.time.Instant
 import java.time.ZoneId
+
+@Composable
+fun SaveRecordingScreen(
+    recordingId: String,
+    onFinished: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: RecordViewModel = viewModel(),
+) {
+    val recordings by viewModel.recordings.collectAsState()
+    val bikes by viewModel.bikes.collectAsState()
+    val lastUsedBikeId by viewModel.lastUsedBikeId.collectAsState()
+    val recording = recordings.firstOrNull { it.id == recordingId }
+
+    if (recording != null) {
+        SaveContent(
+            recordingId = recording.id,
+            startedAtMs = recording.startedAtMs,
+            durationMs = recording.endedAtMs - recording.startedAtMs,
+            bikes = bikes,
+            lastUsedBikeId = lastUsedBikeId,
+            onAddBike = viewModel::addBike,
+            onSave = { title, description, bike ->
+                viewModel.save(recording.id, title, description, bike)
+                onFinished()
+            },
+            onDiscard = {
+                viewModel.discard(recording.id)
+                onFinished()
+            },
+            onBack = onBack,
+            modifier = modifier,
+        )
+    }
+}
 
 /**
  * Save sheet shown after Stop (and reopened from the list for unsaved
@@ -63,7 +113,10 @@ internal fun SaveContent(
     onAddBike: (String, BikeType) -> Bike,
     onSave: (title: String, description: String, bike: Bike?) -> Unit,
     onDiscard: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    BackHandler(onBack = onBack)
     // Field state survives configuration changes and process death; keyed on
     // the recording id so a different recording never inherits stale input.
     var title by rememberSaveable(recordingId) { mutableStateOf(defaultTitle(startedAtMs)) }
@@ -77,39 +130,46 @@ internal fun SaveContent(
     var confirmDiscard by remember { mutableStateOf(false) }
 
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
       Column(
           modifier = Modifier
               .fillMaxSize()
-              .verticalScroll(rememberScrollState())
               .imePadding()
-              .navigationBarsPadding()
-              .padding(horizontal = 24.dp, vertical = 24.dp),
+              .verticalScroll(rememberScrollState())
+              .padding(horizontal = DhavaSpacing.large, vertical = DhavaSpacing.large),
       ) {
-        Text("RIDE COMPLETE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-        Text("Keep the good one.", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.height(18.dp))
+        Row(verticalAlignment = Alignment.Top) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            DhavaScreenHeader(
+                eyebrow = "Ride complete",
+                title = "Save the good one",
+                description = "The raw recording stays on this phone.",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(DhavaSpacing.large))
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        DhavaPanel(
             modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
           Row(
-              Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
+              Modifier.fillMaxWidth().padding(DhavaSpacing.medium),
+              horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
           ) {
-            RideSummaryMetric(formatElapsed(durationMs), "DURATION")
-            RideSummaryMetric(formatStartTime(startedAtMs), "STARTED")
-            RideSummaryMetric("LOCAL", "STORAGE")
+            DhavaMetric(formatElapsed(durationMs), "Duration", Modifier.weight(1f))
+            DhavaMetric(formatStartClock(startedAtMs), "Started", Modifier.weight(1f))
+            DhavaMetric("Local", "Storage", Modifier.weight(0.7f))
           }
         }
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(DhavaSpacing.large))
 
-        Text("DETAILS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(modifier = Modifier.height(10.dp))
+        DhavaSectionLabel("Details")
+        Spacer(modifier = Modifier.height(DhavaSpacing.small))
 
         OutlinedTextField(
             value = title,
@@ -118,7 +178,7 @@ internal fun SaveContent(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(DhavaSpacing.small))
         OutlinedTextField(
             value = description,
             onValueChange = { description = it },
@@ -127,30 +187,23 @@ internal fun SaveContent(
             maxLines = 4,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(DhavaSpacing.large))
 
-        Text(
-            text = "BIKE",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-        )
+        DhavaSectionLabel("Bike", Modifier.padding(bottom = DhavaSpacing.small))
         BikePicker(
             bikes = bikes,
             selectedBikeId = selectedBikeId,
             onSelect = { pickedBikeId = it },
             onAddBike = { showAddBike = true },
         )
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(DhavaSpacing.large))
 
         Button(
             onClick = {
                 onSave(title, description, bikes.firstOrNull { it.id == selectedBikeId })
             },
             enabled = title.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(DhavaSizes.primaryActionHeight),
         ) {
             Text("Save activity", style = MaterialTheme.typography.titleMedium)
         }
@@ -158,7 +211,7 @@ internal fun SaveContent(
             Text("Discard recording", color = MaterialTheme.colorScheme.error)
         }
         Text(
-            "The raw recording remains on this phone.",
+            "Nothing is uploaded while Offline mode is on.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -197,14 +250,6 @@ internal fun SaveContent(
     }
 }
 
-@Composable
-private fun RideSummaryMetric(value: String, label: String) {
-    Column(horizontalAlignment = Alignment.Start) {
-        Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
 /**
  * Horizontally scrollable selectable bike cards (visual, not a dropdown —
  * per docs/VISION.md "Look & feel"; images/3D later), plus an "Add bike"
@@ -219,7 +264,7 @@ private fun BikePicker(
 ) {
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
     ) {
         items(bikes, key = { it.id }) { bike ->
             BikeCard(
@@ -231,26 +276,30 @@ private fun BikePicker(
         item(key = "add-bike") {
             Card(
                 onClick = onAddBike,
+                modifier = Modifier.size(width = 128.dp, height = 80.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    containerColor = MaterialTheme.colorScheme.surface,
                 ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Column(
+                Row(
                     modifier = Modifier
-                        .width(120.dp)
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .fillMaxSize()
+                        .padding(horizontal = DhavaSpacing.medium),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.width(DhavaSpacing.small))
                     Text(
                         text = "Add bike",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -266,6 +315,7 @@ private fun BikeCard(
 ) {
     Card(
         onClick = onClick,
+        modifier = Modifier.size(width = 184.dp, height = 80.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.primaryContainer
@@ -279,26 +329,60 @@ private fun BikeCard(
             null
         },
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = bike.name,
-                style = MaterialTheme.typography.titleMedium,
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = DhavaSpacing.medium),
+            horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = androidx.compose.foundation.shape.CircleShape,
                 color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    MaterialTheme.colorScheme.primary
                 } else {
-                    MaterialTheme.colorScheme.onSurface
+                    MaterialTheme.colorScheme.surfaceContainerHighest
                 },
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = bike.type.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = if (selected) {
+                    MaterialTheme.colorScheme.onPrimary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PedalBike,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = bike.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                )
+                Text(
+                    text = bike.type.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -360,5 +444,23 @@ internal fun defaultTitle(startedAtMs: Long): String {
         in 12..16 -> "Afternoon ride"
         in 17..21 -> "Evening ride"
         else -> "Night ride"
+    }
+}
+
+@Preview(name = "Save ride", widthDp = 412, heightDp = 820)
+@Composable
+private fun SaveContentPreview() {
+    DhavaTheme(darkTheme = true) {
+        SaveContent(
+            recordingId = "preview",
+            startedAtMs = 1_767_000_000_000,
+            durationMs = 3_420_000,
+            bikes = listOf(Bike("enduro", "Enduro", BikeType.FULL_SUS)),
+            lastUsedBikeId = "enduro",
+            onAddBike = { name, type -> Bike("new", name, type) },
+            onSave = { _, _, _ -> },
+            onDiscard = {},
+            onBack = {},
+        )
     }
 }

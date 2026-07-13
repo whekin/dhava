@@ -12,8 +12,8 @@
 //!   the gravity direction — is what matters. The z (vertical) component of
 //!   the world-frame linear acceleration is invariant under yaw error, so
 //!   the EKF altitude channel gets a clean signal; horizontal components
-//!   point in an arbitrary heading and are only used lightly (see
-//!   `fusion::HORIZ_ACCEL_GAIN`).
+//!   point in an arbitrary heading and are currently disabled for live
+//!   position prediction after real trail vibration caused severe drift.
 //! - No magnetometer aiding for now: forest + bike frame + motor-less but
 //!   magnet-rich environment makes phone mag data untrustworthy, and we do
 //!   not need yaw.

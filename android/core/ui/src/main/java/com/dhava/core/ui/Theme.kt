@@ -41,6 +41,7 @@ fun DhavaTheme(
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         motionScheme = MotionScheme.expressive(),
+        shapes = DhavaShapes,
         typography = DhavaTypography,
         content = content,
     )

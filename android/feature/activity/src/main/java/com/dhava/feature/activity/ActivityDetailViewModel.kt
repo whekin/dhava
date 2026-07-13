@@ -14,6 +14,7 @@ import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordLine
 import com.dhava.core.recording.RecordingRepository
 import com.dhava.fusion.RideAnalysis
+import com.dhava.fusion.RecordingReplay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,6 +36,12 @@ sealed interface TrackState {
     data class Loaded(
         val points: List<RecordLine.Gps>,
     ) : TrackState
+}
+
+sealed interface DiagnosticTrackState {
+    data object Loading : DiagnosticTrackState
+    data object Unavailable : DiagnosticTrackState
+    data class Loaded(val replay: RecordingReplay) : DiagnosticTrackState
 }
 
 /**
@@ -63,6 +70,9 @@ class ActivityDetailViewModel(
     private val _analysis = MutableStateFlow<RideAnalysis?>(null)
     val analysis: StateFlow<RideAnalysis?> = _analysis.asStateFlow()
 
+    private val _diagnostics = MutableStateFlow<DiagnosticTrackState>(DiagnosticTrackState.Loading)
+    val diagnostics: StateFlow<DiagnosticTrackState> = _diagnostics.asStateFlow()
+
     fun exportGpx(onReady: (File) -> Unit) {
         val points = (_track.value as? TrackState.Loaded)?.points ?: return
         val title = recording.value?.title ?: "Dhava ride"
@@ -85,13 +95,25 @@ class ActivityDetailViewModel(
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
+            val path = repository.recordingFile(recordingId).absolutePath
             _analysis.value = try {
-                FusionCore.analyze(repository.recordingFile(recordingId).absolutePath)
+                FusionCore.analyze(path)
             } catch (e: Exception) {
                 // Unanalyzable file (missing, empty, corrupt beyond repair) —
                 // the screen simply keeps placeholder tiles.
                 Log.w("ActivityDetail", "fusion-core analysis failed for $recordingId", e)
                 null
+            }
+            _diagnostics.value = try {
+                val replay = FusionCore.replay(path)
+                if (replay.rawTrack.isEmpty() && replay.fusedTrack.isEmpty()) {
+                    DiagnosticTrackState.Unavailable
+                } else {
+                    DiagnosticTrackState.Loaded(replay)
+                }
+            } catch (e: Exception) {
+                Log.w("ActivityDetail", "live replay failed for $recordingId", e)
+                DiagnosticTrackState.Unavailable
             }
         }
     }
