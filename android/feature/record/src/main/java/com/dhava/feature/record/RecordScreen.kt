@@ -90,6 +90,7 @@ fun RecordScreen(
     var backgroundPromptDeclinedThisRun by remember { mutableStateOf(false) }
     var mapFollowing by remember { mutableStateOf(true) }
     var recenterRequest by remember { mutableIntStateOf(0) }
+    var previewAccuracyM by remember { mutableStateOf<Float?>(null) }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var mapVisible by remember {
@@ -177,12 +178,20 @@ fun RecordScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         if (mapVisible && saveTarget == null) {
+            val recordingState = state as? RecordingState.Recording
             LiveTrackMap(
-                points = (state as? RecordingState.Recording)?.liveTrack.orEmpty(),
-                trackColor = MaterialTheme.colorScheme.primary,
+                points = recordingState?.liveTrack.orEmpty(),
+                positionAccuracyM = recordingState?.lastAccuracyM,
+                previewLocationEnabled = state is RecordingState.Idle,
+                cameraBottomPadding = when (state) {
+                    is RecordingState.Recording -> 300.dp
+                    is RecordingState.Preparing -> 260.dp
+                    else -> 190.dp
+                },
                 following = mapFollowing,
                 recenterRequest = recenterRequest,
                 onUserMovedMap = { mapFollowing = false },
+                onPreviewAccuracyChanged = { previewAccuracyM = it },
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -230,6 +239,7 @@ fun RecordScreen(
                 onBack = viewModel::dismissSave,
             )
             else -> IdleContent(
+                gpsAccuracyM = previewAccuracyM,
                 errorMessage = startError ?: if (permissionDenied) {
                     "Precise location is required to record a ride."
                 } else {
@@ -273,7 +283,7 @@ fun RecordScreen(
 private data class SaveTarget(val id: String, val startedAtMs: Long, val durationMs: Long)
 
 @Composable
-private fun IdleContent(errorMessage: String?, onStart: () -> Unit) {
+private fun IdleContent(gpsAccuracyM: Float?, errorMessage: String?, onStart: () -> Unit) {
     val haptics = LocalHapticFeedback.current
     Box(Modifier.fillMaxSize()) {
         DhavaPanel(
@@ -294,9 +304,17 @@ private fun IdleContent(errorMessage: String?, onStart: () -> Unit) {
                     Text("Ready to ride", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(DhavaSpacing.small))
                     Text(
-                        "Sensors warm up before recording starts.",
+                        when {
+                            gpsAccuracyM == null -> "GPS warming up while this screen is open."
+                            gpsAccuracyM <= 15f -> "GPS ready · ±${gpsAccuracyM.toInt()} m"
+                            else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (gpsAccuracyM != null && gpsAccuracyM <= 15f) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
                 DhavaRideControl(
@@ -559,7 +577,7 @@ private fun BackgroundLocationDialog(
 private fun IdleContentPreview() {
     DhavaTheme(darkTheme = true) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            IdleContent(errorMessage = null, onStart = {})
+            IdleContent(gpsAccuracyM = 6f, errorMessage = null, onStart = {})
         }
     }
 }

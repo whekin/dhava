@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.feature.record"
+    namespace = "com.dhava.core.map"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
@@ -22,15 +22,8 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:map"))
     implementation(project(":core:ui"))
-    implementation(project(":core:recording"))
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.maplibre.android)
-    implementation(libs.play.services.location)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    api(libs.maplibre.android)
 }
 
 kotlin {

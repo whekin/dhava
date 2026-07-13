@@ -1131,6 +1131,29 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 /**
  * @suppress
  */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterLong: FfiConverter<Long, Long> {
     override fun lift(value: Long): Long {
         return value
@@ -1566,7 +1589,12 @@ data class DiagnosticTrackPoint (
     var `lat`: kotlin.Double,
     var `lon`: kotlin.Double,
     var `accuracyM`: kotlin.Double?,
-    var `stationary`: kotlin.Boolean?
+    var `stationary`: kotlin.Boolean?,
+    /**
+     * Continuous recording section. Increments at each manual pause so
+     * renderers never draw a line across a paused interval.
+     */
+    var `sectionId`: kotlin.Int
 ) {
 
     companion object
@@ -1583,6 +1611,7 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterDouble.read(buf),
             FfiConverterOptionalDouble.read(buf),
             FfiConverterOptionalBoolean.read(buf),
+            FfiConverterInt.read(buf),
         )
     }
 
@@ -1591,7 +1620,8 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterDouble.allocationSize(value.`lat`) +
             FfiConverterDouble.allocationSize(value.`lon`) +
             FfiConverterOptionalDouble.allocationSize(value.`accuracyM`) +
-            FfiConverterOptionalBoolean.allocationSize(value.`stationary`)
+            FfiConverterOptionalBoolean.allocationSize(value.`stationary`) +
+            FfiConverterInt.allocationSize(value.`sectionId`)
     )
 
     override fun write(value: DiagnosticTrackPoint, buf: ByteBuffer) {
@@ -1600,6 +1630,7 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterDouble.write(value.`lon`, buf)
             FfiConverterOptionalDouble.write(value.`accuracyM`, buf)
             FfiConverterOptionalBoolean.write(value.`stationary`, buf)
+            FfiConverterInt.write(value.`sectionId`, buf)
     }
 }
 

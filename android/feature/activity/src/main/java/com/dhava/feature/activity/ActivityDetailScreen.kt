@@ -106,9 +106,15 @@ private fun ActivityDetailContent(
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
-    val rawPoints = replay?.rawTrack?.map { MapTrackPoint(it.lat, it.lon) }
-        ?: (track as? TrackState.Loaded)?.points?.map { MapTrackPoint(it.lat, it.lon) }.orEmpty()
-    val fusedPoints = replay?.fusedTrack?.map { MapTrackPoint(it.lat, it.lon) }.orEmpty()
+    val rawPoints = replay?.rawTrack?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
+        ?: (track as? TrackState.Loaded)?.points?.mapIndexed { index, point ->
+            // Without Rust replay the pause boundaries are unknown. Keep each
+            // fix isolated rather than drawing a potentially false bridge.
+            MapTrackPoint(point.lat, point.lon, index)
+        }.orEmpty()
+    val fusedPoints = replay?.fusedTrack
+        ?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
+        .orEmpty()
 
     Box(modifier = modifier.fillMaxSize()) {
         when (track) {

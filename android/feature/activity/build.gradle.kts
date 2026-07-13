@@ -22,6 +22,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:map"))
     implementation(project(":core:ui"))
     implementation(project(":core:recording"))
     implementation(project(":core:fusion"))
@@ -32,6 +33,7 @@ dependencies {
     implementation(libs.maplibre.android)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation(libs.junit)
 }
 
 kotlin {

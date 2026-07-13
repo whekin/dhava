@@ -471,3 +471,71 @@ recovery is desired, then test immediate screen-off, rough trail, a true station
 stop and a short bus/shuttle control. Transport must stay recorded as raw data; a later
 Rust analysis stage will label/exclude it instead of treating it as `STILL` or silently
 dropping it.
+
+## 2026-07-14 — themed live map and pre-start GPS warm-up
+
+Restyled the recorder map as part of the Dhava field instrument rather than leaving the
+generic OpenFreeMap Liberty palette untouched. Land, vegetation, water, buildings,
+roads, trails, boundaries and labels are now mapped into coordinated dark/light Dhava
+colors. The live track uses a dark rounded casing beneath a 5.5 px primary-orange line.
+The rider position is a two-ring primary marker with a real geographic accuracy area,
+and camera padding keeps it centered in the unobstructed map above the changing idle,
+preparing and recording panels. The interactive MapLibre attribution control moves
+above those overlays, while the decorative SDK wordmark is hidden so map data and
+license credits remain accessible without adding visual clutter.
+
+Replaced the map SDK's implicit location engine and one-shot cached lookup with an
+explicit high-accuracy preview request (1 s target, 500 ms minimum). It runs only while
+the Record screen is visible and state is `Idle`, uses a recent cached fix for immediate
+orientation, then continuously refines the position. It is removed on screen-off/app
+departure and as soon as the recording service enters Preparing, preventing duplicate
+GPS subscriptions. The idle panel now reports `GPS warming`, `GPS refining · ±N m` or
+`GPS ready · ±N m` so the rider can see pre-start readiness.
+
+Verified light and dark rendering on the AVD and dark rendering on the physical
+OnePlus. `dumpsys location` showed an active `HIGH_ACCURACY` request at 1 s attributed
+to Dhava while idle, and `ProviderRequest[OFF]` after leaving the screen. On the OnePlus
+the visible preview refined from ±100 m through ±24 m to ±7–9 m without starting a
+recording. MapLibre loaded the customized vector style without runtime property errors;
+recording tests and the final debug assembly pass. The final APK was installed and
+opened on the OnePlus.
+
+Moved the shared base-map palette, style URI and MapLibre chrome policy into the new
+`:core:map` module and applied them to both map surfaces: the live recorder and
+Activity Detail diagnostics. Activity Detail now gives the fused path the same rounded
+dark casing used by the live track, reserves camera space for its bottom statistics
+card, hides the decorative MapLibre wordmark and keeps the interactive attribution
+control tucked into the lower-left map corner above the card. The recorder uses the
+same explicit 12 dp edge placement above its ride panel rather than retaining
+MapLibre's large wordmark-sized left margin. Rebuilt, installed and visually verified
+both screens on the OnePlus using the saved bus recording; no user data was modified.
+
+Improved dense-city diagnostics after reviewing the bus track. Raw GPS is now drawn as
+a thin neutral line plus a small outlined dot for every GPS fix in `GPS` and `Compare`;
+the dots are absent from `Fusion`. In compare mode the raw line stays beneath the solid
+orange fused path, while the individual GPS fixes render above fusion so deviations and
+input sampling remain visible. The final point radius is 3.25 px with a 1 px casing.
+Expanded shared label theming from a layer-name subset to every MapLibre symbol layer
+and increased the crisp contrasting halo, fixing road and POI text that previously
+blended into themed city buildings. Verified GPS, Fusion and Compare on the physical
+OnePlus, including the final point size and layer ordering; recording tests and the
+debug build pass, and the updated APK is installed.
+
+Added semantic start/finish markers and pause-safe diagnostic geometry. Activity Detail
+now draws a green play badge at the first visible fix and a primary-orange checkered
+flag at the last, both with dark map casing so their meaning survives forest and city
+backgrounds without relying on color alone. Marker coordinates follow the selected
+mode: raw endpoints in `GPS`, fused endpoints in `Fusion` and `Compare` when available.
+
+Extended Rust `DiagnosticTrackPoint` with `section_id`, assigned by chronological raw
+`pause` events. Both raw and exact-live-replayed fusion points cross UniFFI with the
+same section boundary, and Android renders each section as a separate MultiLineString;
+individual GPS fixes remain visible across the gap. If Rust replay is unavailable,
+the map deliberately shows isolated GPS fixes instead of guessing a continuous line.
+Regenerated the arm64-v8a/x86_64 native libraries and Kotlin bindings. Added a Rust
+pause/resume regression with a large coordinate jump and an Android renderer section
+test. All 38 fusion-core tests, the real forest fixture, workspace strict clippy,
+Activity map test, recording tests and debug assembly pass. Visually verified the
+markers on the real paused `udzo 1` recording on the OnePlus; its 3.8 s pause occurred
+while stationary, so the real geographic gap is under one metre. The final APK is
+installed on the device.

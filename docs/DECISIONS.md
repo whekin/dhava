@@ -95,3 +95,37 @@ activity results are always recomputed canonically from the raw on-device file.
   acceleration. Vertical/orientation processing remains available. This is a safety
   constraint against plausible-looking but unbounded live zigzags, not a permanent
   abandonment of GPS+IMU fusion.
+
+## 2026-07-14 — Recorder screen pre-warms foreground GPS
+
+- While the visible Record screen is idle and precise-location permission exists,
+  request 1 Hz high-accuracy location updates. This both centers the working map and
+  warms GNSS before Start, reducing time to a clean recording anchor.
+- The preview request is strictly lifecycle- and state-scoped: remove it on screen-off,
+  tab/app departure, and immediately when Preparing begins. The foreground recording
+  service is the sole location owner during preparation and recording; the map must not
+  run a second hidden location engine.
+
+## 2026-07-14 — Map presentation is shared across feature screens
+
+- Base-map colors, the vector-style URI and MapLibre chrome configuration live in
+  `:core:map`. Recorder and Activity Detail may own their feature-specific overlays,
+  cameras and controls, but must consume the shared presentation layer so the two map
+  surfaces do not drift visually.
+- Hide the decorative MapLibre wordmark on both surfaces. Keep the interactive
+  attribution control enabled, legible and tucked into the lower-left map corner above
+  feature overlays so OpenStreetMap and map-style credits remain accessible.
+- In Activity Detail, render raw GPS as a thin neutral line with one visible point per
+  fix in `GPS` and `Compare`. In Compare, layer the raw line below the continuous
+  primary-orange fusion path, then layer raw GPS points above fusion so each actual
+  measurement remains inspectable. Apply shared high-contrast text and halo colors to
+  every base-map symbol layer because upstream style layer names are not a reliable
+  label classifier.
+- Manual pause boundaries are part of the Rust diagnostic replay contract via
+  `DiagnosticTrackPoint.section_id`. Android may group points into map geometries by
+  that identifier but must never infer pause timing from timestamp gaps. Every section
+  is a separate line, while GPS points remain visible; if replay is unavailable, prefer
+  isolated fixes over a false bridge.
+- Completed tracks mark start with a green play glyph and finish with a primary-orange
+  checkered flag, both inside dark-cased circular badges. Use raw endpoints in GPS mode
+  and fused endpoints in Fusion/Compare when available.
