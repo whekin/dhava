@@ -28,14 +28,9 @@ const GPS_SPEED_CORROBORATION_MPS: f64 = 1.5;
 const GPS_MOTION_HOLD_MS: i64 = 2_500;
 /// No trustworthy yaw/roughness model exists yet. Full horizontal IMU input
 /// inflated three field tracks by 6-17x and produced 186-495 m sawteeth.
-/// Keep the vertical inertial channel, but make horizontal live position a
-/// GPS-smoothed estimate until a bounded bike-frame model is validated.
+/// Keep the vertical inertial channel, but make each accepted GPS fix the
+/// authoritative horizontal output until a bounded segment model is validated.
 const HORIZONTAL_ACCEL_GAIN: f64 = 0.0;
-/// A fused output may smooth within the GPS uncertainty region, never escape
-/// hundreds of meters from a fresh fix.
-const MIN_LIVE_GPS_ENVELOPE_M: f64 = 6.0;
-const LIVE_GPS_ENVELOPE_SIGMA: f64 = 1.5;
-
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LiveSnapshot {
     pub timestamp_ms: i64,
@@ -350,18 +345,19 @@ impl LiveFusion {
                 // more fixes.
                 ekf.reseat_horizontal(en, measured_velocity, accuracy);
             } else {
-                ekf.update_gps_position(en, accuracy);
+                // Off a known segment there is no external horizontal truth
+                // that can justify bending a good GPS polyline. The EKF's
+                // velocity prediction can cut a turn by most of the reported
+                // accuracy radius before the normal update catches up. Keep
+                // dynamics in velocity/vertical state, but make every accepted
+                // moving GPS fix authoritative for rendered XY.
+                if measured_velocity.is_some() {
+                    ekf.reseat_horizontal(en, measured_velocity, accuracy);
+                } else {
+                    ekf.reseat_horizontal_position(en, accuracy);
+                }
                 if let (Some(alt), Some(anchor_alt)) = (altitude_m, anchor.2) {
                     ekf.update_gps_altitude(alt - anchor_alt, accuracy);
-                }
-                if let Some(vel) = measured_velocity {
-                    ekf.update_gps_velocity(vel);
-                }
-                let p = ekf.position();
-                let offset_m = (p[0] - en[0]).hypot(p[1] - en[1]);
-                let envelope_m = (accuracy * LIVE_GPS_ENVELOPE_SIGMA).max(MIN_LIVE_GPS_ENVELOPE_M);
-                if offset_m > envelope_m {
-                    ekf.reseat_horizontal(en, measured_velocity, accuracy);
                 }
             }
         }
@@ -807,7 +803,52 @@ mod tests {
                 )
                 .unwrap();
             let offset = project(snapshot.lat, snapshot.lon, 41.7, lon);
-            assert!(offset[0].hypot(offset[1]) <= MIN_LIVE_GPS_ENVELOPE_M);
+            assert!(offset[0].hypot(offset[1]) < 0.01);
         }
+    }
+
+    #[test]
+    fn accepted_moving_fix_is_authoritative_through_a_sharp_turn() {
+        let fusion = LiveFusion::new();
+        fusion
+            .push_gps(0, 41.7, 44.8, None, Some(10.0), Some(10.0), Some(0.0))
+            .unwrap();
+
+        for step in 1..=50 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        let north_lat = 41.7 + (10.0 / EARTH_RADIUS_M).to_degrees();
+        fusion
+            .push_gps(
+                1_000,
+                north_lat,
+                44.8,
+                None,
+                Some(10.0),
+                Some(10.0),
+                Some(0.0),
+            )
+            .unwrap();
+
+        for step in 51..=100 {
+            fusion.push_imu(step * 20, vec![0.0, 0.0, GRAVITY], vec![0.0, 0.0, 0.5]);
+        }
+        let east_lon = 44.8 + (10.0 / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees();
+        let turned = fusion
+            .push_gps(
+                2_000,
+                north_lat,
+                east_lon,
+                None,
+                Some(10.0),
+                Some(10.0),
+                Some(90.0),
+            )
+            .unwrap();
+        let offset = project(turned.lat, turned.lon, north_lat, east_lon);
+        assert!(
+            offset[0].hypot(offset[1]) < 0.01,
+            "turn was cut by {offset:?}"
+        );
     }
 }

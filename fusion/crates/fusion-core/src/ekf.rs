@@ -254,6 +254,15 @@ impl Ekf {
         self.vel_rejects = 0;
     }
 
+    /// Makes the current accepted GPS fix authoritative for horizontal
+    /// position while preserving velocity when the fix has no usable
+    /// speed/bearing measurement.
+    pub fn reseat_horizontal_position(&mut self, pos_en: [f64; 2], h_acc_m: f64) {
+        let pos_sigma = h_acc_m.max(GPS_H_ACC_FLOOR_M);
+        self.reseat([0, 1], pos_en, pos_sigma * pos_sigma * 4.0);
+        self.pos_rejects = 0;
+    }
+
     /// Clears horizontal velocity after a pause or sensor-clock gap while
     /// leaving position untouched. The next accepted GPS fix will re-seat the
     /// complete horizontal state; the generous variance admits real motion if

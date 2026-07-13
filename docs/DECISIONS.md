@@ -149,8 +149,11 @@ activity results are always recomputed canonically from the raw on-device file.
   snapping. Build the centerline robustly from several quality-gated rides and retain
   a spatial uncertainty corridor. A ride may contribute only to a later geometry
   version, never the version used to match or score itself.
-- Until segment matching exists, live horizontal smoothing must stay within a tight
-  fresh-GPS accuracy envelope and prefer recovery to a plausible-looking loop.
+- Until trusted segment matching exists, every accepted moving GPS fix is authoritative
+  for rendered horizontal position. Do not treat a large accuracy radius as permission
+  for velocity/bearing prediction to cut a bend: without another spatial reference,
+  that is invented geometry. Fusion may still hold stationary position, reject bad
+  fixes and maintain velocity/vertical/dynamics state.
 - In post-ride GPS/Compare diagnostics, keep the raw line neutral and color individual
   GPS fixes continuously by their stored horizontal accuracy: good/leaf-green at 5 m
   or better, yellow around 10 m, gold through the accepted 20 m boundary and error-red

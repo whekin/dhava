@@ -611,8 +611,9 @@ Added regressions for arrival at a stop, stationary jitter plus the OnePlus's ob
 2.8 m/s false speed, repeated zero reports on a moving vehicle, re-arming at its later
 stop and bad-accuracy rejection. On exact `udzo 1` replay, each of the five detected
 stationary runs has 0.00 m of internal fused path; total fusion length is 1683.3 m
-against 1686.6 m raw. The large stop triangles are gone in Compare on the physical
-OnePlus; remaining smoothing stays inside the accepted GPS envelope.
+against 1686.6 m raw. This removed motion inside the stop windows, but later close
+visual review on the physical OnePlus showed that moving approach/exit triangles still
+remained outside those windows; the next entry corrects that incomplete conclusion.
 
 Refined GPS accuracy presentation so accepted fixes no longer approach the same orange
 as fusion: ≤5 m is green, 10 m yellow and 15–20 m gold. Only raw fixes strictly above
@@ -620,3 +621,26 @@ the fusion acceptance limit of 20 m turn red. Updated the four-anchor numeric le
 and accessibility description. Rebuilt both native Android libraries, ran all Rust
 tests and strict clippy plus Activity unit tests/debug assembly, installed the APK and
 visually verified `udzo 1` on the OnePlus.
+
+## 2026-07-14 — Moving GPS fixes become authoritative off-segment
+
+Corrected the remaining orange triangle shown on the approach to the `udzo 1` stop.
+The problematic interval had a nearly constant 9.94 m reported accuracy and reached
+11.8 m/s before the exact-zero fix. The stop anchor worked once zero arrived, but the
+velocity/bearing EKF had already extrapolated through the preceding bend and used the
+large accuracy radius as permission to cut outside the raw GPS polyline. Measuring
+only the internal path of `stationary` runs had hidden this failure.
+
+Until trusted segment map matching exists, every accepted moving GPS fix is now the
+authoritative rendered horizontal position. Rust still keeps velocity, vertical and
+stationarity state, holds a true stop anchor, rejects >20 m fixes and respects pause
+sections, but it no longer invents off-segment XY smoothing from speed/bearing. Added a
+sharp 90-degree turn regression at 10 m accuracy and strengthened the rough-vibration
+regression to require exact recovery to each accepted fix.
+
+On exact `udzo 1` replay, maximum moving fusion-to-current-fix offset is now 0.000 m.
+Total fused length is 1669.8 m versus 1686.6 m raw; the difference comes from removing
+stationary GPS drift rather than cutting moving bends. All 45 Rust tests, the forest
+fixture and strict clippy pass, as do Activity unit tests and debug assembly. Rebuilt
+both Android native libraries, installed the APK, zoomed to the reported bend on the
+OnePlus and verified that the orange path stays entirely beneath the GPS fixes.
