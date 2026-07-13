@@ -36,9 +36,11 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.MultiLineString
-import org.maplibre.geojson.MultiPoint
 import org.maplibre.geojson.Point
 
 private const val EMPTY_FEATURE_COLLECTION = "{\"type\":\"FeatureCollection\",\"features\":[]}"
@@ -69,6 +71,7 @@ internal data class MapTrackPoint(
     val lat: Double,
     val lon: Double,
     val sectionId: Int,
+    val accuracyM: Double? = null,
 )
 
 /** Raw and replayed live tracks on one map; all computation remains in Rust. */
@@ -83,12 +86,13 @@ internal fun TrackMap(
 ) {
     val mapView = rememberMapViewWithLifecycle()
     val palette = rememberDhavaMapPalette()
+    val accuracyColors = rememberGpsAccuracyColors()
     val overlayBottomPx = with(LocalDensity.current) { 240.dp.roundToPx() }
     val mapChromeMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     val currentMode = rememberUpdatedState(mode)
     AndroidView(factory = { mapView }, modifier = modifier)
 
-    LaunchedEffect(mapView, rawPoints, fusedPoints, rawColor, fusedColor, palette) {
+    LaunchedEffect(mapView, rawPoints, fusedPoints, rawColor, fusedColor, palette, accuracyColors) {
         mapView.getMapAsync { map ->
             @Suppress("DEPRECATION")
             map.setPadding(0, 0, 0, overlayBottomPx)
@@ -108,7 +112,7 @@ internal fun TrackMap(
                     ),
                 )
                 style.addSource(GeoJsonSource(RAW_POINTS_SOURCE_ID).also { source ->
-                    rawPoints.toMultiPointOrNull()?.let(source::setGeoJson)
+                    rawPoints.toAccuracyFeatureCollectionOrNull()?.let(source::setGeoJson)
                 })
                 style.addSource(GeoJsonSource(FUSED_SOURCE_ID).also { source ->
                     fusedPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
@@ -134,7 +138,7 @@ internal fun TrackMap(
                 // fixes above it so Compare exposes the actual measurements.
                 style.addLayer(
                     CircleLayer(RAW_POINTS_LAYER_ID, RAW_POINTS_SOURCE_ID).withProperties(
-                        PropertyFactory.circleColor(rawColor.toArgb()),
+                        PropertyFactory.circleColor(accuracyColorExpression(accuracyColors)),
                         PropertyFactory.circleRadius(3.25f),
                         PropertyFactory.circleOpacity(0.9f),
                         PropertyFactory.circleStrokeColor(palette.roadCasing),
@@ -196,10 +200,35 @@ internal fun List<MapTrackPoint>.continuousSections(): List<List<MapTrackPoint>>
     return sections
 }
 
-private fun List<MapTrackPoint>.toMultiPointOrNull(): MultiPoint? =
+internal fun List<MapTrackPoint>.toAccuracyFeatureCollectionOrNull(): FeatureCollection? =
     takeIf { it.isNotEmpty() }?.let { points ->
-        MultiPoint.fromLngLats(points.map { Point.fromLngLat(it.lon, it.lat) })
+        FeatureCollection.fromFeatures(
+            points.map { point ->
+                Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)).apply {
+                    addNumberProperty(
+                        GPS_ACCURACY_PROPERTY,
+                        point.accuracyM
+                            ?.takeIf { it.isFinite() && it >= 0.0 }
+                            ?: UNKNOWN_GPS_ACCURACY_STYLE_VALUE,
+                    )
+                }
+            },
+        )
     }
+
+private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.get(GPS_ACCURACY_PROPERTY),
+        Expression.stop(
+            UNKNOWN_GPS_ACCURACY_STYLE_VALUE,
+            Expression.color(colors.unknown.toArgb()),
+        ),
+        Expression.stop(0.0, Expression.color(colors.good.toArgb())),
+        Expression.stop(5.0, Expression.color(colors.good.toArgb())),
+        Expression.stop(10.0, Expression.color(colors.fair.toArgb())),
+        Expression.stop(20.0, Expression.color(colors.poor.toArgb())),
+    )
 
 private fun applyMode(
     style: Style,

@@ -144,3 +144,8 @@ activity results are always recomputed canonically from the raw on-device file.
   version, never the version used to match or score itself.
 - Until segment matching exists, live horizontal smoothing must stay within a tight
   fresh-GPS accuracy envelope and prefer recovery to a plausible-looking loop.
+- In post-ride GPS/Compare diagnostics, keep the raw line neutral and color individual
+  GPS fixes continuously by their stored horizontal accuracy: good/leaf-green at 5 m
+  or better, amber around 10 m and error-red at 20 m or worse. Always show a numeric
+  legend and preserve point casing/layer order so quality is not communicated by color
+  alone and GPS remains distinguishable from the primary-orange fusion line.

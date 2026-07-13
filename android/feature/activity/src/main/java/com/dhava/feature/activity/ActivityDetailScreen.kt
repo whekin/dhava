@@ -106,15 +106,19 @@ private fun ActivityDetailContent(
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
-    val rawPoints = replay?.rawTrack?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
+    val rawPoints = replay?.rawTrack?.map {
+        MapTrackPoint(it.lat, it.lon, it.sectionId, it.accuracyM)
+    }
         ?: (track as? TrackState.Loaded)?.points?.mapIndexed { index, point ->
             // Without Rust replay the pause boundaries are unknown. Keep each
             // fix isolated rather than drawing a potentially false bridge.
-            MapTrackPoint(point.lat, point.lon, index)
+            MapTrackPoint(point.lat, point.lon, index, point.accuracyM)
         }.orEmpty()
     val fusedPoints = replay?.fusedTrack
         ?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
         .orEmpty()
+    val accuracyColors = rememberGpsAccuracyColors()
+    val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
 
     Box(modifier = modifier.fillMaxSize()) {
         when (track) {
@@ -150,6 +154,19 @@ private fun ActivityDetailContent(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(DhavaSpacing.medium),
+            )
+        }
+
+        if (trackMode != TrackMode.Fusion && hasAccuracy) {
+            GpsAccuracyLegend(
+                colors = accuracyColors,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(
+                        top = if (fusedPoints.isNotEmpty()) 84.dp else DhavaSpacing.medium,
+                        end = DhavaSpacing.medium,
+                    )
+                    .size(width = 176.dp, height = 72.dp),
             )
         }
 

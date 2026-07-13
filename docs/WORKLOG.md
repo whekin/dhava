@@ -566,3 +566,25 @@ window around the manual pause remains within 0.6 m of its GPS fixes. All 42 cor
 tests, the real forest fixture, workspace strict clippy, Android recording/activity
 tests and debug assembly pass. Rebuilt both Android native libraries and installed and
 launched the verified APK on the physical OnePlus.
+
+## 2026-07-14 — GPS accuracy becomes visible along the ride
+
+Activity Detail now carries each raw fix's stored `accuracy_m` into its GeoJSON feature
+and colors GPS dots with a continuous data-driven MapLibre expression. The scale uses
+Dhava tertiary/leaf-green at 5 m or better, amber at 10 m and the theme error color at
+20 m or worse; missing or invalid estimates stay neutral. The thin raw GPS line remains
+neutral and dots retain their dark casing above the primary-orange fusion path, so
+Compare communicates signal quality without losing source identity.
+
+Added a compact `GPS ACCURACY` map legend with numeric `≤5 m`, `10 m`, and `20+ m`
+anchors and an accessibility description. It appears in GPS and Compare, hides in
+Fusion, and sits below the mode control without covering the track statistics. Added
+dark/light previews plus a unit regression proving per-fix accuracy survives GeoJSON
+conversion and invalid values get the explicit unknown sentinel.
+
+Visually verified the full forest `udzo 1` ride on the physical OnePlus in dark mode:
+421 of 581 fixes are green at ≤5 m, 158 form visible green-to-amber degradation bands
+at 5–10 m, and two are above 10 m. Verified legend contrast and layout in light mode on
+the Pixel 9 Pro AVD, plus the Fusion/GPS/Compare visibility transitions on the OnePlus.
+Activity tests, feature lint and the complete debug assembly pass. The final APK is
+installed and launched on the OnePlus.
