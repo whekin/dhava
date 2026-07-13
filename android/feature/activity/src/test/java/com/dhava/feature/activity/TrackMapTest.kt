@@ -54,4 +54,18 @@ class TrackMapTest {
             0.0,
         )
     }
+
+    @Test
+    fun `fusion sample features preserve every computed point`() {
+        val points = listOf(
+            MapTrackPoint(41.7, 44.8, sectionId = 0),
+            MapTrackPoint(41.70001, 44.80001, sectionId = 0),
+            MapTrackPoint(41.70002, 44.80002, sectionId = 0),
+        )
+
+        val features = points.toPointFeatureCollectionOrNull()?.features()
+
+        assertNotNull(features)
+        assertEquals(3, features!!.size)
+    }
 }

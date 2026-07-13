@@ -1,8 +1,9 @@
-//! Deterministic post-ride replay of the exact live fusion path.
+//! Deterministic post-ride replay and GPS-bounded finalized fusion.
 //!
-//! This is a diagnostics API, not a second analysis implementation. It feeds
-//! the stored raw stream back through [`crate::LiveFusion`] using Android's
-//! same 50 Hz IMU reduction and returns raw/fused tracks for visual comparison.
+//! The raw stream is first fed back through [`crate::LiveFusion`] using
+//! Android's same 50 Hz IMU reduction. A bounded post-pass then restores
+//! causally hidden motion onset and inserts 5 Hz points between immutable GPS
+//! anchors. Both tracks remain Rust-owned diagnostics.
 
 use std::path::Path;
 
@@ -26,7 +27,10 @@ pub struct DiagnosticTrackPoint {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RecordingReplay {
     pub raw_track: Vec<DiagnosticTrackPoint>,
+    /// Exact causal output produced during recording, at accepted GPS rate.
     pub fused_track: Vec<DiagnosticTrackPoint>,
+    /// GPS-bounded, delayed 5 Hz output intended for post-ride display.
+    pub finalized_track: Vec<DiagnosticTrackPoint>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,9 +112,13 @@ pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
         }
     }
 
+    let finalized_track =
+        crate::bounded::finalized_track(&recording.gps, &fused_track, &section_ids, &recording.imu);
+
     Ok(RecordingReplay {
         raw_track,
         fused_track,
+        finalized_track,
     })
 }
 
@@ -173,8 +181,15 @@ mod tests {
         remove_file(path).unwrap();
         assert_eq!(replay.raw_track.len(), 2);
         assert_eq!(replay.fused_track.len(), 2);
+        assert_eq!(replay.finalized_track.len(), 6);
         assert!(replay.raw_track.iter().all(|point| point.section_id == 0));
         assert!(replay.fused_track.iter().all(|point| point.section_id == 0));
+        assert!(
+            replay
+                .finalized_track
+                .iter()
+                .all(|point| point.section_id == 0)
+        );
     }
 
     #[test]
@@ -217,6 +232,19 @@ mod tests {
                 .map(|point| point.section_id)
                 .collect::<Vec<_>>(),
             vec![0, 0, 1, 1],
+        );
+        assert!(
+            replay
+                .finalized_track
+                .windows(2)
+                .all(|pair| pair[0].section_id == pair[1].section_id
+                    || pair[0].timestamp_ms == 2_000 && pair[1].timestamp_ms == 6_000)
+        );
+        assert!(
+            replay
+                .finalized_track
+                .iter()
+                .all(|point| !(2_000 < point.timestamp_ms && point.timestamp_ms < 6_000))
         );
     }
 }

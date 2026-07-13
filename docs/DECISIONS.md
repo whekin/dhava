@@ -160,3 +160,22 @@ activity results are always recomputed canonically from the raw on-device file.
   only above 20 m. Always show a numeric
   legend and preserve point casing/layer order so quality is not communicated by color
   alone and GPS remains distinguishable from the primary-orange fusion line.
+
+## 2026-07-14 — Finalized horizontal fusion is delayed and GPS-bounded
+
+- Preserve the exact causal recording result as `fused_track`; expose delayed post-ride
+  geometry separately as `finalized_track`. Live UI must not pretend that future GPS
+  evidence is already available. A later provisional-live tail may replace only its
+  buffered final interval when the next fix arrives.
+- Finalized horizontal samples target 5 Hz, but accepted GPS fixes remain immutable
+  anchors. Neighboring GPS geometry defines safe tangents; GPS speed and gravity-axis
+  gyro may redistribute samples and turn timing only inside each anchor interval. IMU
+  must never introduce an unbounded XY displacement.
+- Constrain each interpolated interval to forward progress and an accuracy-aware
+  corridor capped at 6 m. Do not interpolate across manual pause sections or sensor/GPS
+  gaps longer than 2.5 seconds. Use later displacement evidence to restore moving GPS
+  fixes that conservative causal `STILL` temporarily held at the stop anchor.
+- In Activity Detail, distinguish computed 5 Hz samples from measured GPS anchors:
+  computed points are smaller, light-centered, below the accuracy-colored GPS layer and
+  visible only at useful detailed zoom. Scale GPS dots with zoom as well so overview
+  mode communicates the line rather than collapsing into a chain of overlapping dots.

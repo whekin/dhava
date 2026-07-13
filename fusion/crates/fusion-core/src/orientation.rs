@@ -245,6 +245,14 @@ impl Mahony {
         [a_world[0], a_world[1], a_world[2] - GRAVITY]
     }
 
+    /// Angular rate around the gravity axis, in rad/s. Unlike horizontal
+    /// heading, this component is invariant to the filter's arbitrary yaw and
+    /// can locate a turn inside a GPS interval even when the phone is mounted
+    /// at an arbitrary roll/pitch orientation.
+    pub fn vertical_angular_rate(&self, gyro: [f64; 3]) -> f64 {
+        self.q.rotate(gyro)[2]
+    }
+
     /// True once the filter has been anchored to an accel sample.
     pub fn is_initialized(&self) -> bool {
         self.initialized

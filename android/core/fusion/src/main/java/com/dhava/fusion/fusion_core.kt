@@ -1690,7 +1690,14 @@ public object FfiConverterTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot>
 
 data class RecordingReplay (
     var `rawTrack`: List<DiagnosticTrackPoint>,
-    var `fusedTrack`: List<DiagnosticTrackPoint>
+    /**
+     * Exact causal output produced during recording, at accepted GPS rate.
+     */
+    var `fusedTrack`: List<DiagnosticTrackPoint>,
+    /**
+     * GPS-bounded, delayed 5 Hz output intended for post-ride display.
+     */
+    var `finalizedTrack`: List<DiagnosticTrackPoint>
 ) {
 
     companion object
@@ -1704,17 +1711,20 @@ public object FfiConverterTypeRecordingReplay: FfiConverterRustBuffer<RecordingR
         return RecordingReplay(
             FfiConverterSequenceTypeDiagnosticTrackPoint.read(buf),
             FfiConverterSequenceTypeDiagnosticTrackPoint.read(buf),
+            FfiConverterSequenceTypeDiagnosticTrackPoint.read(buf),
         )
     }
 
     override fun allocationSize(value: RecordingReplay) = (
             FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`rawTrack`) +
-            FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`fusedTrack`)
+            FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`fusedTrack`) +
+            FfiConverterSequenceTypeDiagnosticTrackPoint.allocationSize(value.`finalizedTrack`)
     )
 
     override fun write(value: RecordingReplay, buf: ByteBuffer) {
             FfiConverterSequenceTypeDiagnosticTrackPoint.write(value.`rawTrack`, buf)
             FfiConverterSequenceTypeDiagnosticTrackPoint.write(value.`fusedTrack`, buf)
+            FfiConverterSequenceTypeDiagnosticTrackPoint.write(value.`finalizedTrack`, buf)
     }
 }
 

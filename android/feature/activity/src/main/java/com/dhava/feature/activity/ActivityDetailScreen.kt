@@ -114,7 +114,8 @@ private fun ActivityDetailContent(
             // fix isolated rather than drawing a potentially false bridge.
             MapTrackPoint(point.lat, point.lon, index, point.accuracyM)
         }.orEmpty()
-    val fusedPoints = replay?.fusedTrack
+    val fusedPoints = replay?.finalizedTrack
+        ?.ifEmpty { replay.fusedTrack }
         ?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
         .orEmpty()
     val accuracyColors = rememberGpsAccuracyColors()

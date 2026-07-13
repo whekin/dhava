@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 uniffi::setup_scaffolding!();
 
 pub mod analysis;
+mod bounded;
 pub mod ekf;
 pub mod linalg;
 pub mod live;

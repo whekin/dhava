@@ -644,3 +644,31 @@ stationary GPS drift rather than cutting moving bends. All 45 Rust tests, the fo
 fixture and strict clippy pass, as do Activity unit tests and debug assembly. Rebuilt
 both Android native libraries, installed the APK, zoomed to the reported bend on the
 OnePlus and verified that the orange path stays entirely beneath the GPS fixes.
+
+## 2026-07-14 — Finalized replay adds GPS-bounded 5 Hz detail
+
+Added a distinct delayed `finalized_track` to Rust diagnostic replay while retaining
+`fused_track` as the exact causal live result. Every accepted GPS fix remains an exact
+horizontal anchor. Between same-section anchors no more than 2.5 seconds apart, the
+post-pass emits 200 ms samples using GPS-derived Hermite tangents and endpoint GPS
+speed. Gravity-axis angular rate from the Mahony orientation filter can shift the
+timing of curvature inside the interval, but never creates a free inertial XY path.
+Forward progress cannot reverse and lateral curvature is clamped to the fixes' combined
+reported accuracy with a hard 6 m ceiling. Manual pause sections are never bridged.
+
+The finalized pass also uses later evidence to repair a causal stop-release artifact:
+when displacement clears the root-sum-square accuracy gate, a monotonic non-zero-speed
+tail previously held by live `STILL` is restored to its actual GPS anchors. On `udzo 1`,
+this recovers all falsely held 2.17–3.60 m/s departure fixes. The finalized result has
+1,711 points versus 581 raw fixes, is 1,674.8 m long versus 1,686.6 m raw, and stays
+within 1.71 m of every causal live anchor; the small remaining held sample had only
+0.74 m/s reported speed and a 0.71 m coordinate offset.
+
+Activity Detail now consumes `finalized_track` for Fusion and Compare, falling back to
+the exact live replay for old/empty results. It renders finalized samples as a separate
+small light-centered layer underneath the larger accuracy-colored GPS fixes. Fusion
+samples appear only at detailed zoom and grow with zoom; GPS dots also scale down at
+ride overview so the orange line remains readable. Regenerated UniFFI bindings and
+both Android native libraries. All 48 core unit tests, the real forest fixture, strict
+clippy, Activity tests and debug assembly pass. The final APK is installed on the
+OnePlus; overview presentation was visually checked there without modifying ride data.

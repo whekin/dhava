@@ -51,6 +51,8 @@ private const val RAW_POINTS_LAYER_ID = "raw-track-points-layer"
 private const val FUSED_SOURCE_ID = "fused-track-source"
 private const val FUSED_CASING_LAYER_ID = "fused-track-casing-layer"
 private const val FUSED_LAYER_ID = "fused-track-layer"
+private const val FUSED_POINTS_SOURCE_ID = "fused-track-points-source"
+private const val FUSED_POINTS_LAYER_ID = "fused-track-points-layer"
 private const val START_SOURCE_ID = "track-start-source"
 private const val START_LAYER_ID = "track-start-layer"
 private const val START_IMAGE_ID = "track-start-image"
@@ -60,6 +62,7 @@ private const val FINISH_IMAGE_ID = "track-finish-image"
 private const val MARKER_SIZE_PX = 48
 private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 15.0
+private const val FUSION_POINTS_MIN_ZOOM = 16.5f
 
 internal enum class TrackMode(val label: String) {
     Gps("GPS"),
@@ -134,15 +137,32 @@ internal fun TrackMap(
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ),
                 )
+                style.addSource(GeoJsonSource(FUSED_POINTS_SOURCE_ID).also { source ->
+                    fusedPoints.toPointFeatureCollectionOrNull()?.let(source::setGeoJson)
+                })
+                style.addLayer(
+                    CircleLayer(FUSED_POINTS_LAYER_ID, FUSED_POINTS_SOURCE_ID)
+                        .also { it.setMinZoom(FUSION_POINTS_MIN_ZOOM) }
+                        .withProperties(
+                            // At ride overview scale, 5 Hz points merge into a
+                            // solid bead chain. Reveal and grow them only once
+                            // the map has enough room to distinguish samples.
+                            PropertyFactory.circleColor(palette.onPrimary),
+                            PropertyFactory.circleRadius(fusionPointRadiusExpression()),
+                            PropertyFactory.circleOpacity(0.92f),
+                            PropertyFactory.circleStrokeColor(fusedColor.toArgb()),
+                            PropertyFactory.circleStrokeWidth(1f),
+                        ),
+                )
                 // Keep the raw line beneath fusion, but put individual GPS
                 // fixes above it so Compare exposes the actual measurements.
                 style.addLayer(
                     CircleLayer(RAW_POINTS_LAYER_ID, RAW_POINTS_SOURCE_ID).withProperties(
                         PropertyFactory.circleColor(accuracyColorExpression(accuracyColors)),
-                        PropertyFactory.circleRadius(3.25f),
+                        PropertyFactory.circleRadius(gpsPointRadiusExpression()),
                         PropertyFactory.circleOpacity(0.9f),
                         PropertyFactory.circleStrokeColor(palette.roadCasing),
-                        PropertyFactory.circleStrokeWidth(1f),
+                        PropertyFactory.circleStrokeWidth(gpsPointStrokeExpression()),
                     ),
                 )
                 style.addImage(START_IMAGE_ID, createStartMarker(palette))
@@ -216,6 +236,13 @@ internal fun List<MapTrackPoint>.toAccuracyFeatureCollectionOrNull(): FeatureCol
         )
     }
 
+internal fun List<MapTrackPoint>.toPointFeatureCollectionOrNull(): FeatureCollection? =
+    takeIf { it.isNotEmpty() }?.let { points ->
+        FeatureCollection.fromFeatures(
+            points.map { point -> Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)) },
+        )
+    }
+
 private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
     Expression.interpolate(
         Expression.linear(),
@@ -233,6 +260,33 @@ private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
         // sample. Use a sharp red boundary only for those rejected fixes so
         // the accepted accuracy scale stays distinct from the orange track.
         Expression.stop(20.0001, Expression.color(colors.rejected.toArgb())),
+    )
+
+private fun fusionPointRadiusExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.stop(FUSION_POINTS_MIN_ZOOM.toDouble(), 0.45),
+        Expression.stop(18.0, 0.9),
+        Expression.stop(20.0, 1.5),
+    )
+
+private fun gpsPointRadiusExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.stop(14.0, 0.9),
+        Expression.stop(16.0, 1.4),
+        Expression.stop(18.0, 3.25),
+        Expression.stop(20.0, 4.0),
+    )
+
+private fun gpsPointStrokeExpression(): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.stop(14.0, 0.4),
+        Expression.stop(18.0, 1.0),
     )
 
 private fun applyMode(
@@ -257,6 +311,11 @@ private fun applyMode(
         ),
     )
     style.getLayer(FUSED_CASING_LAYER_ID)?.setProperties(
+        PropertyFactory.visibility(
+            if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
+        ),
+    )
+    style.getLayer(FUSED_POINTS_LAYER_ID)?.setProperties(
         PropertyFactory.visibility(
             if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
         ),
