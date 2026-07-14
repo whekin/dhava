@@ -210,7 +210,31 @@ activity results are always recomputed canonically from the raw on-device file.
   `finalized_track`; Android must not resample or smooth them again. Both exports use
   Rust replay `section_id` boundaries to create separate GPX `<trkseg>` elements, so
   a pause never becomes a straight line in another application.
-- Raw GPX keeps recorded GPS elevation. The current finalized diagnostic contract has
-  no altitude per 5 Hz point, so processed GPX deliberately omits `<ele>` rather than
-  inventing vertical fusion in Kotlin. Add finalized elevation to Rust before calling
-  the processed export vertically canonical.
+- Raw GPX keeps recorded GPS elevation. Processed GPX may include `<ele>` only when the
+  canonical Rust contract supplies it; Android must never invent vertical fusion. The
+  first export omitted elevation, and the later `gps-bounded-0.2` Rust artifact made it
+  vertically canonical.
+
+## 2026-07-14 — Canonical activities are rebuildable caches, raw remains truth
+
+- The immutable `recordings/<id>.jsonl.gz` file remains the only source of truth.
+  Canonical output lives separately under `activity-artifacts/` as a gzip-compressed
+  JSON cache. Creating, reading, invalidating or deleting that cache never edits raw;
+  an explicit user discard removes both.
+- A cache is reusable only when its schema version, Rust algorithm version, raw byte
+  size and raw modification time all match. Missing, corrupt, stale and old-algorithm
+  artifacts are rebuilt locally from raw and atomically replace the old file. This
+  makes an algorithm upgrade a cache invalidation rather than a data migration. The
+  fingerprint is checked again after computation; a recording that resumed or grew
+  concurrently cannot publish a stale result under the newer fingerprint.
+- Rust `finalize_recording` parses raw once and owns the complete derived result:
+  metrics, raw GPS diagnostic view, GPS-bounded 5 Hz track, pause section ids and
+  finalized elevation. Android owns persistence and representation conversion only.
+- Explicit Finish publishes the save workspace immediately, then canonicalizes on an
+  IO scope. If the process dies before completion, Activity Detail or GPX export lazily
+  performs the same rebuild. Existing recordings are migrated lazily instead of all at
+  app startup, avoiding a large CPU/battery spike.
+- Canonical vertical v0 preserves relative barometer movement and anchors it to
+  median-filtered, accuracy-gated GPS altitude. GPS-only recordings use section-aware
+  altitude interpolation. Ascent/descent hysteresis resets at pause boundaries. The
+  canonical algorithm version is `gps-bounded-0.2`.

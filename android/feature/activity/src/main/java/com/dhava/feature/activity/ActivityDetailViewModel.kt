@@ -8,12 +8,16 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import android.util.Log
 import com.dhava.core.fusion.FusionCore
+import com.dhava.core.recording.CanonicalActivityArtifact
 import com.dhava.core.recording.GpsTrackReader
 import com.dhava.core.recording.GpxExporter
 import com.dhava.core.recording.GpxTrackPoint
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordLine
 import com.dhava.core.recording.RecordingRepository
+import com.dhava.core.recording.rawGpsPoints
+import com.dhava.core.recording.toRecordingReplay
+import com.dhava.core.recording.toRideAnalysis
 import com.dhava.fusion.RideAnalysis
 import com.dhava.fusion.RecordingReplay
 import kotlinx.coroutines.Dispatchers
@@ -79,33 +83,42 @@ class ActivityDetailViewModel(
     private val _diagnostics = MutableStateFlow<DiagnosticTrackState>(DiagnosticTrackState.Loading)
     val diagnostics: StateFlow<DiagnosticTrackState> = _diagnostics.asStateFlow()
 
+    @Volatile
+    private var canonicalArtifact: CanonicalActivityArtifact? = null
+
     fun exportGpx(kind: GpxExportKind, onResult: (Result<File>) -> Unit) {
         val title = recording.value?.title ?: "Dhava ride"
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
+        val artifact = canonicalArtifact
         val points = when (kind) {
-            GpxExportKind.PROCESSED_5_HZ -> replay?.finalizedTrack
+            GpxExportKind.PROCESSED_5_HZ -> artifact?.finalizedTrack
                 ?.takeIf { it.isNotEmpty() }
                 ?.map { point ->
                     GpxTrackPoint(
                         timestampMs = point.timestampMs,
                         lat = point.lat,
                         lon = point.lon,
+                        altitudeM = point.altitudeM,
                         sectionId = point.sectionId,
                     )
                 }
             GpxExportKind.RAW_GPS -> {
-                val raw = (_track.value as? TrackState.Loaded)?.points
-                val sectionByTimestamp = replay?.rawTrack
-                    ?.associate { point -> point.timestampMs to point.sectionId }
-                    .orEmpty()
-                raw?.map { point ->
-                    GpxTrackPoint(
-                        timestampMs = point.timestampMs,
-                        lat = point.lat,
-                        lon = point.lon,
-                        altitudeM = point.altitudeM,
-                        sectionId = sectionByTimestamp[point.timestampMs] ?: 0,
-                    )
+                artifact?.rawTrack?.map { point ->
+                    GpxTrackPoint(point.timestampMs, point.lat, point.lon, point.altitudeM, point.sectionId)
+                } ?: run {
+                    val raw = (_track.value as? TrackState.Loaded)?.points
+                    val sectionByTimestamp = replay?.rawTrack
+                        ?.associate { point -> point.timestampMs to point.sectionId }
+                        .orEmpty()
+                    raw?.map { point ->
+                        GpxTrackPoint(
+                            timestampMs = point.timestampMs,
+                            lat = point.lat,
+                            lon = point.lon,
+                            altitudeM = point.altitudeM,
+                            sectionId = sectionByTimestamp[point.timestampMs] ?: 0,
+                        )
+                    }
                 }
             }
         }
@@ -131,36 +144,43 @@ class ActivityDetailViewModel(
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            // One streaming pass over the raw file; see GpsTrackReader for
-            // why this stays display-only (polyline for the map, nothing else).
-            val points = GpsTrackReader.read(repository.recordingFile(recordingId))
-            _track.value = if (points.isEmpty()) {
-                TrackState.Empty
-            } else {
-                TrackState.Loaded(points = points)
-            }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
             val path = repository.recordingFile(recordingId).absolutePath
-            _analysis.value = try {
-                FusionCore.analyze(path)
-            } catch (e: Exception) {
-                // Unanalyzable file (missing, empty, corrupt beyond repair) —
-                // the screen simply keeps placeholder tiles.
-                Log.w("ActivityDetail", "fusion-core analysis failed for $recordingId", e)
-                null
-            }
-            _diagnostics.value = try {
-                val replay = FusionCore.replay(path)
-                if (replay.rawTrack.isEmpty() && replay.fusedTrack.isEmpty()) {
+            val artifact = repository.canonicalActivity(recordingId)
+            if (artifact != null) {
+                canonicalArtifact = artifact
+                val points = artifact.rawGpsPoints()
+                _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
+                _analysis.value = artifact.toRideAnalysis()
+                val replay = artifact.toRecordingReplay()
+                _diagnostics.value = if (replay.rawTrack.isEmpty() && replay.finalizedTrack.isEmpty()) {
                     DiagnosticTrackState.Unavailable
                 } else {
                     DiagnosticTrackState.Loaded(replay)
                 }
-            } catch (e: Exception) {
-                Log.w("ActivityDetail", "live replay failed for $recordingId", e)
-                DiagnosticTrackState.Unavailable
+                return@launch
             }
+
+            // Damage-tolerant fallback for an artifact that cannot be built.
+            // It preserves the old read path and leaves the raw file untouched.
+            val points = GpsTrackReader.read(repository.recordingFile(recordingId))
+            _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
+            _analysis.value = runCatching { FusionCore.analyze(path) }
+                .onFailure { Log.w("ActivityDetail", "analysis fallback failed for $recordingId", it) }
+                .getOrNull()
+            _diagnostics.value = runCatching { FusionCore.replay(path) }
+                .fold(
+                    onSuccess = { replay ->
+                        if (replay.rawTrack.isEmpty() && replay.fusedTrack.isEmpty()) {
+                            DiagnosticTrackState.Unavailable
+                        } else {
+                            DiagnosticTrackState.Loaded(replay)
+                        }
+                    },
+                    onFailure = {
+                        Log.w("ActivityDetail", "replay fallback failed for $recordingId", it)
+                        DiagnosticTrackState.Unavailable
+                    },
+                )
         }
     }
 

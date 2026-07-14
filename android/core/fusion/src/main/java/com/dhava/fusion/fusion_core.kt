@@ -726,6 +726,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -744,6 +746,8 @@ internal interface IntegrityCheckingUniffiLib : Library {
     fun uniffi_fusion_core_checksum_func_algorithm_version(
 ): Short
 fun uniffi_fusion_core_checksum_func_analyze_recording(
+): Short
+fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
 fun uniffi_fusion_core_checksum_func_replay_recording(
 ): Short
@@ -815,6 +819,8 @@ fun uniffi_fusion_core_fn_method_livefusion_push_imu(`ptr`: Pointer,`timestampMs
 fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -948,6 +954,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_analyze_recording() != 175.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_replay_recording() != 45909.toShort()) {
@@ -1584,6 +1593,111 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
 
 
 
+/**
+ * Complete derived activity. Safe to delete and rebuild from the raw file.
+ */
+data class CanonicalActivity (
+    var `algorithmVersion`: kotlin.String,
+    var `analysis`: RideAnalysis,
+    var `rawTrack`: List<CanonicalTrackPoint>,
+    var `finalizedTrack`: List<CanonicalTrackPoint>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<CanonicalActivity> {
+    override fun read(buf: ByteBuffer): CanonicalActivity {
+        return CanonicalActivity(
+            FfiConverterString.read(buf),
+            FfiConverterTypeRideAnalysis.read(buf),
+            FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
+            FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CanonicalActivity) = (
+            FfiConverterString.allocationSize(value.`algorithmVersion`) +
+            FfiConverterTypeRideAnalysis.allocationSize(value.`analysis`) +
+            FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`rawTrack`) +
+            FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`finalizedTrack`)
+    )
+
+    override fun write(value: CanonicalActivity, buf: ByteBuffer) {
+            FfiConverterString.write(value.`algorithmVersion`, buf)
+            FfiConverterTypeRideAnalysis.write(value.`analysis`, buf)
+            FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`rawTrack`, buf)
+            FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`finalizedTrack`, buf)
+    }
+}
+
+
+
+/**
+ * One point in either the raw GPS view or finalized 5 Hz track.
+ */
+data class CanonicalTrackPoint (
+    var `timestampMs`: kotlin.Long,
+    var `lat`: kotlin.Double,
+    var `lon`: kotlin.Double,
+    var `altitudeM`: kotlin.Double?,
+    var `accuracyM`: kotlin.Double?,
+    var `speedMps`: kotlin.Double?,
+    var `stationary`: kotlin.Boolean?,
+    /**
+     * Continuous recording section; changes at each manual pause.
+     */
+    var `sectionId`: kotlin.Int
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalTrackPoint: FfiConverterRustBuffer<CanonicalTrackPoint> {
+    override fun read(buf: ByteBuffer): CanonicalTrackPoint {
+        return CanonicalTrackPoint(
+            FfiConverterLong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
+            FfiConverterInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CanonicalTrackPoint) = (
+            FfiConverterLong.allocationSize(value.`timestampMs`) +
+            FfiConverterDouble.allocationSize(value.`lat`) +
+            FfiConverterDouble.allocationSize(value.`lon`) +
+            FfiConverterOptionalDouble.allocationSize(value.`altitudeM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`accuracyM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`speedMps`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`stationary`) +
+            FfiConverterInt.allocationSize(value.`sectionId`)
+    )
+
+    override fun write(value: CanonicalTrackPoint, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`timestampMs`, buf)
+            FfiConverterDouble.write(value.`lat`, buf)
+            FfiConverterDouble.write(value.`lon`, buf)
+            FfiConverterOptionalDouble.write(value.`altitudeM`, buf)
+            FfiConverterOptionalDouble.write(value.`accuracyM`, buf)
+            FfiConverterOptionalDouble.write(value.`speedMps`, buf)
+            FfiConverterOptionalBoolean.write(value.`stationary`, buf)
+            FfiConverterInt.write(value.`sectionId`, buf)
+    }
+}
+
+
+
 data class DiagnosticTrackPoint (
     var `timestampMs`: kotlin.Long,
     var `lat`: kotlin.Double,
@@ -2186,6 +2300,34 @@ public object FfiConverterSequenceTypeAirtimeWindow: FfiConverterRustBuffer<List
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeCanonicalTrackPoint: FfiConverterRustBuffer<List<CanonicalTrackPoint>> {
+    override fun read(buf: ByteBuffer): List<CanonicalTrackPoint> {
+        val len = buf.getInt()
+        return List<CanonicalTrackPoint>(len) {
+            FfiConverterTypeCanonicalTrackPoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<CanonicalTrackPoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeCanonicalTrackPoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<CanonicalTrackPoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeCanonicalTrackPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeDiagnosticTrackPoint: FfiConverterRustBuffer<List<DiagnosticTrackPoint>> {
     override fun read(buf: ByteBuffer): List<DiagnosticTrackPoint> {
         val len = buf.getInt()
@@ -2258,6 +2400,19 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
             return FfiConverterTypeRideAnalysis.lift(
     uniffiRustCallWithError(FusionException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_analyze_recording(
+        FfiConverterString.lower(`path`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Parses one raw recording once and produces its canonical processed result.
+         */
+    @Throws(FusionException::class) fun `finalizeRecording`(`path`: kotlin.String): CanonicalActivity {
+            return FfiConverterTypeCanonicalActivity.lift(
+    uniffiRustCallWithError(FusionException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_finalize_recording(
         FfiConverterString.lower(`path`),_status)
 }
     )

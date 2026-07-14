@@ -15,6 +15,7 @@ uniffi::setup_scaffolding!();
 
 pub mod analysis;
 mod bounded;
+pub mod canonical;
 pub mod ekf;
 pub mod linalg;
 pub mod live;
@@ -24,6 +25,8 @@ pub mod replay;
 
 pub use live::{LiveFusion, LiveSnapshot};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
+
+pub use canonical::{CanonicalActivity, CanonicalTrackPoint, finalize_recording};
 
 pub use analysis::{
     ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,

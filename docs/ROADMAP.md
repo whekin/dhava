@@ -21,8 +21,9 @@ skeleton and deployment scaffolding.
 
 ## Phase 2 — Complete local activity
 
-- Canonical on-device fusion immediately after Finish
-- Active time, fused distance/speed/track, elevation quality and GPS quality
+- Canonical on-device fusion immediately after Finish ✅
+- Active time, fused distance/speed/track and GPS/barometer elevation ✅
+- Surface elevation quality, GPS quality and uncertainty indicators
 - Reliable activity detail, rename/edit/delete and raw diagnostics export
 - Local storage management and offline map/cache behavior
 
@@ -30,7 +31,7 @@ skeleton and deployment scaffolding.
 
 - GPX export through Android Share: raw GPS and processed 5 Hz tracks ✅
 - Canonical finalized horizontal GPX with explicit pause sections ✅
-- Add Rust-finalized elevation to the processed GPX
+- Add Rust-finalized elevation to the processed GPX ✅
 - One-time `Connect with Strava`, then one-tap per-activity export with offline queue,
   retry and duplicate protection
 - Minimal Go OAuth/upload broker for Strava credentials; the recorder itself remains

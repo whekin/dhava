@@ -721,3 +721,38 @@ Core Recording lint remains blocked by the pre-existing missing-permission annot
 at `RecordingService.kt:521`; its report contains no GPX exporter findings. Processed
 elevation remains open: the current finalized replay contract is horizontal-only, so
 Android intentionally does not manufacture vertical interpolation outside fusion-core.
+
+## 2026-07-14 — Versioned canonical artifact generated from immutable raw
+
+Added Rust `finalize_recording`, which parses a raw recording once and returns one
+complete `gps-bounded-0.2` result: ride analysis, original GPS diagnostic points and
+the GPS-bounded finalized 5 Hz track. Finalized points now include optional elevation,
+accuracy, speed, stationarity and manual-pause section id. The vertical pass converts
+barometer pressure into relative altitude, anchors it to median-filtered GPS altitude
+from ≤20 m fixes and falls back to section-aware GPS interpolation when barometer data
+is unavailable. Ascent/descent is recomputed from that finalized profile with the
+hysteresis reference reset across pauses.
+
+Android persists the result as `files/activity-artifacts/<id>.canonical.json.gz`.
+Schema version, Rust algorithm version and the raw file's size/mtime form the cache
+key, and the fingerprint is rechecked after computation so a concurrently resumed raw
+file cannot validate a partial artifact. Writes use atomic replace; corrupt or stale
+artifacts recompute from raw. Explicit
+Finish starts generation after the writer closes without delaying the save workspace;
+Activity Detail lazily fills any missing artifact and otherwise reads it instead of
+replaying the large raw file on every opening. Raw GPX reads the cached exact GPS view;
+processed GPX now includes Rust-finalized `<ele>` at 5 Hz. Discard serializes against
+generation and removes both files, while every normal recomputation leaves raw intact.
+
+Added Rust regressions for GPS-only 5 Hz altitude, barometric detail and pause-safe
+vertical totals, plus Android store regressions for cache reuse, raw/algorithm
+invalidation, corrupt-file replacement, atomic persistence and raw preservation. All
+51 fusion-core tests plus the forest fixture, the complete fusion workspace tests and
+strict clippy pass. Core Recording and Activity unit tests and debug assembly pass.
+
+Installed on the OnePlus and lazily finalized the existing bus ride: a 29 KB artifact
+contains 167 raw fixes, 689 finalized points and 689 elevations. Reopening preserved
+the artifact mtime, confirming a cache hit. The resulting processed GPX is valid and
+contains 689 track points with 689 `<ele>` elements. The original raw recording remains
+present. Transport classification and explicit GPS/elevation quality indicators remain
+separate next steps.

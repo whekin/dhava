@@ -1,6 +1,8 @@
 package com.dhava.core.recording
 
 import android.content.Context
+import android.util.Log
+import com.dhava.core.fusion.FusionCore
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -39,6 +41,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
         private const val INDEX_FILE = "recordings.json"
         private const val BIKES_FILE = "bikes.json"
         private const val RECORDINGS_DIR = "recordings"
+        private const val ARTIFACTS_DIR = "activity-artifacts"
+        private const val LOG_TAG = "RecordingRepository"
 
         @Volatile
         private var instance: RecordingRepository? = null
@@ -52,6 +56,11 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val indexMutex = Mutex()
     private val uploader = ActivityUploader()
+    private val canonicalStore = CanonicalActivityStore(
+        artifactsDir = File(appContext.filesDir, ARTIFACTS_DIR),
+        currentAlgorithmVersion = { FusionCore.algorithmVersion },
+        produce = { path -> FusionCore.finalize(path).toArtifactPayload() },
+    )
 
     /** Completed once the JSON files are read; [awaitRecording] gates on it. */
     private val loaded = CompletableDeferred<Unit>()
@@ -102,6 +111,18 @@ class RecordingRepository private constructor(private val appContext: Context) {
     fun recordingsDir(): File = File(appContext.filesDir, RECORDINGS_DIR)
 
     fun recordingFile(id: String): File = File(recordingsDir(), "$id.jsonl.gz")
+
+    /**
+     * Loads a valid derived artifact or rebuilds it from immutable raw data.
+     * A missing/corrupt/old-version cache is never fatal and never mutates raw.
+     */
+    suspend fun canonicalActivity(id: String): CanonicalActivityArtifact? {
+        loaded.await()
+        val rawFile = recordingFile(id)
+        return runCatching { canonicalStore.loadOrCreate(id, rawFile) }
+            .onFailure { error -> Log.w(LOG_TAG, "canonical finalization failed for $id", error) }
+            .getOrNull()
+    }
 
     /** Observes a single index entry; emits null once the entry is gone (discarded). */
     fun recording(id: String): Flow<LocalRecording?> =
@@ -156,6 +177,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 }
                 saveIndex()
             }
+            // The save workspace can appear immediately. Canonicalization is
+            // an IO-bound rebuildable cache; if the process dies here, the
+            // first Activity Detail/GPX access recreates it from raw.
+            canonicalActivity(summary.id)
         }
         _state.value = RecordingState.Finished(summary)
     }
@@ -310,6 +335,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 saveIndex()
             }
             recordingFile(id).delete()
+            canonicalStore.delete(id)
         }
     }
 

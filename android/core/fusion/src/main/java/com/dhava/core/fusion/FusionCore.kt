@@ -1,9 +1,11 @@
 package com.dhava.core.fusion
 
+import com.dhava.fusion.CanonicalActivity
 import com.dhava.fusion.RideAnalysis
 import com.dhava.fusion.RecordingReplay
 import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
+import com.dhava.fusion.finalizeRecording as ffiFinalizeRecording
 import com.dhava.fusion.replayRecording as ffiReplayRecording
 
 /**
@@ -17,7 +19,7 @@ import com.dhava.fusion.replayRecording as ffiReplayRecording
 object FusionCore {
 
     /**
-     * Version tag of the analysis algorithms (e.g. `"gps-naive-0.1"`).
+     * Version tag of the canonical algorithms (e.g. `"gps-bounded-0.2"`).
      * Results are tagged with this value product-wide so they can be
      * recomputed on-device when algorithms improve.
      */
@@ -34,6 +36,13 @@ object FusionCore {
      *   or contains no analyzable samples.
      */
     fun analyze(path: String): RideAnalysis = ffiAnalyzeRecording(path)
+
+    /**
+     * Produces the complete versioned post-ride artifact from one immutable
+     * raw recording. Rust owns horizontal/vertical finalization and metrics;
+     * Android may persist the returned value only as a rebuildable cache.
+     */
+    fun finalize(path: String): CanonicalActivity = ffiFinalizeRecording(path)
 
     /**
      * Replays a raw recording through the exact live Rust pipeline and

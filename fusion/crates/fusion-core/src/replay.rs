@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use crate::recording::parse_recording_file;
+use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, LiveFusion};
 
 const LIVE_IMU_INTERVAL_MS: i64 = 20;
@@ -41,15 +41,21 @@ enum Item {
 
 #[uniffi::export]
 pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
-    let mut recording = parse_recording_file(Path::new(&path))?;
-    recording.imu.sort_by_key(|sample| sample.timestamp_ms);
-    recording.gps.sort_by_key(|sample| sample.timestamp_ms);
-    recording.events.sort_by_key(|event| event.timestamp_ms);
+    let recording = parse_recording_file(Path::new(&path))?;
+    Ok(replay_parsed(&recording))
+}
 
-    let section_ids = section_ids_for_gps(&recording.gps, &recording.events);
+pub(crate) fn replay_parsed(recording: &ParsedRecording) -> RecordingReplay {
+    let mut imu = recording.imu.clone();
+    let mut gps = recording.gps.clone();
+    let mut events = recording.events.clone();
+    imu.sort_by_key(|sample| sample.timestamp_ms);
+    gps.sort_by_key(|sample| sample.timestamp_ms);
+    events.sort_by_key(|event| event.timestamp_ms);
 
-    let raw_track = recording
-        .gps
+    let section_ids = section_ids_for_gps(&gps, &events);
+
+    let raw_track = gps
         .iter()
         .zip(&section_ids)
         .map(|(gps, section_id)| DiagnosticTrackPoint {
@@ -62,12 +68,12 @@ pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
         })
         .collect();
 
-    let mut items = Vec::with_capacity(recording.imu.len() + recording.gps.len());
-    items.extend((0..recording.imu.len()).map(Item::Imu));
-    items.extend((0..recording.gps.len()).map(Item::Gps));
+    let mut items = Vec::with_capacity(imu.len() + gps.len());
+    items.extend((0..imu.len()).map(Item::Imu));
+    items.extend((0..gps.len()).map(Item::Gps));
     items.sort_by_key(|item| match item {
-        Item::Imu(index) => recording.imu[*index].timestamp_ms,
-        Item::Gps(index) => recording.gps[*index].timestamp_ms,
+        Item::Imu(index) => imu[*index].timestamp_ms,
+        Item::Gps(index) => gps[*index].timestamp_ms,
     });
 
     let fusion = LiveFusion::new();
@@ -76,7 +82,7 @@ pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
     for item in items {
         match item {
             Item::Imu(index) => {
-                let sample = &recording.imu[index];
+                let sample = &imu[index];
                 if last_live_imu_ms == i64::MIN
                     || sample.timestamp_ms - last_live_imu_ms >= LIVE_IMU_INTERVAL_MS
                 {
@@ -89,7 +95,7 @@ pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
                 }
             }
             Item::Gps(index) => {
-                let gps = &recording.gps[index];
+                let gps = &gps[index];
                 if let Some(snapshot) = fusion.push_gps(
                     gps.timestamp_ms,
                     gps.lat,
@@ -112,14 +118,13 @@ pub fn replay_recording(path: String) -> Result<RecordingReplay, FusionError> {
         }
     }
 
-    let finalized_track =
-        crate::bounded::finalized_track(&recording.gps, &fused_track, &section_ids, &recording.imu);
+    let finalized_track = crate::bounded::finalized_track(&gps, &fused_track, &section_ids, &imu);
 
-    Ok(RecordingReplay {
+    RecordingReplay {
         raw_track,
         fused_track,
         finalized_track,
-    })
+    }
 }
 
 fn section_ids_for_gps(
