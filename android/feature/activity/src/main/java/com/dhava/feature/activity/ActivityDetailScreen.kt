@@ -1,6 +1,7 @@
 package com.dhava.feature.activity
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -75,8 +78,16 @@ fun ActivityDetailScreen(
         analysis = analysis,
         diagnostics = diagnostics,
         onBack = onBack,
-        onExport = {
-            viewModel.exportGpx { file ->
+        onExport = { kind ->
+            viewModel.exportGpx(kind) { result ->
+                val file = result.getOrElse { error ->
+                    Toast.makeText(
+                        context,
+                        error.message ?: "GPX export failed",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    return@exportGpx
+                }
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
                 context.startActivity(
                     Intent.createChooser(
@@ -101,7 +112,7 @@ private fun ActivityDetailContent(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     onBack: () -> Unit,
-    onExport: () -> Unit,
+    onExport: (GpxExportKind) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
@@ -120,6 +131,7 @@ private fun ActivityDetailContent(
         .orEmpty()
     val accuracyColors = rememberGpsAccuracyColors()
     val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
+    val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true
 
     Box(modifier = modifier.fillMaxSize()) {
         when (track) {
@@ -205,14 +217,79 @@ private fun ActivityDetailContent(
                         }
                     }
                     recording?.let { RecordingStatusPill(it.status) }
-                    IconButton(onClick = onExport, enabled = track is TrackState.Loaded) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share GPX")
-                    }
+                    GpxExportMenu(
+                        rawAvailable = track is TrackState.Loaded,
+                        processedAvailable = processedExportAvailable,
+                        processedLoading = diagnostics is DiagnosticTrackState.Loading,
+                        onExport = onExport,
+                    )
                 }
                 DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
                 ActivityMetrics(recording, analysis)
             }
         }
+    }
+}
+
+@Composable
+private fun GpxExportMenu(
+    rawAvailable: Boolean,
+    processedAvailable: Boolean,
+    processedLoading: Boolean,
+    onExport: (GpxExportKind) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, enabled = rawAvailable) {
+            Icon(Icons.Filled.Share, contentDescription = "Export GPX")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = {
+                    ExportOptionText(
+                        title = "Processed · 5 Hz",
+                        description = when {
+                            processedAvailable -> "GPS-bounded finalized track"
+                            processedLoading -> "Preparing finalized track…"
+                            else -> "Not available for this ride"
+                        },
+                    )
+                },
+                enabled = processedAvailable,
+                onClick = {
+                    expanded = false
+                    onExport(GpxExportKind.PROCESSED_5_HZ)
+                },
+            )
+            DropdownMenuItem(
+                text = {
+                    ExportOptionText(
+                        title = "Raw GPS",
+                        description = "Original recorded fixes",
+                    )
+                },
+                enabled = rawAvailable,
+                onClick = {
+                    expanded = false
+                    onExport(GpxExportKind.RAW_GPS)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportOptionText(title: String, description: String) {
+    Column {
+        Text(text = title, style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -387,7 +464,7 @@ private fun ActivityDetailContentPreview() {
             analysis = null,
             diagnostics = DiagnosticTrackState.Unavailable,
             onBack = {},
-            onExport = {},
+            onExport = { _ -> },
         )
     }
 }

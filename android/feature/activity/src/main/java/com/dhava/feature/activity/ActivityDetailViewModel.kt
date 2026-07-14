@@ -10,6 +10,7 @@ import android.util.Log
 import com.dhava.core.fusion.FusionCore
 import com.dhava.core.recording.GpsTrackReader
 import com.dhava.core.recording.GpxExporter
+import com.dhava.core.recording.GpxTrackPoint
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordLine
 import com.dhava.core.recording.RecordingRepository
@@ -44,6 +45,11 @@ sealed interface DiagnosticTrackState {
     data class Loaded(val replay: RecordingReplay) : DiagnosticTrackState
 }
 
+enum class GpxExportKind {
+    PROCESSED_5_HZ,
+    RAW_GPS,
+}
+
 /**
  * Loads one recording's index entry plus its GPS polyline for the detail
  * screen. Manual wiring — no DI framework yet.
@@ -73,13 +79,53 @@ class ActivityDetailViewModel(
     private val _diagnostics = MutableStateFlow<DiagnosticTrackState>(DiagnosticTrackState.Loading)
     val diagnostics: StateFlow<DiagnosticTrackState> = _diagnostics.asStateFlow()
 
-    fun exportGpx(onReady: (File) -> Unit) {
-        val points = (_track.value as? TrackState.Loaded)?.points ?: return
+    fun exportGpx(kind: GpxExportKind, onResult: (Result<File>) -> Unit) {
         val title = recording.value?.title ?: "Dhava ride"
+        val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
+        val points = when (kind) {
+            GpxExportKind.PROCESSED_5_HZ -> replay?.finalizedTrack
+                ?.takeIf { it.isNotEmpty() }
+                ?.map { point ->
+                    GpxTrackPoint(
+                        timestampMs = point.timestampMs,
+                        lat = point.lat,
+                        lon = point.lon,
+                        sectionId = point.sectionId,
+                    )
+                }
+            GpxExportKind.RAW_GPS -> {
+                val raw = (_track.value as? TrackState.Loaded)?.points
+                val sectionByTimestamp = replay?.rawTrack
+                    ?.associate { point -> point.timestampMs to point.sectionId }
+                    .orEmpty()
+                raw?.map { point ->
+                    GpxTrackPoint(
+                        timestampMs = point.timestampMs,
+                        lat = point.lat,
+                        lon = point.lon,
+                        altitudeM = point.altitudeM,
+                        sectionId = sectionByTimestamp[point.timestampMs] ?: 0,
+                    )
+                }
+            }
+        }
+        if (points.isNullOrEmpty()) {
+            onResult(Result.failure(IllegalStateException("The selected GPX track is unavailable")))
+            return
+        }
+        val suffix = when (kind) {
+            GpxExportKind.PROCESSED_5_HZ -> "processed-5hz"
+            GpxExportKind.RAW_GPS -> "raw-gps"
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val output = File(getApplication<Application>().cacheDir, "exports/dhava-${recordingId.take(8)}.gpx")
-            val file = GpxExporter.write(points, title, output)
-            withContext(Dispatchers.Main) { onReady(file) }
+            val result = runCatching {
+                val output = File(
+                    getApplication<Application>().cacheDir,
+                    "exports/dhava-${recordingId.take(8)}-$suffix.gpx",
+                )
+                GpxExporter.write(points, title, output)
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
         }
     }
 

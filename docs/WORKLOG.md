@@ -701,3 +701,23 @@ Because Strava requires a client secret for code exchange and refresh, direct ex
 uses a minimal Go OAuth/upload broker rather than shipping the secret in Android. The
 broker receives only the processed GPX/FIT artifact and never the device's raw sensor
 recording. Recorder and local activity functionality remain fully backend-optional.
+
+## 2026-07-14 — Raw and processed 5 Hz GPX export
+
+Replaced Activity Detail's single ambiguous GPX share action with a compact two-option
+menu. `Processed · 5 Hz` exports Rust's GPS-bounded `finalized_track`; `Raw GPS`
+exports the original recorded fixes and retains their GPS elevation. The processed
+option stays disabled while replay is being prepared or if finalization is unavailable,
+and export failures now surface to the rider instead of silently doing nothing.
+
+Generalized the core GPX writer around an explicit export-point model with timestamp,
+optional elevation and Rust-owned section id. Each consecutive section becomes its own
+`<trkseg>`, preventing other apps from drawing a bridge across a manual pause. Added a
+unit regression covering 200 ms timestamps and separate pause sections. Recording and
+Activity unit tests, Activity lint and the full debug assembly pass. Installed and
+visually checked both menu choices on the OnePlus: the sampled bus ride produced a
+valid 689-point processed GPX and a valid 167-point raw GPX with all 167 elevations.
+Core Recording lint remains blocked by the pre-existing missing-permission annotation
+at `RecordingService.kt:521`; its report contains no GPX exporter findings. Processed
+elevation remains open: the current finalized replay contract is horizontal-only, so
+Android intentionally does not manufacture vertical interpolation outside fusion-core.

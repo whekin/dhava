@@ -200,3 +200,17 @@ activity results are always recomputed canonically from the raw on-device file.
 - Ship canonical finalized GPX first, including separate pause sections, ride title,
   description and `MountainBikeRide` sport type. Move to FIT later for richer pause,
   device and sport metadata without changing the one-button UX.
+
+## 2026-07-14 — GPX exposes processed and raw GPS artifacts
+
+- Activity Detail offers two local Share targets: `Processed · 5 Hz` is the normal
+  ride artifact, while `Raw GPS` preserves the original recorded fixes for inspection
+  and interoperability. The two filenames are explicit so they cannot be confused.
+- Processed GPX coordinates and timestamps come directly from Rust
+  `finalized_track`; Android must not resample or smooth them again. Both exports use
+  Rust replay `section_id` boundaries to create separate GPX `<trkseg>` elements, so
+  a pause never becomes a straight line in another application.
+- Raw GPX keeps recorded GPS elevation. The current finalized diagnostic contract has
+  no altitude per 5 Hz point, so processed GPX deliberately omits `<ele>` rather than
+  inventing vertical fusion in Kotlin. Add finalized elevation to Rust before calling
+  the processed export vertically canonical.

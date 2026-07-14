@@ -28,8 +28,9 @@ skeleton and deployment scaffolding.
 
 ## Phase 3 — Export
 
-- GPX export through Android Share ✅
-- Canonical finalized GPX with explicit pause sections
+- GPX export through Android Share: raw GPS and processed 5 Hz tracks ✅
+- Canonical finalized horizontal GPX with explicit pause sections ✅
+- Add Rust-finalized elevation to the processed GPX
 - One-time `Connect with Strava`, then one-tap per-activity export with offline queue,
   retry and duplicate protection
 - Minimal Go OAuth/upload broker for Strava credentials; the recorder itself remains
