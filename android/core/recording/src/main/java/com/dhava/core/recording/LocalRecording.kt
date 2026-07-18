@@ -74,3 +74,18 @@ data class LocalRecording(
      */
     @SerialName("server_id") val serverId: String? = null,
 )
+
+/**
+ * Applies save-sheet/edit metadata to an entry. Blank title/description clear
+ * the field; a null bike clears every bike field. Lifecycle fields (status,
+ * savedAtMs, serverId, …) are deliberately untouched — editing metadata must
+ * never change what happens to the recording.
+ */
+fun LocalRecording.withMetadata(title: String, description: String, bike: Bike?): LocalRecording =
+    copy(
+        title = title.trim().ifBlank { null },
+        description = description.trim().ifBlank { null },
+        bikeId = bike?.id,
+        bikeName = bike?.name,
+        bikeType = bike?.type,
+    )

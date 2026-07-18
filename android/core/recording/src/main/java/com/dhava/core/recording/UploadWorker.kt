@@ -37,6 +37,9 @@ class UploadWorker(
          */
         private const val MAX_ATTEMPTS = 5
 
+        /** Unique-work name per recording; enqueue and cancel must agree. */
+        private fun uniqueName(recordingId: String) = "upload-$recordingId"
+
         /** Enqueues (or keeps) the unique upload job for one recording. */
         fun enqueue(context: Context, recordingId: String) {
             val request = OneTimeWorkRequestBuilder<UploadWorker>()
@@ -53,13 +56,21 @@ class UploadWorker(
                 )
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "upload-$recordingId",
+                uniqueName(recordingId),
                 // KEEP: if a job for this recording is already queued/running,
                 // this call is a no-op. Retry-after-terminal-failure still
                 // works because finished work does not block a new enqueue.
                 ExistingWorkPolicy.KEEP,
                 request,
             )
+        }
+
+        /**
+         * Cancels the pending/queued upload job for one recording (activity
+         * deletion). A no-op when nothing is enqueued under this name.
+         */
+        fun cancel(context: Context, recordingId: String) {
+            WorkManager.getInstance(context).cancelUniqueWork(uniqueName(recordingId))
         }
     }
 

@@ -822,3 +822,47 @@ fixture quality check), strict clippy and fmt pass; UniFFI bindings and both
 Android .so files regenerated. Core Recording and Activity unit tests and the
 full debug assembly pass. Only the physical OnePlus was attached (no
 emulator), so the on-device visual pass is still pending.
+
+## 2026-07-19 — Activity edit/delete, raw diagnostics export, detail reliability
+
+The activity detail screen finishes Phase 2's last item. An overflow menu (next
+to the export share icon) gains Edit and Delete. Edit opens a dialog prefilled
+from the index entry — title, notes and a bike FilterChip row with the same
+add-bike dialog shape as the save sheet (module-local copy; features must not
+depend on each other) — and persists through the new
+`RecordingRepository.updateMetadata(id, title, description, bike)`. The
+transform is extracted into `LocalRecording.withMetadata`, now shared with
+`saveActivity` so the save and edit paths cannot drift; it trims fields, clears
+them when blank and never touches lifecycle fields (status, savedAtMs,
+serverId). Deliberately local-only: an uploaded activity's server copy is not
+re-synced (needs a metadata-update endpoint in the contract first).
+
+Delete is a two-step confirm that names the activity and warns that the raw
+sensor recording goes with it. `RecordingRepository.deleteActivity(id)` cancels
+the WorkManager unique upload job first (new `UploadWorker.cancel`, sharing the
+`upload-<id>` name with enqueue), removes the index entry under the index
+mutex, deletes the raw `.jsonl.gz` and finally the canonical artifact through
+the store mutex, so an in-flight finalization cannot resurrect it. This is the
+one deliberate exception to the raw-forever principle — that principle governs
+automatic behavior, not an explicit confirmed user request. `discard` now
+delegates to `deleteActivity`, keeping a single deletion path. The screen pops
+itself when the recording flow emits null after having been seen once, which
+covers both self-delete and deleted-elsewhere without double-popping.
+
+The export menu adds "Raw recording (.jsonl.gz)": the immutable raw file is
+copied into `cache/exports/` (the only FileProvider-exposed dir) and shared as
+`application/gzip`; `GpxExportKind` became `ActivityExportKind` carrying the
+mime type. Reliability pass: a missing raw file now shows a terminal
+"Activity data unavailable" state instead of a misleading "no GPS" empty state,
+and a raw file whose GPS extraction is empty while the Rust replay also fails
+is reported as unreadable (raw export stays enabled exactly then — that is the
+bug-report use case; only a missing file disables it).
+
+New `LocalRecordingMetadataTest` (3 tests) pins withMetadata trimming/clearing
+and lifecycle-field immutability. Repository-level round-trip tests were
+skipped as not cheap: RecordingRepository needs a real Context, WorkManager and
+the native FusionCore, and the project has no Robolectric; the file-side delete
+semantics stay covered by CanonicalActivityStoreTest. Core Recording and
+Activity unit tests plus the full debug assembly pass. No device attached —
+the on-device pass (edit round-trip, delete from an open detail screen, raw
+share into another app) is pending.

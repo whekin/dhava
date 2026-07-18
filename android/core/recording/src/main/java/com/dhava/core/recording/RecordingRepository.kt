@@ -317,12 +317,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
             .getBoolean("offline_mode", true)
         scope.launch {
             updateEntry(id) {
-                it.copy(
-                    title = title.trim().ifBlank { null },
-                    description = description.trim().ifBlank { null },
-                    bikeId = bike?.id,
-                    bikeName = bike?.name,
-                    bikeType = bike?.type,
+                it.withMetadata(title, description, bike).copy(
                     savedAtMs = System.currentTimeMillis(),
                     status = if (offline) RecordingStatus.RECORDED else RecordingStatus.PENDING_UPLOAD,
                 )
@@ -337,16 +332,48 @@ class RecordingRepository private constructor(private val appContext: Context) {
         }
     }
 
-    /** Deletes the raw file and drops the index entry. Irreversible. */
-    fun discard(id: String) {
-        scope.launch {
-            indexMutex.withLock {
-                _recordings.update { list -> list.filterNot { it.id == id } }
-                saveIndex()
-            }
-            recordingFile(id).delete()
-            canonicalStore.delete(id)
+    /**
+     * Edits the metadata of an already-saved activity in place. Local-only by
+     * design: for an uploaded activity the server copy is deliberately NOT
+     * re-synced here — upload/finish already happened, and metadata sync-back
+     * is a future backend concern (needs an update endpoint in the contract).
+     */
+    suspend fun updateMetadata(id: String, title: String, description: String, bike: Bike?) {
+        loaded.await()
+        updateEntry(id) { it.withMetadata(title, description, bike) }
+    }
+
+    /**
+     * Deletes an activity entirely: the pending upload job (if any), the
+     * index entry, the raw `.jsonl.gz` and the derived canonical artifact.
+     * Irreversible.
+     *
+     * This is the one deliberate exception to the "raw sensor data is kept
+     * forever" principle: that principle governs automatic behavior (nothing
+     * may ever drop raw data as a side effect), not an explicit, confirmed
+     * user request to delete an activity.
+     */
+    suspend fun deleteActivity(id: String) {
+        loaded.await()
+        // Cancel first so a queued worker cannot pick the entry up while the
+        // files underneath it are being removed. A no-op when nothing is
+        // queued; a worker that already ran to completion is unaffected.
+        UploadWorker.cancel(appContext, id)
+        indexMutex.withLock {
+            _recordings.update { list -> list.filterNot { it.id == id } }
+            saveIndex()
         }
+        recordingFile(id).delete()
+        // Serializes on the store mutex against an in-flight artifact
+        // generation for this id, so a concurrent finalization cannot
+        // resurrect the artifact after this delete (a generation that loses
+        // the race fails its raw fingerprint recheck and persists nothing).
+        canonicalStore.delete(id)
+    }
+
+    /** Deletes an unsaved recording (save-sheet Discard). Irreversible. */
+    fun discard(id: String) {
+        scope.launch { deleteActivity(id) }
     }
 
     /** Re-enqueues an upload whose worker exhausted its retries. */

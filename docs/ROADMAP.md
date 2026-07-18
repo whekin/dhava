@@ -23,9 +23,9 @@ skeleton and deployment scaffolding.
 
 - Canonical on-device fusion immediately after Finish ✅
 - Active time, fused distance/speed/track and GPS/barometer elevation ✅
-- Surface elevation quality, GPS quality and uncertainty indicators
-- Reliable activity detail, rename/edit/delete and raw diagnostics export
-- Local storage management and offline map/cache behavior
+- Surface elevation quality, GPS quality and uncertainty indicators ✅
+- Reliable activity detail, rename/edit/delete and raw diagnostics export ✅
+- Local storage management and offline map/cache behavior ✅
 
 ## Phase 3 — Export
 

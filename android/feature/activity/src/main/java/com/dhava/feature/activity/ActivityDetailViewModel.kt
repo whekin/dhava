@@ -8,6 +8,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import android.util.Log
 import com.dhava.core.fusion.FusionCore
+import com.dhava.core.recording.Bike
+import com.dhava.core.recording.BikeType
 import com.dhava.core.recording.CanonicalActivityArtifact
 import com.dhava.core.recording.CanonicalQuality
 import com.dhava.core.recording.GpsTrackReader
@@ -36,8 +38,15 @@ sealed interface TrackState {
     /** Streaming the raw file on IO. */
     data object Loading : TrackState
 
-    /** Recording has no usable GPS fixes (or the file is gone). */
+    /** Recording is readable but has no usable GPS fixes. */
     data object Empty : TrackState
+
+    /**
+     * Raw file missing or unreadable — a user-visible terminal state.
+     * [rawFileMissing] distinguishes "gone" (nothing to export) from
+     * "unreadable" (raw diagnostics export is exactly what a bug report needs).
+     */
+    data class Failed(val message: String, val rawFileMissing: Boolean = false) : TrackState
 
     data class Loaded(
         val points: List<RecordLine.Gps>,
@@ -50,9 +59,12 @@ sealed interface DiagnosticTrackState {
     data class Loaded(val replay: RecordingReplay) : DiagnosticTrackState
 }
 
-enum class GpxExportKind {
-    PROCESSED_5_HZ,
-    RAW_GPS,
+/** What the share menu can produce; the mime type drives the share intent. */
+enum class ActivityExportKind(val mimeType: String) {
+    PROCESSED_5_HZ("application/gpx+xml"),
+    RAW_GPS("application/gpx+xml"),
+    /** The raw sensor recording as-is, for diagnostics/bug reports. */
+    RAW_RECORDING("application/gzip"),
 }
 
 /**
@@ -95,12 +107,35 @@ class ActivityDetailViewModel(
     @Volatile
     private var canonicalArtifact: CanonicalActivityArtifact? = null
 
-    fun exportGpx(kind: GpxExportKind, onResult: (Result<File>) -> Unit) {
+    /** Bikes for the edit sheet's picker. */
+    val bikes: StateFlow<List<Bike>> = repository.bikes
+
+    fun addBike(name: String, type: BikeType): Bike = repository.addBike(name, type)
+
+    fun updateMetadata(title: String, description: String, bike: Bike?) {
+        viewModelScope.launch {
+            repository.updateMetadata(recordingId, title, description, bike)
+        }
+    }
+
+    /**
+     * Deletes the whole activity (index entry, raw file, artifact, pending
+     * upload). The screen pops itself once [recording] emits null.
+     */
+    fun deleteActivity() {
+        viewModelScope.launch { repository.deleteActivity(recordingId) }
+    }
+
+    fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {
+        if (kind == ActivityExportKind.RAW_RECORDING) {
+            exportRawRecording(onResult)
+            return
+        }
         val title = recording.value?.title ?: "Dhava ride"
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
         val artifact = canonicalArtifact
         val points = when (kind) {
-            GpxExportKind.PROCESSED_5_HZ -> artifact?.finalizedTrack
+            ActivityExportKind.PROCESSED_5_HZ -> artifact?.finalizedTrack
                 ?.takeIf { it.isNotEmpty() }
                 ?.map { point ->
                     GpxTrackPoint(
@@ -111,7 +146,7 @@ class ActivityDetailViewModel(
                         sectionId = point.sectionId,
                     )
                 }
-            GpxExportKind.RAW_GPS -> {
+            ActivityExportKind.RAW_GPS -> {
                 artifact?.rawTrack?.map { point ->
                     GpxTrackPoint(point.timestampMs, point.lat, point.lon, point.altitudeM, point.sectionId)
                 } ?: run {
@@ -130,14 +165,16 @@ class ActivityDetailViewModel(
                     }
                 }
             }
+            ActivityExportKind.RAW_RECORDING -> null // handled above
         }
         if (points.isNullOrEmpty()) {
             onResult(Result.failure(IllegalStateException("The selected GPX track is unavailable")))
             return
         }
         val suffix = when (kind) {
-            GpxExportKind.PROCESSED_5_HZ -> "processed-5hz"
-            GpxExportKind.RAW_GPS -> "raw-gps"
+            ActivityExportKind.PROCESSED_5_HZ -> "processed-5hz"
+            ActivityExportKind.RAW_GPS -> "raw-gps"
+            ActivityExportKind.RAW_RECORDING -> error("unreachable")
         }
         viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching {
@@ -151,9 +188,31 @@ class ActivityDetailViewModel(
         }
     }
 
+    /**
+     * Shares the immutable raw sensor file as-is for diagnostics. The
+     * FileProvider only exposes `cache/exports/`, so the file is copied there
+     * first; the source under `files/recordings/` is never touched.
+     */
+    private fun exportRawRecording(onResult: (Result<File>) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val source = repository.recordingFile(recordingId)
+                check(source.isFile) { "The raw recording file is missing" }
+                val output = File(
+                    getApplication<Application>().cacheDir,
+                    "exports/dhava-${recordingId.take(8)}-raw.jsonl.gz",
+                )
+                output.parentFile?.mkdirs()
+                source.copyTo(output, overwrite = true)
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            val path = repository.recordingFile(recordingId).absolutePath
+            val rawFile = repository.recordingFile(recordingId)
+            val path = rawFile.absolutePath
             val artifact = repository.canonicalActivity(recordingId)
             if (artifact != null) {
                 canonicalArtifact = artifact
@@ -170,27 +229,39 @@ class ActivityDetailViewModel(
                 return@launch
             }
 
+            // Raw file gone while the index entry still exists (external
+            // cleanup, restored backup, …): a terminal error state instead of
+            // a misleading "no GPS" empty state.
+            if (!rawFile.isFile) {
+                _track.value = TrackState.Failed(
+                    message = "The raw recording file is missing from this phone.",
+                    rawFileMissing = true,
+                )
+                _diagnostics.value = DiagnosticTrackState.Unavailable
+                return@launch
+            }
+
             // Damage-tolerant fallback for an artifact that cannot be built.
             // It preserves the old read path and leaves the raw file untouched.
-            val points = GpsTrackReader.read(repository.recordingFile(recordingId))
-            _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
+            val points = GpsTrackReader.read(rawFile)
             _analysis.value = runCatching { FusionCore.analyze(path) }
                 .onFailure { Log.w("ActivityDetail", "analysis fallback failed for $recordingId", it) }
                 .getOrNull()
-            _diagnostics.value = runCatching { FusionCore.replay(path) }
-                .fold(
-                    onSuccess = { replay ->
-                        if (replay.rawTrack.isEmpty() && replay.fusedTrack.isEmpty()) {
-                            DiagnosticTrackState.Unavailable
-                        } else {
-                            DiagnosticTrackState.Loaded(replay)
-                        }
-                    },
-                    onFailure = {
-                        Log.w("ActivityDetail", "replay fallback failed for $recordingId", it)
-                        DiagnosticTrackState.Unavailable
-                    },
+            val replayResult = runCatching { FusionCore.replay(path) }
+                .onFailure { Log.w("ActivityDetail", "replay fallback failed for $recordingId", it) }
+            _diagnostics.value = replayResult.getOrNull()
+                ?.takeIf { it.rawTrack.isNotEmpty() || it.fusedTrack.isNotEmpty() }
+                ?.let { DiagnosticTrackState.Loaded(it) }
+                ?: DiagnosticTrackState.Unavailable
+            _track.value = when {
+                points.isNotEmpty() -> TrackState.Loaded(points)
+                // No GPS anywhere and even the Rust replay failed: the file
+                // itself is unreadable, not merely GPS-free.
+                replayResult.isFailure -> TrackState.Failed(
+                    "This recording could not be read. The raw file is preserved on this phone.",
                 )
+                else -> TrackState.Empty
+            }
         }
     }
 

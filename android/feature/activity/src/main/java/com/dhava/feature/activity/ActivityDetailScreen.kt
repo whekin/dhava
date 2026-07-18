@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -26,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +43,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.dhava.core.recording.Bike
+import com.dhava.core.recording.BikeType
 import com.dhava.core.recording.CanonicalQuality
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingStatus
@@ -72,7 +77,20 @@ fun ActivityDetailScreen(
     val analysis by viewModel.analysis.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
     val quality by viewModel.quality.collectAsState()
+    val bikes by viewModel.bikes.collectAsState()
     val context = LocalContext.current
+
+    // Pops the screen once the entry disappears (deleted here or elsewhere).
+    // Guarded on "seen at least once" so the initial null emitted while the
+    // index is still loading never pops a freshly opened screen.
+    var recordingSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(recording) {
+        if (recording != null) {
+            recordingSeen = true
+        } else if (recordingSeen) {
+            onBack()
+        }
+    }
 
     ActivityDetailContent(
         recording = recording,
@@ -80,30 +98,37 @@ fun ActivityDetailScreen(
         analysis = analysis,
         diagnostics = diagnostics,
         quality = quality,
+        bikes = bikes,
         onBack = onBack,
         onExport = { kind ->
-            viewModel.exportGpx(kind) { result ->
+            viewModel.export(kind) { result ->
                 val file = result.getOrElse { error ->
                     Toast.makeText(
                         context,
-                        error.message ?: "GPX export failed",
+                        error.message ?: "Export failed",
                         Toast.LENGTH_SHORT,
                     ).show()
-                    return@exportGpx
+                    return@export
                 }
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
                 context.startActivity(
                     Intent.createChooser(
                         Intent(Intent.ACTION_SEND).apply {
-                            type = "application/gpx+xml"
+                            type = kind.mimeType
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         },
-                        "Share GPX",
+                        when (kind) {
+                            ActivityExportKind.RAW_RECORDING -> "Share raw recording"
+                            else -> "Share GPX"
+                        },
                     ),
                 )
             }
         },
+        onAddBike = viewModel::addBike,
+        onEditSave = viewModel::updateMetadata,
+        onDelete = viewModel::deleteActivity,
         modifier = modifier,
     )
 }
@@ -115,11 +140,17 @@ private fun ActivityDetailContent(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
+    bikes: List<Bike>,
     onBack: () -> Unit,
-    onExport: (GpxExportKind) -> Unit,
+    onExport: (ActivityExportKind) -> Unit,
+    onAddBike: (name: String, type: BikeType) -> Bike,
+    onEditSave: (title: String, description: String, bike: Bike?) -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
+    var showEdit by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
     val rawPoints = replay?.rawTrack?.map {
         MapTrackPoint(it.lat, it.lon, it.sectionId, it.accuracyM)
@@ -145,6 +176,11 @@ private fun ActivityDetailContent(
             TrackState.Empty -> DhavaEmptyState(
                 title = "No usable GPS track",
                 description = "The raw recording is still preserved on this phone.",
+                modifier = Modifier.fillMaxSize(),
+            )
+            is TrackState.Failed -> DhavaEmptyState(
+                title = "Activity data unavailable",
+                description = track.message,
                 modifier = Modifier.fillMaxSize(),
             )
             is TrackState.Loaded -> TrackMap(
@@ -221,11 +257,20 @@ private fun ActivityDetailContent(
                         }
                     }
                     recording?.let { RecordingStatusPill(it.status) }
-                    GpxExportMenu(
-                        rawAvailable = track is TrackState.Loaded,
+                    ExportMenu(
+                        rawGpsAvailable = track is TrackState.Loaded,
                         processedAvailable = processedExportAvailable,
                         processedLoading = diagnostics is DiagnosticTrackState.Loading,
+                        // The raw file is worth exporting even when it cannot
+                        // be decoded (that is the diagnostics use case) — only
+                        // a missing file makes the option pointless.
+                        rawRecordingAvailable = !(track is TrackState.Failed && track.rawFileMissing),
                         onExport = onExport,
+                    )
+                    ActivityOverflowMenu(
+                        enabled = recording != null,
+                        onEdit = { showEdit = true },
+                        onDelete = { confirmDelete = true },
                     )
                 }
                 DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
@@ -241,19 +286,114 @@ private fun ActivityDetailContent(
             }
         }
     }
+
+    val currentRecording = recording
+    if (showEdit && currentRecording != null) {
+        ActivityEditDialog(
+            recording = currentRecording,
+            bikes = bikes,
+            onAddBike = onAddBike,
+            onSave = { title, description, bike ->
+                onEditSave(title, description, bike)
+                showEdit = false
+            },
+            onDismiss = { showEdit = false },
+        )
+    }
+    if (confirmDelete && currentRecording != null) {
+        DeleteActivityDialog(
+            activityName = currentRecording.title ?: formatStartTime(currentRecording.startedAtMs),
+            onConfirm = {
+                confirmDelete = false
+                onDelete()
+            },
+            onDismiss = { confirmDelete = false },
+        )
+    }
+}
+
+/**
+ * Second step of the two-step delete (overflow item → confirm). Names the
+ * activity so there is no doubt what is about to disappear. Deleting the raw
+ * file at the user's explicit, confirmed request is the intended exception to
+ * the raw-forever principle (see RecordingRepository.deleteActivity).
+ */
+@Composable
+private fun DeleteActivityDialog(
+    activityName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete activity?") },
+        text = {
+            Text(
+                "“$activityName” will be deleted from this phone, " +
+                    "including its raw sensor recording. This cannot be undone.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable
-private fun GpxExportMenu(
-    rawAvailable: Boolean,
-    processedAvailable: Boolean,
-    processedLoading: Boolean,
-    onExport: (GpxExportKind) -> Unit,
+private fun ActivityOverflowMenu(
+    enabled: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }, enabled = rawAvailable) {
-            Icon(Icons.Filled.Share, contentDescription = "Export GPX")
+        IconButton(onClick = { expanded = true }, enabled = enabled) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "More actions")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Edit") },
+                onClick = {
+                    expanded = false
+                    onEdit()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                onClick = {
+                    expanded = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportMenu(
+    rawGpsAvailable: Boolean,
+    processedAvailable: Boolean,
+    processedLoading: Boolean,
+    rawRecordingAvailable: Boolean,
+    onExport: (ActivityExportKind) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            enabled = rawGpsAvailable || rawRecordingAvailable,
+        ) {
+            Icon(Icons.Filled.Share, contentDescription = "Export")
         }
         DropdownMenu(
             expanded = expanded,
@@ -273,7 +413,7 @@ private fun GpxExportMenu(
                 enabled = processedAvailable,
                 onClick = {
                     expanded = false
-                    onExport(GpxExportKind.PROCESSED_5_HZ)
+                    onExport(ActivityExportKind.PROCESSED_5_HZ)
                 },
             )
             DropdownMenuItem(
@@ -283,10 +423,23 @@ private fun GpxExportMenu(
                         description = "Original recorded fixes",
                     )
                 },
-                enabled = rawAvailable,
+                enabled = rawGpsAvailable,
                 onClick = {
                     expanded = false
-                    onExport(GpxExportKind.RAW_GPS)
+                    onExport(ActivityExportKind.RAW_GPS)
+                },
+            )
+            DropdownMenuItem(
+                text = {
+                    ExportOptionText(
+                        title = "Raw recording (.jsonl.gz)",
+                        description = "Full sensor data for diagnostics",
+                    )
+                },
+                enabled = rawRecordingAvailable,
+                onClick = {
+                    expanded = false
+                    onExport(ActivityExportKind.RAW_RECORDING)
                 },
             )
         }
@@ -476,8 +629,12 @@ private fun ActivityDetailContentPreview() {
             analysis = null,
             diagnostics = DiagnosticTrackState.Unavailable,
             quality = null,
+            bikes = emptyList(),
             onBack = {},
             onExport = { _ -> },
+            onAddBike = { name, type -> Bike("preview-bike", name, type) },
+            onEditSave = { _, _, _ -> },
+            onDelete = {},
         )
     }
 }
