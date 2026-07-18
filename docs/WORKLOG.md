@@ -756,3 +756,69 @@ the artifact mtime, confirming a cache hit. The resulting processed GPX is valid
 contains 689 track points with 689 `<ele>` elements. The original raw recording remains
 present. Transport classification and explicit GPS/elevation quality indicators remain
 separate next steps.
+
+## 2026-07-18 — Local storage management and offline map behavior
+
+Settings gained a Storage section. Three rows report the raw recordings
+(count + size, `files/recordings/*.jsonl.gz`), the derived canonical artifacts
+(`files/activity-artifacts/*.canonical.json.gz`) and the MapLibre cache
+database, all sized on IO once per section entry with a small spinner while
+measuring; the footer shows the device's free space. Two confirmed actions
+clear derived data only: "Clear processed artifacts" goes through a new
+`CanonicalActivityStore.clearAll()` under the store mutex (raw is never
+touched; artifacts recompute lazily on the next activity open), and "Clear map
+cache" runs MapLibre's `OfflineManager.clearAmbientCache` followed by
+`packDatabase` so the SQLite file actually shrinks. Results surface as toasts
+and re-trigger sizing. There is deliberately no bulk raw delete — that arrives
+with per-activity delete.
+
+Offline map behavior is now explicit. `initDhavaMap` (core:map) replaces the
+bare `MapLibre.getInstance` in both map screens and applies a 512 MB ambient
+cache ceiling once per process, so previously seen tiles render offline and the
+cache stays bounded via LRU eviction. `MapView.setDhavaMapStyle` wraps style
+loading with an offline fallback: if the remote style document cannot load
+(offline with a cold cache), a minimal local background-only style is applied
+and the same overlay callback still runs — track polylines, markers and the
+live position never depend on tile or style availability. The fallback is
+one-shot per style attempt and ignores per-resource failures once a style has
+loaded, so failed tile fetches cannot replace a good style or loop.
+
+Added `directoryUsage` (core:recording) as the pure sizing primitive with unit
+tests (suffix filtering, non-recursion, missing dir) and a store regression
+proving `clearAll` removes artifacts and temp files, preserves raw and
+recomputes on the next load. Core Recording and Activity unit tests and the
+full debug assembly pass; the APK was installed on the OnePlus, but the phone
+was dozing so the visual pass and an airplane-mode check are still pending.
+
+## 2026-07-18 — Elevation source, GPS quality and uncertainty indicators
+
+Rust now derives a `QualitySummary` alongside every canonical activity. The
+elevation source (Barometric / GpsInterpolated / None) is threaded directly
+out of the vertical pass — it reports which signal each finalized point
+actually used (majority wins, since a barometric profile can still fall back
+to GPS at the edges of the baro time range) instead of re-deriving the answer
+heuristically. The summary also carries baro sample and GPS fix counts, the
+accepted count under the same ≤20 m gate the altitude anchors use, median and
+interpolated p90 accuracy, within-section >5 s gap count and longest gap
+(manual pause boundaries change the section id and never count as gaps), and
+a coarse elevation uncertainty documented as heuristic v0 for UI display
+only: barometric = 2 m + stddev of the raw baro-vs-GPS anchor offsets (fixed
+3 m spread when under two anchors), GPS-only = max(5 m, p90 × 1.5).
+
+The Android artifact stores the summary as a nullable `quality` block and the
+store schema bumped 1 → 2 so pre-quality artifacts recompute from raw on next
+open; a new store regression proves a legacy-schema file is rebuilt. Activity
+Detail shows two tappable chips under the stat tiles once the artifact is
+loaded (hidden while computing, so no wrong-data flicker): an elevation chip
+("Barometric" positive, "GPS-only (±N m)" caution using the amber accuracy
+palette, or "No elevation") and a GPS chip bucketing median accuracy into
+Good ≤5 m / Fair ≤10 m / Poor with the gap count appended. Either chip opens
+a plain AlertDialog with the full numbers (fixes, accepted %, median/p90,
+gaps, baro samples, source, uncertainty).
+
+All 57 fusion-core tests (five new: gap counting,
+pause-spanning holes, rejected fixes, altitude-free recordings, plus a forest
+fixture quality check), strict clippy and fmt pass; UniFFI bindings and both
+Android .so files regenerated. Core Recording and Activity unit tests and the
+full debug assembly pass. Only the physical OnePlus was attached (no
+emulator), so the on-device visual pass is still pending.

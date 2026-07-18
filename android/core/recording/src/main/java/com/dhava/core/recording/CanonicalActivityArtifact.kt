@@ -3,6 +3,8 @@ package com.dhava.core.recording
 import com.dhava.fusion.AirtimeWindow
 import com.dhava.fusion.CanonicalActivity
 import com.dhava.fusion.DiagnosticTrackPoint
+import com.dhava.fusion.ElevationSource
+import com.dhava.fusion.QualitySummary
 import com.dhava.fusion.RecordingReplay
 import com.dhava.fusion.RideAnalysis
 import com.dhava.fusion.TrackPoint
@@ -25,6 +27,28 @@ data class CanonicalActivityArtifact(
     val analysis: CanonicalAnalysis,
     val rawTrack: List<CanonicalPoint>,
     val finalizedTrack: List<CanonicalPoint>,
+    /**
+     * Rust-derived signal quality. Nullable only for decode compatibility;
+     * the schema bump makes the store rebuild artifacts that predate it.
+     */
+    val quality: CanonicalQuality? = null,
+)
+
+@Serializable
+enum class CanonicalElevationSource { BAROMETRIC, GPS_INTERPOLATED, NONE }
+
+/** Mirror of Rust's `QualitySummary`; heuristic v0, for UI display only. */
+@Serializable
+data class CanonicalQuality(
+    val elevationSource: CanonicalElevationSource,
+    val baroSampleCount: Int,
+    val gpsFixCount: Int,
+    val gpsAcceptedCount: Int,
+    val medianAccuracyM: Double? = null,
+    val p90AccuracyM: Double? = null,
+    val gpsGapCount: Int,
+    val longestGapS: Double,
+    val elevationUncertaintyM: Double? = null,
 )
 
 @Serializable
@@ -78,6 +102,7 @@ internal data class CanonicalArtifactPayload(
     val analysis: CanonicalAnalysis,
     val rawTrack: List<CanonicalPoint>,
     val finalizedTrack: List<CanonicalPoint>,
+    val quality: CanonicalQuality,
 )
 
 internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
@@ -108,7 +133,24 @@ internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
                 sectionId = point.sectionId,
             )
         },
+        quality = quality.toCanonicalQuality(),
     )
+
+private fun QualitySummary.toCanonicalQuality(): CanonicalQuality = CanonicalQuality(
+    elevationSource = when (elevationSource) {
+        ElevationSource.BAROMETRIC -> CanonicalElevationSource.BAROMETRIC
+        ElevationSource.GPS_INTERPOLATED -> CanonicalElevationSource.GPS_INTERPOLATED
+        ElevationSource.NONE -> CanonicalElevationSource.NONE
+    },
+    baroSampleCount = baroSampleCount.toInt(),
+    gpsFixCount = gpsFixCount.toInt(),
+    gpsAcceptedCount = gpsAcceptedCount.toInt(),
+    medianAccuracyM = medianAccuracyM,
+    p90AccuracyM = p90AccuracyM,
+    gpsGapCount = gpsGapCount.toInt(),
+    longestGapS = longestGapS,
+    elevationUncertaintyM = elevationUncertaintyM,
+)
 
 private fun RideAnalysis.toCanonicalAnalysis(): CanonicalAnalysis = CanonicalAnalysis(
     startedAtMs = startedAtMs,

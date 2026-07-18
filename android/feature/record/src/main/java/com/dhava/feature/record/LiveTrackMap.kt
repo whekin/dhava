@@ -23,11 +23,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.dhava.core.map.DHAVA_MAP_STYLE_URI
 import com.dhava.core.map.DhavaMapPalette
-import com.dhava.core.map.applyDhavaMapPalette
 import com.dhava.core.map.configureDhavaMapChrome
+import com.dhava.core.map.initDhavaMap
 import com.dhava.core.map.rememberDhavaMapPalette
+import com.dhava.core.map.setDhavaMapStyle
 import com.dhava.core.recording.LiveTrackPoint
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -38,7 +38,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
-import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
@@ -165,8 +164,9 @@ internal fun LiveTrackMap(
     LaunchedEffect(mapView, palette) {
         mapView.getMapAsync { map ->
             map.applyContentPadding(bottomPaddingPx, mapChromeMarginPx, palette)
-            map.setStyle(Style.Builder().fromUri(DHAVA_MAP_STYLE_URI)) { style ->
-                style.applyDhavaMapPalette(palette)
+            // Fallback-aware: the overlay layers below are added even when the
+            // remote style cannot load offline, so the live track always draws.
+            mapView.setDhavaMapStyle(map, palette) { style ->
                 style.addSource(GeoJsonSource(ACCURACY_SOURCE))
                 style.addLayer(
                     FillLayer(ACCURACY_FILL_LAYER, ACCURACY_SOURCE).withProperties(
@@ -306,7 +306,7 @@ private fun accuracyPolygon(position: MapPosition, radiusM: Double): Polygon {
 private fun rememberLiveMapView(): MapView {
     val context = LocalContext.current
     val mapView = remember {
-        MapLibre.getInstance(context)
+        initDhavaMap(context)
         MapView(context).also { it.onCreate(null) }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle

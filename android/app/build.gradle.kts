@@ -36,6 +36,8 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(project(":core:map"))
+    implementation(project(":core:recording"))
     implementation(project(":feature:record"))
     implementation(project(":feature:activity"))
 

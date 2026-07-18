@@ -110,7 +110,17 @@ class RecordingRepository private constructor(private val appContext: Context) {
     /** Directory holding the raw `.jsonl.gz` files. */
     fun recordingsDir(): File = File(appContext.filesDir, RECORDINGS_DIR)
 
+    /** Directory holding derived `.canonical.json.gz` artifacts. */
+    fun artifactsDir(): File = File(appContext.filesDir, ARTIFACTS_DIR)
+
     fun recordingFile(id: String): File = File(recordingsDir(), "$id.jsonl.gz")
+
+    /**
+     * Deletes every derived canonical artifact; raw recordings are never
+     * touched. [canonicalActivity] transparently recomputes an artifact the
+     * next time its activity is opened. Returns the number of files removed.
+     */
+    suspend fun clearProcessedArtifacts(): Int = canonicalStore.clearAll()
 
     /**
      * Loads a valid derived artifact or rebuilds it from immutable raw data.

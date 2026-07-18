@@ -1600,7 +1600,8 @@ data class CanonicalActivity (
     var `algorithmVersion`: kotlin.String,
     var `analysis`: RideAnalysis,
     var `rawTrack`: List<CanonicalTrackPoint>,
-    var `finalizedTrack`: List<CanonicalTrackPoint>
+    var `finalizedTrack`: List<CanonicalTrackPoint>,
+    var `quality`: QualitySummary
 ) {
 
     companion object
@@ -1616,6 +1617,7 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterTypeRideAnalysis.read(buf),
             FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
             FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
+            FfiConverterTypeQualitySummary.read(buf),
         )
     }
 
@@ -1623,7 +1625,8 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterString.allocationSize(value.`algorithmVersion`) +
             FfiConverterTypeRideAnalysis.allocationSize(value.`analysis`) +
             FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`rawTrack`) +
-            FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`finalizedTrack`)
+            FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`finalizedTrack`) +
+            FfiConverterTypeQualitySummary.allocationSize(value.`quality`)
     )
 
     override fun write(value: CanonicalActivity, buf: ByteBuffer) {
@@ -1631,6 +1634,7 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterTypeRideAnalysis.write(value.`analysis`, buf)
             FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`rawTrack`, buf)
             FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`finalizedTrack`, buf)
+            FfiConverterTypeQualitySummary.write(value.`quality`, buf)
     }
 }
 
@@ -1797,6 +1801,94 @@ public object FfiConverterTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot>
             FfiConverterDouble.write(value.`speedMps`, buf)
             FfiConverterBoolean.write(value.`stationary`, buf)
             FfiConverterDouble.write(value.`accuracyM`, buf)
+    }
+}
+
+
+
+/**
+ * Signal-quality indicators for one canonical activity.
+ *
+ * `elevation_source` is threaded out of the vertical pass itself, so it
+ * reports what [`finalize`] actually used rather than a re-derivation.
+ * `elevation_uncertainty_m` is an honest but coarse heuristic (v0) meant for
+ * UI display only — never feed it back into timing or segment math.
+ */
+data class QualitySummary (
+    var `elevationSource`: ElevationSource,
+    /**
+     * Barometer samples parsed from the raw recording.
+     */
+    var `baroSampleCount`: kotlin.UInt,
+    /**
+     * All GPS fixes in the raw recording.
+     */
+    var `gpsFixCount`: kotlin.UInt,
+    /**
+     * Fixes passing the same ≤ 20 m accuracy gate used by the vertical pass
+     * (fixes without a reported accuracy also pass, matching that gate).
+     */
+    var `gpsAcceptedCount`: kotlin.UInt,
+    var `medianAccuracyM`: kotlin.Double?,
+    var `p90AccuracyM`: kotlin.Double?,
+    /**
+     * Gaps > 5 s between consecutive fixes inside one recording section.
+     * Manual pause boundaries change the section id and never count.
+     */
+    var `gpsGapCount`: kotlin.UInt,
+    /**
+     * Longest within-section gap in seconds; 0 when there are no gaps.
+     */
+    var `longestGapS`: kotlin.Double,
+    /**
+     * Coarse ± estimate of the finalized elevation profile, meters.
+     */
+    var `elevationUncertaintyM`: kotlin.Double?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeQualitySummary: FfiConverterRustBuffer<QualitySummary> {
+    override fun read(buf: ByteBuffer): QualitySummary {
+        return QualitySummary(
+            FfiConverterTypeElevationSource.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: QualitySummary) = (
+            FfiConverterTypeElevationSource.allocationSize(value.`elevationSource`) +
+            FfiConverterUInt.allocationSize(value.`baroSampleCount`) +
+            FfiConverterUInt.allocationSize(value.`gpsFixCount`) +
+            FfiConverterUInt.allocationSize(value.`gpsAcceptedCount`) +
+            FfiConverterOptionalDouble.allocationSize(value.`medianAccuracyM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`p90AccuracyM`) +
+            FfiConverterUInt.allocationSize(value.`gpsGapCount`) +
+            FfiConverterDouble.allocationSize(value.`longestGapS`) +
+            FfiConverterOptionalDouble.allocationSize(value.`elevationUncertaintyM`)
+    )
+
+    override fun write(value: QualitySummary, buf: ByteBuffer) {
+            FfiConverterTypeElevationSource.write(value.`elevationSource`, buf)
+            FfiConverterUInt.write(value.`baroSampleCount`, buf)
+            FfiConverterUInt.write(value.`gpsFixCount`, buf)
+            FfiConverterUInt.write(value.`gpsAcceptedCount`, buf)
+            FfiConverterOptionalDouble.write(value.`medianAccuracyM`, buf)
+            FfiConverterOptionalDouble.write(value.`p90AccuracyM`, buf)
+            FfiConverterUInt.write(value.`gpsGapCount`, buf)
+            FfiConverterDouble.write(value.`longestGapS`, buf)
+            FfiConverterOptionalDouble.write(value.`elevationUncertaintyM`, buf)
     }
 }
 
@@ -2028,6 +2120,49 @@ public object FfiConverterTypeTrackPoint: FfiConverterRustBuffer<TrackPoint> {
             FfiConverterOptionalDouble.write(value.`speedMps`, buf)
     }
 }
+
+
+
+/**
+ * Which signal the finalized vertical profile is actually built from.
+ */
+
+enum class ElevationSource {
+
+    /**
+     * Barometric relative movement anchored to median-filtered GPS altitude.
+     */
+    BAROMETRIC,
+    /**
+     * Section-aware linear interpolation of accepted GPS altitudes only.
+     */
+    GPS_INTERPOLATED,
+    /**
+     * The recording has no usable altitude information at all.
+     */
+    NONE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeElevationSource: FfiConverterRustBuffer<ElevationSource> {
+    override fun read(buf: ByteBuffer) = try {
+        ElevationSource.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ElevationSource) = 4UL
+
+    override fun write(value: ElevationSource, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 

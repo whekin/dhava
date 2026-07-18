@@ -14,6 +14,7 @@ use crate::replay::{DiagnosticTrackPoint, replay_parsed};
 use crate::{BaroSample, FusionError};
 
 const MAX_GPS_ACCURACY_M: f64 = 20.0;
+const GPS_GAP_MIN_S: f64 = 5.0;
 const GPS_ALTITUDE_MEDIAN_WINDOW: usize = 5;
 const ALTITUDE_HYSTERESIS_M: f64 = 2.0;
 const BAROMETRIC_SCALE_M: f64 = 44_330.0;
@@ -40,6 +41,45 @@ pub struct CanonicalActivity {
     pub analysis: RideAnalysis,
     pub raw_track: Vec<CanonicalTrackPoint>,
     pub finalized_track: Vec<CanonicalTrackPoint>,
+    pub quality: QualitySummary,
+}
+
+/// Which signal the finalized vertical profile is actually built from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ElevationSource {
+    /// Barometric relative movement anchored to median-filtered GPS altitude.
+    Barometric,
+    /// Section-aware linear interpolation of accepted GPS altitudes only.
+    GpsInterpolated,
+    /// The recording has no usable altitude information at all.
+    None,
+}
+
+/// Signal-quality indicators for one canonical activity.
+///
+/// `elevation_source` is threaded out of the vertical pass itself, so it
+/// reports what [`finalize`] actually used rather than a re-derivation.
+/// `elevation_uncertainty_m` is an honest but coarse heuristic (v0) meant for
+/// UI display only — never feed it back into timing or segment math.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct QualitySummary {
+    pub elevation_source: ElevationSource,
+    /// Barometer samples parsed from the raw recording.
+    pub baro_sample_count: u32,
+    /// All GPS fixes in the raw recording.
+    pub gps_fix_count: u32,
+    /// Fixes passing the same ≤ 20 m accuracy gate used by the vertical pass
+    /// (fixes without a reported accuracy also pass, matching that gate).
+    pub gps_accepted_count: u32,
+    pub median_accuracy_m: Option<f64>,
+    pub p90_accuracy_m: Option<f64>,
+    /// Gaps > 5 s between consecutive fixes inside one recording section.
+    /// Manual pause boundaries change the section id and never count.
+    pub gps_gap_count: u32,
+    /// Longest within-section gap in seconds; 0 when there are no gaps.
+    pub longest_gap_s: f64,
+    /// Coarse ± estimate of the finalized elevation profile, meters.
+    pub elevation_uncertainty_m: Option<f64>,
 }
 
 /// Parses one raw recording once and produces its canonical processed result.
@@ -76,12 +116,13 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
         })
         .collect();
 
-    let altitudes = finalized_altitudes(&raw_track, &recording.baro, &replay.finalized_track);
+    let vertical = finalized_altitudes(&raw_track, &recording.baro, &replay.finalized_track);
+    let quality = quality_summary(&raw_track, recording.baro.len(), &vertical);
     let speeds = finalized_speeds(&raw_track, &replay.finalized_track);
     let finalized_track: Vec<_> = replay
         .finalized_track
         .iter()
-        .zip(altitudes.into_iter().zip(speeds))
+        .zip(vertical.altitudes.into_iter().zip(speeds))
         .map(|(point, (altitude_m, speed_mps))| CanonicalTrackPoint {
             timestamp_ms: point.timestamp_ms,
             lat: point.lat,
@@ -109,17 +150,32 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
         analysis,
         raw_track,
         finalized_track,
+        quality,
     })
+}
+
+/// Vertical-pass output plus what it actually used, so the quality summary
+/// never has to re-derive the elevation source heuristically.
+struct VerticalPass {
+    altitudes: Vec<Option<f64>>,
+    source: ElevationSource,
+    /// Standard deviation of the raw baro-vs-GPS anchor offsets, if the pass
+    /// was barometric and had at least two anchors.
+    anchor_spread_m: Option<f64>,
 }
 
 fn finalized_altitudes(
     raw: &[CanonicalTrackPoint],
     baro: &[BaroSample],
     finalized: &[DiagnosticTrackPoint],
-) -> Vec<Option<f64>> {
+) -> VerticalPass {
     let gps_anchors = smoothed_gps_altitudes(raw);
     if gps_anchors.is_empty() {
-        return vec![None; finalized.len()];
+        return VerticalPass {
+            altitudes: vec![None; finalized.len()],
+            source: ElevationSource::None,
+            anchor_spread_m: None,
+        };
     }
 
     let barometric = relative_barometric_altitudes(baro);
@@ -138,7 +194,9 @@ fn finalized_altitudes(
     let gps_by_section = values_by_section(&gps_anchors);
     let offsets_by_section = values_by_section(&smoothed_offsets);
 
-    finalized
+    let mut barometric_points = 0usize;
+    let mut gps_points = 0usize;
+    let altitudes: Vec<_> = finalized
         .iter()
         .map(|point| {
             let gps_fallback =
@@ -148,9 +206,111 @@ fn finalized_altitudes(
                     interpolate_sectioned(&offsets_by_section, point.timestamp_ms, point.section_id)
                         .and_then(|offset| finite(Some(relative + offset)))
                 });
+            if barometric_altitude.is_some() {
+                barometric_points += 1;
+            } else if gps_fallback.is_some() {
+                gps_points += 1;
+            }
             barometric_altitude.or(gps_fallback)
         })
-        .collect()
+        .collect();
+
+    // A barometric profile may still fall back to GPS for a few edge points
+    // outside the baro time range; the majority signal names the source.
+    let source = if barometric_points > 0 && barometric_points >= gps_points {
+        ElevationSource::Barometric
+    } else if gps_points > 0 {
+        ElevationSource::GpsInterpolated
+    } else {
+        ElevationSource::None
+    };
+    let anchor_spread_m = (source == ElevationSource::Barometric)
+        .then(|| stddev(offset_anchors.iter().map(|anchor| anchor.altitude_m)))
+        .flatten();
+
+    VerticalPass {
+        altitudes,
+        source,
+        anchor_spread_m,
+    }
+}
+
+fn quality_summary(
+    raw: &[CanonicalTrackPoint],
+    baro_sample_count: usize,
+    vertical: &VerticalPass,
+) -> QualitySummary {
+    let gps_accepted_count = raw
+        .iter()
+        .filter(|point| {
+            point
+                .accuracy_m
+                .is_none_or(|accuracy| accuracy <= MAX_GPS_ACCURACY_M)
+        })
+        .count();
+
+    let mut accuracies: Vec<_> = raw.iter().filter_map(|point| point.accuracy_m).collect();
+    accuracies.sort_by(f64::total_cmp);
+    let median_accuracy_m = percentile(&accuracies, 0.5);
+    let p90_accuracy_m = percentile(&accuracies, 0.9);
+
+    let mut gps_gap_count = 0u32;
+    let mut longest_gap_s = 0.0f64;
+    for pair in raw.windows(2) {
+        if pair[0].section_id != pair[1].section_id {
+            continue;
+        }
+        let gap_s = (pair[1].timestamp_ms - pair[0].timestamp_ms) as f64 / 1_000.0;
+        if gap_s > GPS_GAP_MIN_S {
+            gps_gap_count += 1;
+            longest_gap_s = longest_gap_s.max(gap_s);
+        }
+    }
+
+    // Heuristic v0, for UI display only (see the field documentation).
+    let elevation_uncertainty_m = match vertical.source {
+        ElevationSource::Barometric => Some(2.0 + vertical.anchor_spread_m.unwrap_or(3.0)),
+        ElevationSource::GpsInterpolated => Some(
+            p90_accuracy_m
+                .map(|p90| (p90 * 1.5).max(5.0))
+                .unwrap_or(5.0),
+        ),
+        ElevationSource::None => None,
+    };
+
+    QualitySummary {
+        elevation_source: vertical.source,
+        baro_sample_count: baro_sample_count as u32,
+        gps_fix_count: raw.len() as u32,
+        gps_accepted_count: gps_accepted_count as u32,
+        median_accuracy_m,
+        p90_accuracy_m,
+        gps_gap_count,
+        longest_gap_s,
+        elevation_uncertainty_m,
+    }
+}
+
+/// Linear-interpolated percentile of an ascending slice; `None` when empty.
+fn percentile(sorted: &[f64], fraction: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let rank = fraction * (sorted.len() - 1) as f64;
+    let below = rank.floor() as usize;
+    let above = rank.ceil() as usize;
+    let weight = rank - below as f64;
+    Some(sorted[below] + (sorted[above.min(sorted.len() - 1)] - sorted[below]) * weight)
+}
+
+fn stddev(values: impl Iterator<Item = f64> + Clone) -> Option<f64> {
+    let count = values.clone().count();
+    if count < 2 {
+        return None;
+    }
+    let mean = values.clone().sum::<f64>() / count as f64;
+    let variance = values.map(|value| (value - mean).powi(2)).sum::<f64>() / count as f64;
+    Some(variance.sqrt())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -385,6 +545,18 @@ mod tests {
         assert!((midpoint.altitude_m.unwrap() - 94.0).abs() < 0.01);
         assert_eq!(canonical.algorithm_version, ALGORITHM_VERSION);
         assert_eq!(canonical.raw_track.len(), 2);
+
+        let quality = &canonical.quality;
+        assert_eq!(quality.elevation_source, ElevationSource::GpsInterpolated);
+        assert_eq!(quality.baro_sample_count, 0);
+        assert_eq!(quality.gps_fix_count, 2);
+        assert_eq!(quality.gps_accepted_count, 2);
+        assert_eq!(quality.median_accuracy_m, Some(4.0));
+        assert_eq!(quality.p90_accuracy_m, Some(4.0));
+        assert_eq!(quality.gps_gap_count, 0);
+        assert_eq!(quality.longest_gap_s, 0.0);
+        // GPS-only uncertainty: max(5.0, p90 × 1.5) with p90 = 4 m.
+        assert_eq!(quality.elevation_uncertainty_m, Some(6.0));
     }
 
     #[test]
@@ -418,6 +590,106 @@ mod tests {
             .altitude_m
             .unwrap();
         assert!((peak - 110.0).abs() < 0.2, "barometric peak was {peak}");
+        assert_eq!(
+            canonical.quality.elevation_source,
+            ElevationSource::Barometric
+        );
+        assert_eq!(canonical.quality.baro_sample_count, 3);
+        let uncertainty = canonical.quality.elevation_uncertainty_m.unwrap();
+        assert!(
+            (2.0..=5.0).contains(&uncertainty),
+            "barometric uncertainty was {uncertainty}"
+        );
+    }
+
+    #[test]
+    fn gps_hole_within_a_section_counts_as_gap() {
+        let recording = ParsedRecording {
+            gps: vec![
+                gps(1_000, 44.8, 100.0),
+                gps(2_000, 44.8001, 100.0),
+                gps(14_000, 44.8002, 100.0),
+                gps(15_000, 44.8003, 100.0),
+            ],
+            ..ParsedRecording::default()
+        };
+
+        let quality = finalize(&recording).unwrap().quality;
+        assert_eq!(quality.gps_gap_count, 1);
+        assert!((quality.longest_gap_s - 12.0).abs() < 1e-9);
+        assert_eq!(quality.gps_fix_count, 4);
+        assert_eq!(quality.gps_accepted_count, 4);
+    }
+
+    #[test]
+    fn gps_hole_spanning_a_manual_pause_is_not_a_gap() {
+        let recording = ParsedRecording {
+            gps: vec![
+                gps(1_000, 44.8, 100.0),
+                gps(2_000, 44.8001, 100.0),
+                gps(14_000, 44.81, 100.0),
+                gps(15_000, 44.8101, 100.0),
+            ],
+            events: vec![
+                RecordingEvent {
+                    timestamp_ms: 2_500,
+                    action: "pause".into(),
+                },
+                RecordingEvent {
+                    timestamp_ms: 13_000,
+                    action: "resume".into(),
+                },
+            ],
+            ..ParsedRecording::default()
+        };
+
+        let quality = finalize(&recording).unwrap().quality;
+        assert_eq!(quality.gps_gap_count, 0);
+        assert_eq!(quality.longest_gap_s, 0.0);
+    }
+
+    #[test]
+    fn inaccurate_fixes_fail_the_accepted_gate_and_widen_uncertainty() {
+        let mut inaccurate = gps(2_000, 44.8001, 90.0);
+        inaccurate.accuracy_m = Some(25.0);
+        let recording = ParsedRecording {
+            gps: vec![
+                gps(1_000, 44.8, 100.0),
+                inaccurate,
+                gps(3_000, 44.8002, 80.0),
+            ],
+            ..ParsedRecording::default()
+        };
+
+        let quality = finalize(&recording).unwrap().quality;
+        assert_eq!(quality.gps_fix_count, 3);
+        assert_eq!(quality.gps_accepted_count, 2);
+        assert_eq!(quality.median_accuracy_m, Some(4.0));
+        // p90 over [4, 4, 25]: interpolated between the two largest values.
+        let p90 = quality.p90_accuracy_m.unwrap();
+        assert!((p90 - 20.8).abs() < 1e-9, "p90 was {p90}");
+        assert_eq!(quality.elevation_source, ElevationSource::GpsInterpolated);
+        let uncertainty = quality.elevation_uncertainty_m.unwrap();
+        assert!(
+            (uncertainty - 31.2).abs() < 1e-9,
+            "uncertainty was {uncertainty}"
+        );
+    }
+
+    #[test]
+    fn no_altitude_information_yields_none_source() {
+        let mut a = gps(1_000, 44.8, 0.0);
+        let mut b = gps(2_000, 44.8001, 0.0);
+        a.altitude_m = None;
+        b.altitude_m = None;
+        let recording = ParsedRecording {
+            gps: vec![a, b],
+            ..ParsedRecording::default()
+        };
+
+        let quality = finalize(&recording).unwrap().quality;
+        assert_eq!(quality.elevation_source, ElevationSource::None);
+        assert_eq!(quality.elevation_uncertainty_m, None);
     }
 
     #[test]

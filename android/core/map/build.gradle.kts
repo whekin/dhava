@@ -23,6 +23,7 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(libs.kotlinx.coroutines.android)
     api(libs.maplibre.android)
 }
 

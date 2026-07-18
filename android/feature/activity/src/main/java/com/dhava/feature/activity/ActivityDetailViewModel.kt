@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import android.util.Log
 import com.dhava.core.fusion.FusionCore
 import com.dhava.core.recording.CanonicalActivityArtifact
+import com.dhava.core.recording.CanonicalQuality
 import com.dhava.core.recording.GpsTrackReader
 import com.dhava.core.recording.GpxExporter
 import com.dhava.core.recording.GpxTrackPoint
@@ -83,6 +84,14 @@ class ActivityDetailViewModel(
     private val _diagnostics = MutableStateFlow<DiagnosticTrackState>(DiagnosticTrackState.Loading)
     val diagnostics: StateFlow<DiagnosticTrackState> = _diagnostics.asStateFlow()
 
+    /**
+     * Rust-derived signal quality from the canonical artifact. Null while the
+     * artifact is computing or on the legacy fallback path — the quality row
+     * stays hidden instead of flashing wrong data.
+     */
+    private val _quality = MutableStateFlow<CanonicalQuality?>(null)
+    val quality: StateFlow<CanonicalQuality?> = _quality.asStateFlow()
+
     @Volatile
     private var canonicalArtifact: CanonicalActivityArtifact? = null
 
@@ -148,6 +157,7 @@ class ActivityDetailViewModel(
             val artifact = repository.canonicalActivity(recordingId)
             if (artifact != null) {
                 canonicalArtifact = artifact
+                _quality.value = artifact.quality
                 val points = artifact.rawGpsPoints()
                 _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
                 _analysis.value = artifact.toRideAnalysis()

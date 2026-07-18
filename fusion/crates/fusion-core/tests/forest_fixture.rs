@@ -3,7 +3,7 @@
 //! at 1 Hz, no baro. The rider does two bunny hops (around t ≈ +19.8 s and
 //! +23.3 s) and rides down a short stair drop.
 
-use fusion_core::{ALGORITHM_VERSION, analyze_recording};
+use fusion_core::{ALGORITHM_VERSION, ElevationSource, analyze_recording, finalize_recording};
 
 fn fixture_path() -> String {
     concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/forest-30s.jsonl.gz").to_owned()
@@ -77,4 +77,36 @@ fn real_forest_recording_analyzes_plausibly() {
 
     assert_eq!(a.algorithm_version, ALGORITHM_VERSION);
     assert!(a.descent_m >= 0.0 && a.ascent_m >= 0.0);
+}
+
+#[test]
+fn real_forest_recording_reports_gps_only_quality() {
+    let canonical = finalize_recording(fixture_path()).expect("fixture must finalize");
+    let quality = &canonical.quality;
+
+    // The LE2123 recording has no barometer lines, so the vertical pass must
+    // report GPS interpolation rather than barometric anchoring.
+    assert_eq!(quality.baro_sample_count, 0);
+    assert_eq!(quality.elevation_source, ElevationSource::GpsInterpolated);
+
+    // Counts line up with the raw fixes the analyzer saw.
+    assert_eq!(quality.gps_fix_count as usize, canonical.raw_track.len());
+    assert_eq!(quality.gps_fix_count, canonical.analysis.gps_count);
+    assert!(quality.gps_accepted_count <= quality.gps_fix_count);
+    assert!(quality.gps_accepted_count > 0);
+
+    // A phone fix always reports accuracy; the stats must exist and be sane.
+    let median = quality.median_accuracy_m.expect("median accuracy");
+    let p90 = quality.p90_accuracy_m.expect("p90 accuracy");
+    assert!(median > 0.0 && median <= p90, "median {median}, p90 {p90}");
+
+    // Continuous 1 Hz coverage: no >5 s holes in 30 s of recording.
+    assert_eq!(quality.gps_gap_count, 0);
+    assert_eq!(quality.longest_gap_s, 0.0);
+
+    let uncertainty = quality.elevation_uncertainty_m.expect("uncertainty");
+    assert!(
+        uncertainty >= 5.0 && (uncertainty - (p90 * 1.5).max(5.0)).abs() < 1e-9,
+        "uncertainty {uncertainty}"
+    );
 }

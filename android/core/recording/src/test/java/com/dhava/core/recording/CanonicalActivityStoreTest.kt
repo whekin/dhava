@@ -2,9 +2,13 @@ package com.dhava.core.recording
 
 import java.io.File
 import java.nio.file.Files
+import java.util.zip.GZIPOutputStream
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -42,6 +46,38 @@ class CanonicalActivityStoreTest {
         assertEquals("gps-bounded-0.3", changedAlgorithm.algorithmVersion)
     }
 
+    @Test fun `artifact with an older schema version is recomputed`() = runBlocking {
+        val root = Files.createTempDirectory("dhava-artifact-schema").toFile()
+        val raw = root.resolve("ride.jsonl.gz").apply { writeText("raw") }
+        var produceCalls = 0
+        val store = CanonicalActivityStore(
+            artifactsDir = root.resolve("artifacts"),
+            currentAlgorithmVersion = { "gps-bounded-0.2" },
+            produce = {
+                produceCalls++
+                payload("gps-bounded-0.2", distanceM = 7.0)
+            },
+        )
+
+        val fresh = store.loadOrCreate("ride", raw)
+        assertEquals(CanonicalActivityStore.SCHEMA_VERSION, fresh.schemaVersion)
+        assertNotNull("new artifacts must carry the quality summary", fresh.quality)
+
+        // Simulate a pre-quality artifact: same raw fingerprint and algorithm,
+        // but the previous schema version and no quality block.
+        val legacyJson = Json { encodeDefaults = true; explicitNulls = false }
+        val legacy = fresh.copy(schemaVersion = CanonicalActivityStore.SCHEMA_VERSION - 1, quality = null)
+        GZIPOutputStream(store.artifactFile("ride").outputStream()).bufferedWriter().use { writer ->
+            writer.write(legacyJson.encodeToString(legacy))
+        }
+
+        val rebuilt = store.loadOrCreate("ride", raw)
+        assertEquals(2, produceCalls)
+        assertEquals(CanonicalActivityStore.SCHEMA_VERSION, rebuilt.schemaVersion)
+        assertNotNull(rebuilt.quality)
+        assertEquals(CanonicalElevationSource.GPS_INTERPOLATED, rebuilt.quality?.elevationSource)
+    }
+
     @Test fun `corrupt artifact is replaced and delete removes cache`() = runBlocking {
         val root = Files.createTempDirectory("dhava-artifact-corrupt").toFile()
         val raw = root.resolve("ride.jsonl.gz").apply { writeText("raw") }
@@ -64,6 +100,35 @@ class CanonicalActivityStoreTest {
         store.delete("ride")
         assertFalse(store.artifactFile("ride").exists())
         assertTrue(raw.exists())
+    }
+
+    @Test fun `clearAll removes every artifact and temp file but preserves raw and recomputes`() = runBlocking {
+        val root = Files.createTempDirectory("dhava-artifact-clear").toFile()
+        val rawA = root.resolve("a.jsonl.gz").apply { writeText("raw-a") }
+        val rawB = root.resolve("b.jsonl.gz").apply { writeText("raw-b") }
+        var produceCalls = 0
+        val store = CanonicalActivityStore(
+            artifactsDir = root.resolve("artifacts"),
+            currentAlgorithmVersion = { "gps-bounded-0.2" },
+            produce = {
+                produceCalls++
+                payload("gps-bounded-0.2", distanceM = produceCalls.toDouble())
+            },
+        )
+        store.loadOrCreate("a", rawA)
+        store.loadOrCreate("b", rawB)
+        root.resolve("artifacts/stale.canonical.tmp").writeText("partial")
+
+        assertEquals(2, store.clearAll())
+        assertFalse(store.artifactFile("a").exists())
+        assertFalse(store.artifactFile("b").exists())
+        assertFalse(root.resolve("artifacts/stale.canonical.tmp").exists())
+        assertTrue(rawA.exists())
+        assertTrue(rawB.exists())
+
+        store.loadOrCreate("a", rawA)
+        assertEquals(3, produceCalls)
+        assertTrue(store.artifactFile("a").exists())
     }
 
     @Test fun `does not cache a result when raw changes during finalization`() = runBlocking {
@@ -105,5 +170,16 @@ class CanonicalActivityStoreTest {
             ),
             rawTrack = listOf(CanonicalPoint(1_000, 41.7, 44.8, sectionId = 0)),
             finalizedTrack = listOf(CanonicalPoint(1_000, 41.7, 44.8, sectionId = 0)),
+            quality = CanonicalQuality(
+                elevationSource = CanonicalElevationSource.GPS_INTERPOLATED,
+                baroSampleCount = 0,
+                gpsFixCount = 2,
+                gpsAcceptedCount = 2,
+                medianAccuracyM = 4.0,
+                p90AccuracyM = 4.0,
+                gpsGapCount = 0,
+                longestGapS = 0.0,
+                elevationUncertaintyM = 6.0,
+            ),
         )
 }

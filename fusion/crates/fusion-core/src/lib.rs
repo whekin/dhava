@@ -26,7 +26,9 @@ pub mod replay;
 pub use live::{LiveFusion, LiveSnapshot};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
 
-pub use canonical::{CanonicalActivity, CanonicalTrackPoint, finalize_recording};
+pub use canonical::{
+    CanonicalActivity, CanonicalTrackPoint, ElevationSource, QualitySummary, finalize_recording,
+};
 
 pub use analysis::{
     ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,

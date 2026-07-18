@@ -48,6 +48,7 @@ internal class CanonicalActivityStore(
                 analysis = payload.analysis,
                 rawTrack = payload.rawTrack,
                 finalizedTrack = payload.finalizedTrack,
+                quality = payload.quality,
             )
             writeAtomically(id, artifact)
             artifact
@@ -56,6 +57,20 @@ internal class CanonicalActivityStore(
     suspend fun delete(id: String) = mutex.withLock {
         artifactFile(id).delete()
         temporaryFile(id).delete()
+    }
+
+    /**
+     * Removes every persisted artifact (and stray temp files) under the mutex
+     * so an in-flight finalization cannot interleave. Artifacts are purely
+     * derived data: the next [loadOrCreate] rebuilds them from immutable raw.
+     * Returns the number of artifacts deleted.
+     */
+    suspend fun clearAll(): Int = mutex.withLock {
+        artifactsDir.listFiles { file -> file.name.endsWith(".canonical.tmp") }
+            ?.forEach { it.delete() }
+        artifactsDir.listFiles { file -> file.name.endsWith(".canonical.json.gz") }
+            ?.count { it.delete() }
+            ?: 0
     }
 
     internal fun artifactFile(id: String): File = File(artifactsDir, "$id.canonical.json.gz")
@@ -106,8 +121,9 @@ internal class CanonicalActivityStore(
 
     private fun temporaryFile(id: String): File = File(artifactsDir, "$id.canonical.tmp")
 
-    private companion object {
-        const val SCHEMA_VERSION = 1
+    internal companion object {
+        // v2: adds the Rust-derived quality summary; v1 artifacts recompute.
+        const val SCHEMA_VERSION = 2
         val ArtifactJson = Json {
             encodeDefaults = true
             explicitNulls = false

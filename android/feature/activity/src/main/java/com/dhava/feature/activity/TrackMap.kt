@@ -19,12 +19,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.dhava.core.map.DHAVA_MAP_STYLE_URI
 import com.dhava.core.map.DhavaMapPalette
-import com.dhava.core.map.applyDhavaMapPalette
 import com.dhava.core.map.configureDhavaMapChrome
+import com.dhava.core.map.initDhavaMap
 import com.dhava.core.map.rememberDhavaMapPalette
-import org.maplibre.android.MapLibre
+import com.dhava.core.map.setDhavaMapStyle
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -101,8 +100,9 @@ internal fun TrackMap(
             @Suppress("DEPRECATION")
             map.setPadding(0, 0, 0, overlayBottomPx)
             map.configureDhavaMapChrome(palette, overlayBottomPx, mapChromeMarginPx)
-            map.setStyle(Style.Builder().fromUri(DHAVA_MAP_STYLE_URI)) { style ->
-                style.applyDhavaMapPalette(palette)
+            // Fallback-aware: track layers are added even when the remote
+            // style cannot load offline, so recorded lines always render.
+            mapView.setDhavaMapStyle(map, palette) { style ->
                 style.addSource(
                     GeoJsonSource(RAW_SOURCE_ID, diagnosticLineOptions()).also { source ->
                         rawPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
@@ -438,7 +438,7 @@ private fun fitCamera(map: MapLibreMap, points: List<MapTrackPoint>) {
 private fun rememberMapViewWithLifecycle(): MapView {
     val context = LocalContext.current
     val mapView = remember {
-        MapLibre.getInstance(context)
+        initDhavaMap(context)
         MapView(context).also { it.onCreate(null) }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle

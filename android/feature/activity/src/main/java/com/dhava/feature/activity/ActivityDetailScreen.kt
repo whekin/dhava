@@ -40,6 +40,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.dhava.core.recording.CanonicalQuality
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingStatus
 import com.dhava.core.ui.DhavaDivider
@@ -70,6 +71,7 @@ fun ActivityDetailScreen(
     val track by viewModel.track.collectAsState()
     val analysis by viewModel.analysis.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
+    val quality by viewModel.quality.collectAsState()
     val context = LocalContext.current
 
     ActivityDetailContent(
@@ -77,6 +79,7 @@ fun ActivityDetailScreen(
         track = track,
         analysis = analysis,
         diagnostics = diagnostics,
+        quality = quality,
         onBack = onBack,
         onExport = { kind ->
             viewModel.exportGpx(kind) { result ->
@@ -111,6 +114,7 @@ private fun ActivityDetailContent(
     track: TrackState,
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
+    quality: CanonicalQuality?,
     onBack: () -> Unit,
     onExport: (GpxExportKind) -> Unit,
     modifier: Modifier = Modifier,
@@ -226,6 +230,14 @@ private fun ActivityDetailContent(
                 }
                 DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
                 ActivityMetrics(recording, analysis)
+                // Hidden until the canonical artifact provides real numbers,
+                // so a computing or legacy artifact never flashes wrong data.
+                quality?.let {
+                    ActivityQualityRow(
+                        quality = it,
+                        modifier = Modifier.padding(top = DhavaSpacing.large),
+                    )
+                }
             }
         }
     }
@@ -463,6 +475,7 @@ private fun ActivityDetailContentPreview() {
             track = TrackState.Empty,
             analysis = null,
             diagnostics = DiagnosticTrackState.Unavailable,
+            quality = null,
             onBack = {},
             onExport = { _ -> },
         )

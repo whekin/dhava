@@ -6,7 +6,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import java.util.Locale
+import java.util.WeakHashMap
 import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
@@ -129,6 +132,63 @@ fun Style.applyDhavaMapPalette(palette: DhavaMapPalette) {
             PropertyFactory.textHaloBlur(0.15f),
         )
     }
+}
+
+// Style-fallback bookkeeping is main-thread only (MapView callbacks); one
+// listener per MapView, dropped automatically with the view.
+private val styleFallbacks = WeakHashMap<MapView, DhavaStyleFallback>()
+
+/**
+ * Loads the Dhava remote style with an offline fallback. If the style document
+ * itself cannot be loaded (offline with a cold ambient cache), a local
+ * background-only style is applied instead and [onStyleReady] still runs — so
+ * track overlays (polylines, markers, position) never depend on network or
+ * tile availability. Failed tile fetches inside a successfully loaded style do
+ * not trigger the fallback; MapLibre keeps rendering whatever is cached.
+ */
+fun MapView.setDhavaMapStyle(
+    map: MapLibreMap,
+    palette: DhavaMapPalette,
+    onStyleReady: (Style) -> Unit,
+) {
+    val fallback = styleFallbacks.getOrPut(this) {
+        DhavaStyleFallback().also(::addOnDidFailLoadingMapListener)
+    }
+    fallback.pending = {
+        // OnDidFailLoadingMap can also fire for individual failed resources;
+        // only replace the style when none ever loaded.
+        if (map.style == null) {
+            map.setStyle(Style.Builder().fromJson(fallbackStyleJson(palette))) { style ->
+                style.applyDhavaMapPalette(palette)
+                onStyleReady(style)
+            }
+        }
+    }
+    map.setStyle(Style.Builder().fromUri(DHAVA_MAP_STYLE_URI)) { style ->
+        fallback.pending = null
+        style.applyDhavaMapPalette(palette)
+        onStyleReady(style)
+    }
+}
+
+/** One-shot per style attempt so repeated resource errors cannot loop. */
+private class DhavaStyleFallback : MapView.OnDidFailLoadingMapListener {
+    var pending: (() -> Unit)? = null
+
+    override fun onDidFailLoadingMap(errorMessage: String) {
+        pending?.invoke()
+        pending = null
+    }
+}
+
+/**
+ * Minimal valid local style: a quiet themed background with no remote sources,
+ * so it always loads synchronously and the overlay layers have a canvas.
+ */
+private fun fallbackStyleJson(palette: DhavaMapPalette): String {
+    val background = String.format(Locale.US, "#%06X", 0xFFFFFF and palette.background)
+    return """{"version":8,"name":"dhava-offline-fallback","sources":{},""" +
+        """"layers":[{"id":"background","type":"background","paint":{"background-color":"$background"}}]}"""
 }
 
 fun MapLibreMap.configureDhavaMapChrome(
