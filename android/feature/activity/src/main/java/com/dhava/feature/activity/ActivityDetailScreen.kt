@@ -274,7 +274,7 @@ private fun ActivityDetailContent(
                     )
                 }
                 DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
-                ActivityMetrics(recording, analysis)
+                ActivityMetrics(recording, analysis, quality)
                 // Hidden until the canonical artifact provides real numbers,
                 // so a computing or legacy artifact never flashes wrong data.
                 quality?.let {
@@ -548,7 +548,11 @@ private fun RecordingStatusPill(status: RecordingStatus) {
 private data class StatusPresentation(val label: String, val container: Color, val content: Color)
 
 @Composable
-private fun ActivityMetrics(recording: LocalRecording?, analysis: RideAnalysis?) {
+private fun ActivityMetrics(
+    recording: LocalRecording?,
+    analysis: RideAnalysis?,
+    quality: CanonicalQuality?,
+) {
     val durationMs = recording
         ?.takeIf { it.endedAtMs > it.startedAtMs }
         ?.let { it.endedAtMs - it.startedAtMs }
@@ -558,7 +562,8 @@ private fun ActivityMetrics(recording: LocalRecording?, analysis: RideAnalysis?)
         "Distance" to (analysis?.let { formatDistance(it.distanceM) } ?: Placeholder),
         "Avg speed" to (analysis?.avgMovingSpeedMps?.let(::formatSpeed) ?: Placeholder),
         "Max speed" to (analysis?.maxSpeedMps?.let(::formatSpeed) ?: Placeholder),
-        "Descent" to (analysis?.let { formatDistance(it.descentM) } ?: Placeholder),
+        descentMetricLabel(quality) to
+            (analysis?.let { formatDistance(it.descentM) } ?: Placeholder),
         "Airtime" to (analysis?.let(::formatAirtime) ?: Placeholder),
     )
     Column(verticalArrangement = Arrangement.spacedBy(DhavaSpacing.large)) {

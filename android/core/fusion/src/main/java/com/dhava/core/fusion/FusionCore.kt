@@ -19,7 +19,7 @@ import com.dhava.fusion.replayRecording as ffiReplayRecording
 object FusionCore {
 
     /**
-     * Version tag of the canonical algorithms (e.g. `"gps-bounded-0.3"`).
+     * Version tag of the canonical algorithms (e.g. `"gps-bounded-0.4"`).
      * Results are tagged with this value product-wide so they can be
      * recomputed on-device when algorithms improve.
      */

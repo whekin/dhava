@@ -1,6 +1,6 @@
 //! On-device ride analysis: the first real analysis API exposed to Android.
 //!
-//! # Algorithm status: `gps-bounded-0.3`
+//! # Algorithm status: `gps-bounded-0.4`
 //!
 //! Everything in this module is a deliberately NAIVE, GPS-first v0 baseline,
 //! to be replaced by proper GPS+IMU+baro Kalman fusion. Every result is
@@ -37,7 +37,7 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.3";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.4";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;
@@ -100,9 +100,12 @@ pub struct RideAnalysis {
     pub moving_time_s: f64,
     /// Total horizontal distance, meters.
     pub distance_m: f64,
-    /// Total ascent, meters (hysteresis-filtered GPS altitude).
+    /// Upward elevation, meters.
+    ///
+    /// Canonical finalization reports accumulated movement with barometer data
+    /// and robust section-wise net change for GPS-only recordings.
     pub ascent_m: f64,
-    /// Total descent, meters (hysteresis-filtered GPS altitude).
+    /// Downward elevation, with the same source-dependent semantics as ascent.
     pub descent_m: f64,
     /// Maximum speed, m/s.
     pub max_speed_mps: f64,

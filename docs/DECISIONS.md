@@ -237,7 +237,7 @@ activity results are always recomputed canonically from the raw on-device file.
 - Canonical vertical v0 preserves relative barometer movement and anchors it to
   median-filtered, accuracy-gated GPS altitude. GPS-only recordings use section-aware
   altitude interpolation. Ascent/descent hysteresis resets at pause boundaries. The
-  canonical algorithm version is currently `gps-bounded-0.3`.
+  canonical algorithm version is currently `gps-bounded-0.4`.
 
 ## 2026-07-19 — Short GPS jumps require accuracy and Doppler consistency
 
@@ -254,3 +254,19 @@ activity results are always recomputed canonically from the raw on-device file.
   only across consecutive fixes without reported speed; average moving speed is the
   conservative floor. This avoids interpreting an allowed correction inside GPS
   uncertainty as instantaneous rider velocity.
+
+## 2026-07-20 — GPS-only elevation is a net metric, not accumulated gain
+
+- A barometric canonical track keeps accumulated ascent/descent. Without a
+  barometer, short smoothing cannot distinguish actual repeated climbing from
+  low-frequency GPS-altitude drift, so accumulated GPS gain/drop is not presented as
+  trustworthy.
+- GPS-only canonical metrics sum robust net altitude changes independently per
+  continuous recording section. Each section uses the median of up to five accepted
+  altitude fixes at each endpoint, applies the existing 2 m deadband and never bridges
+  a pause. The processed track still carries section-aware interpolated GPS elevation;
+  immutable raw remains available for future DEM or multi-run segment recalculation.
+- Android labels the downward metric `Net drop` and the quality source `GPS net`.
+  GPS-only uncertainty is a conservative display heuristic of `max(7 m, p90 horizontal
+  accuracy × 2)`; it describes the reported net metric and must not feed timing,
+  segment matching or corrections.

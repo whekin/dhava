@@ -106,7 +106,7 @@ fn real_forest_recording_reports_gps_only_quality() {
 
     let uncertainty = quality.elevation_uncertainty_m.expect("uncertainty");
     assert!(
-        uncertainty >= 5.0 && (uncertainty - (p90 * 1.5).max(5.0)).abs() < 1e-9,
+        uncertainty >= 7.0 && (uncertainty - (p90 * 2.0).max(7.0)).abs() < 1e-9,
         "uncertainty {uncertainty}"
     );
 }

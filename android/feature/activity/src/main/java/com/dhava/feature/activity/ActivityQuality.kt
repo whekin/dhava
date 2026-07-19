@@ -50,10 +50,17 @@ internal fun elevationChipText(quality: CanonicalQuality): String = when (qualit
     CanonicalElevationSource.BAROMETRIC -> "Elevation: Barometric"
     CanonicalElevationSource.GPS_INTERPOLATED ->
         quality.elevationUncertaintyM
-            ?.let { "Elevation: GPS-only (±${it.roundToInt()} m)" }
-            ?: "Elevation: GPS-only"
+            ?.let { "Elevation: GPS net (±${it.roundToInt()} m)" }
+            ?: "Elevation: GPS net"
     CanonicalElevationSource.NONE -> "No elevation"
 }
+
+internal fun descentMetricLabel(quality: CanonicalQuality?): String =
+    if (quality?.elevationSource == CanonicalElevationSource.GPS_INTERPOLATED) {
+        "Net drop"
+    } else {
+        "Descent"
+    }
 
 /** Null when the recording carries no accuracy estimates to bucket. */
 internal fun gpsChipText(quality: CanonicalQuality): String? {
@@ -147,6 +154,12 @@ private fun QualityDetailsDialog(quality: CanonicalQuality, onDismiss: () -> Uni
     } else {
         0.0
     }
+    val uncertaintyLabel =
+        if (quality.elevationSource == CanonicalElevationSource.GPS_INTERPOLATED) {
+            "Net uncertainty"
+        } else {
+            "Elevation uncertainty"
+        }
     val rows = buildList {
         add("GPS fixes" to "${quality.gpsFixCount}")
         add(
@@ -167,12 +180,19 @@ private fun QualityDetailsDialog(quality: CanonicalQuality, onDismiss: () -> Uni
         add(
             "Elevation source" to when (quality.elevationSource) {
                 CanonicalElevationSource.BAROMETRIC -> "Barometric"
-                CanonicalElevationSource.GPS_INTERPOLATED -> "GPS-interpolated"
+                CanonicalElevationSource.GPS_INTERPOLATED -> "GPS-interpolated track"
                 CanonicalElevationSource.NONE -> "None"
             },
         )
         add(
-            "Elevation uncertainty" to (
+            "Elevation metric" to when (quality.elevationSource) {
+                CanonicalElevationSource.BAROMETRIC -> "Accumulated ascent/descent"
+                CanonicalElevationSource.GPS_INTERPOLATED -> "Net change per section"
+                CanonicalElevationSource.NONE -> "—"
+            },
+        )
+        add(
+            uncertaintyLabel to (
                 quality.elevationUncertaintyM
                     ?.let { String.format(Locale.US, "±%.1f m", it) }
                     ?: "—"
@@ -226,7 +246,7 @@ private fun ActivityQualityRowGpsOnlyPreview() {
                 p90AccuracyM = 9.4,
                 gpsGapCount = 2,
                 longestGapS = 12.4,
-                elevationUncertaintyM = 14.1,
+                elevationUncertaintyM = 18.8,
             ),
             modifier = Modifier.padding(DhavaSpacing.medium),
         )

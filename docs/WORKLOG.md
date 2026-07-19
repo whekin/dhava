@@ -953,3 +953,38 @@ Installed the APK on the OnePlus and opened Kojoring: schema-2 cache invalidatio
 rebuilt it locally as `gps-bounded-0.3`, and Activity Detail shows 48.8 km/h
 while preserving 11.0 km and 6.6 s × 23 airtime. The temporary Mac raw copy was
 used only for the full replay validation and removed afterward.
+
+## 2026-07-20 — Honest GPS-only net elevation
+
+The canonical algorithm advanced to `gps-bounded-0.4`. Barometric activities
+continue to use accumulated, hysteresis-filtered ascent/descent. GPS-only
+activities now avoid accumulating low-frequency altitude drift: Rust groups
+accepted altitude anchors by pause-aware section and reports only the net
+change between robust endpoint medians (up to five fixes at each edge, 2 m
+deadband). The interpolated elevation profile and immutable raw recording are
+unchanged, so a later DEM or multi-run segment model can recompute richer
+vertical totals without data loss.
+
+Android now names that different quantity honestly: Activity Detail shows
+`NET DROP`, its chip says `ELEVATION: GPS NET (±N M)`, and the signal-quality
+dialog identifies both the GPS-interpolated track source and `Net change per
+section`. Barometric activities retain `DESCENT` and accumulated semantics.
+GPS-only display uncertainty is more conservative at
+`max(7 m, p90 horizontal accuracy × 2)`; it remains UI metadata, not an input
+to correction, timing or segment math.
+
+Full replay of the private Kojoring raw file changed the previous misleading
+GPS accumulation of +637/-1,535 m to 0/+898.7 m net drop, matching the
+approximately 899 m endpoint difference. Horizontal distance (10,992.30 m),
+supported max speed (48.78 km/h), 19,282 finalized points and airtime
+(6.637 s across 23 candidates) stayed unchanged. On the OnePlus, stale-cache
+invalidation rebuilt the same schema-2 artifact locally as `gps-bounded-0.4`;
+the detail screen showed 899 m `NET DROP`, `GPS NET (±20 M)`, 11.0 km,
+48.8 km/h and 6.6 s × 23. Both the detail card and signal-quality dialog were
+visually checked on the physical 1080 × 2412 display.
+
+Added GPS-noise and barometric accumulation regressions, updated quality/UI
+tests and regenerated both committed Android native libraries. Rust formatting,
+all 62 fusion-core unit tests, both forest fixtures, the full workspace tests
+and strict all-target clippy pass. Activity and Recording unit tests plus the
+full debug Android assembly also pass.

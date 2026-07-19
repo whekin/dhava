@@ -37,7 +37,7 @@ class ActivityQualityTest {
             elevationChipText(quality(source = CanonicalElevationSource.BAROMETRIC)),
         )
         assertEquals(
-            "Elevation: GPS-only (±8 m)",
+            "Elevation: GPS net (±8 m)",
             elevationChipText(
                 quality(
                     source = CanonicalElevationSource.GPS_INTERPOLATED,
@@ -46,7 +46,7 @@ class ActivityQualityTest {
             ),
         )
         assertEquals(
-            "Elevation: GPS-only",
+            "Elevation: GPS net",
             elevationChipText(
                 quality(
                     source = CanonicalElevationSource.GPS_INTERPOLATED,
@@ -58,6 +58,18 @@ class ActivityQualityTest {
             "No elevation",
             elevationChipText(quality(source = CanonicalElevationSource.NONE)),
         )
+    }
+
+    @Test fun `GPS elevation labels descent as net drop`() {
+        assertEquals(
+            "Net drop",
+            descentMetricLabel(quality(source = CanonicalElevationSource.GPS_INTERPOLATED)),
+        )
+        assertEquals(
+            "Descent",
+            descentMetricLabel(quality(source = CanonicalElevationSource.BAROMETRIC)),
+        )
+        assertEquals("Descent", descentMetricLabel(null))
     }
 
     private fun quality(

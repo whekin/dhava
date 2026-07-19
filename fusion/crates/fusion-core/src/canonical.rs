@@ -16,7 +16,9 @@ use crate::{BaroSample, FusionError};
 const MAX_GPS_ACCURACY_M: f64 = 20.0;
 const GPS_GAP_MIN_S: f64 = 5.0;
 const GPS_ALTITUDE_MEDIAN_WINDOW: usize = 5;
+const GPS_NET_ENDPOINT_WINDOW: usize = 5;
 const ALTITUDE_HYSTERESIS_M: f64 = 2.0;
+const GPS_NET_UNCERTAINTY_MULTIPLIER: f64 = 2.0;
 const BAROMETRIC_SCALE_M: f64 = 44_330.0;
 const BAROMETRIC_EXPONENT: f64 = 0.190_294_957;
 
@@ -78,7 +80,10 @@ pub struct QualitySummary {
     pub gps_gap_count: u32,
     /// Longest within-section gap in seconds; 0 when there are no gaps.
     pub longest_gap_s: f64,
-    /// Coarse ± estimate of the finalized elevation profile, meters.
+    /// Coarse ± estimate of the reported vertical metric, meters.
+    ///
+    /// This describes accumulated ascent/descent for barometric recordings and
+    /// section-wise net change for GPS-only recordings.
     pub elevation_uncertainty_m: Option<f64>,
 }
 
@@ -135,14 +140,11 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
         })
         .collect();
 
-    if finalized_track
-        .iter()
-        .filter_map(|point| point.altitude_m)
-        .count()
-        >= 2
-    {
-        (analysis.ascent_m, analysis.descent_m) = ascent_descent(&finalized_track);
-    }
+    (analysis.ascent_m, analysis.descent_m) = match vertical.source {
+        ElevationSource::Barometric => ascent_descent(&finalized_track),
+        ElevationSource::GpsInterpolated => gps_net_ascent_descent(&raw_track),
+        ElevationSource::None => (0.0, 0.0),
+    };
     analysis.algorithm_version = ALGORITHM_VERSION.to_owned();
 
     Ok(CanonicalActivity {
@@ -272,8 +274,8 @@ fn quality_summary(
         ElevationSource::Barometric => Some(2.0 + vertical.anchor_spread_m.unwrap_or(3.0)),
         ElevationSource::GpsInterpolated => Some(
             p90_accuracy_m
-                .map(|p90| (p90 * 1.5).max(5.0))
-                .unwrap_or(5.0),
+                .map(|p90| (p90 * GPS_NET_UNCERTAINTY_MULTIPLIER).max(7.0))
+                .unwrap_or(7.0),
         ),
         ElevationSource::None => None,
     };
@@ -327,8 +329,11 @@ struct TimedValue {
 }
 
 fn smoothed_gps_altitudes(raw: &[CanonicalTrackPoint]) -> Vec<AltitudeAnchor> {
-    let anchors: Vec<_> = raw
-        .iter()
+    median_filter_by_section(&gps_altitude_anchors(raw), GPS_ALTITUDE_MEDIAN_WINDOW)
+}
+
+fn gps_altitude_anchors(raw: &[CanonicalTrackPoint]) -> Vec<AltitudeAnchor> {
+    raw.iter()
         .filter(|point| {
             point
                 .accuracy_m
@@ -341,8 +346,49 @@ fn smoothed_gps_altitudes(raw: &[CanonicalTrackPoint]) -> Vec<AltitudeAnchor> {
                 section_id: point.section_id,
             })
         })
-        .collect();
-    median_filter_by_section(&anchors, GPS_ALTITUDE_MEDIAN_WINDOW)
+        .collect()
+}
+
+/// GPS altitude has low-frequency bias that survives short median filters and
+/// looks like real climbing when accumulated. Without a barometer, report only
+/// robust endpoint change inside each continuous recording section.
+fn gps_net_ascent_descent(raw: &[CanonicalTrackPoint]) -> (f64, f64) {
+    let anchors = gps_altitude_anchors(raw);
+    let mut ascent_m = 0.0;
+    let mut descent_m = 0.0;
+    let mut start = 0;
+    while start < anchors.len() {
+        let section_id = anchors[start].section_id;
+        let mut end = start + 1;
+        while end < anchors.len() && anchors[end].section_id == section_id {
+            end += 1;
+        }
+        let section = &anchors[start..end];
+        if section.len() >= 2 {
+            let edge_count = GPS_NET_ENDPOINT_WINDOW.min(section.len() / 2).max(1);
+            let start_altitude_m = median_altitude(&section[..edge_count]);
+            let end_altitude_m = median_altitude(&section[section.len() - edge_count..]);
+            let delta_m = end_altitude_m - start_altitude_m;
+            if delta_m >= ALTITUDE_HYSTERESIS_M {
+                ascent_m += delta_m;
+            } else if delta_m <= -ALTITUDE_HYSTERESIS_M {
+                descent_m -= delta_m;
+            }
+        }
+        start = end;
+    }
+    (ascent_m, descent_m)
+}
+
+fn median_altitude(anchors: &[AltitudeAnchor]) -> f64 {
+    let mut values: Vec<_> = anchors.iter().map(|anchor| anchor.altitude_m).collect();
+    values.sort_by(f64::total_cmp);
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    }
 }
 
 fn relative_barometric_altitudes(baro: &[BaroSample]) -> Vec<TimedValue> {
@@ -555,8 +601,40 @@ mod tests {
         assert_eq!(quality.p90_accuracy_m, Some(4.0));
         assert_eq!(quality.gps_gap_count, 0);
         assert_eq!(quality.longest_gap_s, 0.0);
-        // GPS-only uncertainty: max(5.0, p90 × 1.5) with p90 = 4 m.
-        assert_eq!(quality.elevation_uncertainty_m, Some(6.0));
+        // GPS-only net uncertainty: max(7.0, p90 × 2) with p90 = 4 m.
+        assert_eq!(quality.elevation_uncertainty_m, Some(8.0));
+        assert_eq!(canonical.analysis.ascent_m, 0.0);
+        assert!((canonical.analysis.descent_m - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn gps_only_statistics_use_section_net_change_not_accumulated_noise() {
+        let altitudes = [
+            100.0, 120.0, 90.0, 125.0, 80.0, 110.0, 75.0, 105.0, 70.0, 95.0, 65.0, 60.0,
+        ];
+        let recording = ParsedRecording {
+            gps: altitudes
+                .into_iter()
+                .enumerate()
+                .map(|(index, altitude_m)| {
+                    gps(
+                        1_000 + index as i64 * 1_000,
+                        44.8 + index as f64 * 0.0001,
+                        altitude_m,
+                    )
+                })
+                .collect(),
+            ..ParsedRecording::default()
+        };
+
+        let canonical = finalize(&recording).unwrap();
+
+        assert_eq!(
+            canonical.quality.elevation_source,
+            ElevationSource::GpsInterpolated
+        );
+        assert_eq!(canonical.analysis.ascent_m, 0.0);
+        assert!((canonical.analysis.descent_m - 30.0).abs() < 0.01);
     }
 
     #[test]
@@ -595,6 +673,8 @@ mod tests {
             ElevationSource::Barometric
         );
         assert_eq!(canonical.quality.baro_sample_count, 3);
+        assert!((canonical.analysis.ascent_m - 10.0).abs() < 0.2);
+        assert!((canonical.analysis.descent_m - 10.0).abs() < 0.2);
         let uncertainty = canonical.quality.elevation_uncertainty_m.unwrap();
         assert!(
             (2.0..=5.0).contains(&uncertainty),
@@ -671,7 +751,7 @@ mod tests {
         assert_eq!(quality.elevation_source, ElevationSource::GpsInterpolated);
         let uncertainty = quality.elevation_uncertainty_m.unwrap();
         assert!(
-            (uncertainty - 31.2).abs() < 1e-9,
+            (uncertainty - 41.6).abs() < 1e-9,
             "uncertainty was {uncertainty}"
         );
     }
