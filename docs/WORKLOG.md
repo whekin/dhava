@@ -905,6 +905,9 @@ as trustworthy.
 
 The current detector produced 23 airtime candidates totaling 6.637 s, including
 several clustered sequences and landing peaks up to 21.2 g. These remain
-candidates until compared with rider memory/video; the raw IMU is preserved for
-replay after detector changes. No production code or raw activity data changed
-in this diagnostic pass.
+candidates at the individual-event level, but the rider confirmed several
+feature jumps plus many bunny hops, so the overall count and clustered pattern
+are plausible rather than obvious vibration false positives. Exact event recall
+or video is still needed to measure missed/merged/split detections; the raw IMU
+is preserved for replay after detector changes. No production code or raw
+activity data changed in this diagnostic pass.
