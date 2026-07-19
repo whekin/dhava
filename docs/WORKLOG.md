@@ -866,3 +866,45 @@ semantics stay covered by CanonicalActivityStoreTest. Core Recording and
 Activity unit tests plus the full debug assembly pass. No device attached —
 the on-device pass (edit round-trip, delete from an open detail screen, raw
 share into another app) is pending.
+
+## 2026-07-19 — Kojoring long-ride field diagnostics
+
+Pulled the single user-authorized `Kojoring` activity from the attached OnePlus
+into a temporary local directory, verified the raw and schema-2 artifact against
+on-device SHA-256 hashes, and analyzed them without adding either private file
+to the repository. The 1:51:39 recording is complete: 6,875 GPS fixes at
+1.026 Hz and 3,353,112 IMU rows at 500.5 Hz span the full interval, with no IMU
+gap even over 20 ms and only the terminal pause event. This is strong field
+evidence that the foreground service plus partial wake lock survived screen-off
+for a long ride. The raw gzip is 91.7 MB (544 MB uncompressed), about 49 MB per
+recorded hour; keeping 500 Hz forever deserves a later storage/battery tradeoff
+test against a capped raw rate while retaining sufficient airtime evidence.
+
+Horizontal GPS quality was generally useful in the forest: median accuracy
+4.97 m, p90 9.99 m, and only 18/6,875 fixes over the canonical 20 m gate.
+There were 24 within-section gaps over 5 s (longest 8.303 s), concentrated late
+in the activity while IMU remained continuous, so these are GPS availability
+gaps rather than recorder/process stalls. Stop pinning also behaved as intended:
+65 finalized STILL spans of at least 5 s were found; during the longest raw GPS
+fixes wandered up to roughly 14 m while the finalized track stayed pinned.
+
+Two metric problems are now grounded in real data. First, canonical max speed
+is 60.6 km/h because the naive analysis takes the maximum plausible derived
+step even when Android supplies a contradictory Doppler speed: one accepted
+3.9 m-accuracy fix moved 16.8 m in one second while reporting only 10.5 km/h.
+The maximum reported speed was 48.78 km/h and was supported by adjacent fixes.
+The next stats revision should prefer reported speed when present and only use
+derived speed when absent or corroborated, then recompute from immutable raw.
+Second, this device exposes no pressure sensor in Android `sensorservice`, so
+the activity is GPS-elevation-only. Its net height change is about -899 m, but
+low-frequency GPS altitude drift inflates totals to +637/-1,535 m even after
+the current five-fix median and 2 m hysteresis. The UI correctly labels the
+source and ±15 m point uncertainty, but ascent/descent themselves need a
+stronger GPS-only model (or later DEM/segment consensus) before being presented
+as trustworthy.
+
+The current detector produced 23 airtime candidates totaling 6.637 s, including
+several clustered sequences and landing peaks up to 21.2 g. These remain
+candidates until compared with rider memory/video; the raw IMU is preserved for
+replay after detector changes. No production code or raw activity data changed
+in this diagnostic pass.
