@@ -17,6 +17,7 @@ pub mod analysis;
 mod bounded;
 pub mod canonical;
 pub mod ekf;
+mod gps_quality;
 pub mod linalg;
 pub mod live;
 pub mod orientation;

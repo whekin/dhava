@@ -237,4 +237,20 @@ activity results are always recomputed canonically from the raw on-device file.
 - Canonical vertical v0 preserves relative barometer movement and anchors it to
   median-filtered, accuracy-gated GPS altitude. GPS-only recordings use section-aware
   altitude interpolation. Ascent/descent hysteresis resets at pause boundaries. The
-  canonical algorithm version is `gps-bounded-0.2`.
+  canonical algorithm version is currently `gps-bounded-0.3`.
+
+## 2026-07-19 — Short GPS jumps require accuracy and Doppler consistency
+
+- Raw GPS fixes remain immutable and visible in diagnostics. A processed horizontal
+  anchor still needs accuracy ≤20 m, and a short 0.2–5 s move is additionally rejected
+  when its chord exceeds the sum of both reported accuracy radii plus the distance
+  allowed by the larger endpoint Doppler speed and a 3 m/s acceleration margin.
+- Missing, exact-zero and sub-1.5 m/s reported speeds never veto earth-relative
+  displacement. OnePlus field recordings proved that a calm phone on a moving vehicle
+  can report zero, so coordinate motion must remain able to release STILL. Manual pause
+  boundaries reset the kinematic anchor; a rejected fix does not advance it, allowing
+  the next consistent fix to recover normally.
+- Maximum speed prefers Android's Doppler speed. Coordinate-derived maxima are used
+  only across consecutive fixes without reported speed; average moving speed is the
+  conservative floor. This avoids interpreting an allowed correction inside GPS
+  uncertainty as instantaneous rider velocity.

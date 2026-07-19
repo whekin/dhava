@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use crate::ekf::Ekf;
+use crate::gps_quality::{HorizontalFix, kinematically_plausible};
 use crate::orientation::{GRAVITY, Mahony};
 
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
@@ -49,14 +50,6 @@ struct MotionSample {
     gyro_norm: f64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct GpsFix {
-    timestamp_ms: i64,
-    lat: f64,
-    lon: f64,
-    accuracy_m: f64,
-}
-
 #[derive(Debug)]
 struct State {
     orientation: Mahony,
@@ -68,10 +61,10 @@ struct State {
     calm_since_ms: Option<i64>,
     motion_since_ms: Option<i64>,
     gps_motion_hold_until_ms: i64,
-    last_gps_fix: Option<GpsFix>,
-    still_gps_anchor: Option<GpsFix>,
-    gps_stop_anchor: Option<GpsFix>,
-    gps_stop_rearm_anchor: Option<GpsFix>,
+    last_gps_fix: Option<HorizontalFix>,
+    still_gps_anchor: Option<HorizontalFix>,
+    gps_stop_anchor: Option<HorizontalFix>,
+    gps_stop_rearm_anchor: Option<HorizontalFix>,
     horizontal_reseat_pending: bool,
 }
 
@@ -213,12 +206,19 @@ impl LiveFusion {
         let reported_velocity = velocity_en(speed_mps, bearing_deg);
         let gps_reports_zero_speed = reported_velocity == Some([0.0, 0.0]);
         let horizontal_reseat_pending = s.horizontal_reseat_pending;
-        let current_fix = GpsFix {
+        let current_fix = HorizontalFix {
             timestamp_ms,
             lat,
             lon,
             accuracy_m: accuracy,
+            speed_mps: speed_mps.filter(|speed| speed.is_finite() && *speed >= 0.0),
         };
+        if !horizontal_reseat_pending
+            && s.last_gps_fix
+                .is_some_and(|previous| !kinematically_plausible(previous, current_fix))
+        {
+            return None;
+        }
         let stop_anchor_moved = s
             .gps_stop_anchor
             .is_some_and(|anchor| gps_fix_moved_beyond_uncertainty(anchor, current_fix));
@@ -381,7 +381,7 @@ impl LiveFusion {
     }
 }
 
-fn gps_fix_moved_beyond_uncertainty(anchor: GpsFix, current: GpsFix) -> bool {
+fn gps_fix_moved_beyond_uncertainty(anchor: HorizontalFix, current: HorizontalFix) -> bool {
     let en = project(current.lat, current.lon, anchor.lat, anchor.lon);
     // Each Android accuracy is a radius around its own fix. Root-sum-square
     // gives a conservative combined gate without making movement recovery as
@@ -392,7 +392,7 @@ fn gps_fix_moved_beyond_uncertainty(anchor: GpsFix, current: GpsFix) -> bool {
 }
 
 fn derived_gps_velocity(
-    previous: GpsFix,
+    previous: HorizontalFix,
     timestamp_ms: i64,
     lat: f64,
     lon: f64,
@@ -421,6 +421,25 @@ fn derived_gps_velocity(
 impl Default for LiveFusion {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl LiveFusion {
+    /// Manual pause/resume starts a new earth-relative section. The next GPS
+    /// fix must reseat position instead of being compared with the old section.
+    pub(crate) fn start_new_section(&self) {
+        let mut state = self.state.lock().expect("live fusion mutex poisoned");
+        state.stationary = false;
+        state.calm_since_ms = None;
+        state.motion_since_ms = None;
+        state.last_gps_fix = None;
+        state.still_gps_anchor = None;
+        state.gps_stop_anchor = None;
+        state.gps_stop_rearm_anchor = None;
+        state.horizontal_reseat_pending = state.ekf.is_some();
+        if let Some(ekf) = &mut state.ekf {
+            ekf.reset_horizontal_velocity();
+        }
     }
 }
 
@@ -518,6 +537,45 @@ mod tests {
         assert!(held.stationary);
         assert_eq!(held.lat, stopped.lat);
         assert_eq!(held.lon, stopped.lon);
+    }
+
+    #[test]
+    fn contradictory_low_speed_teleport_is_ignored_and_recovers() {
+        let fusion = LiveFusion::new();
+        fusion
+            .push_gps(0, 41.7, 44.8, None, Some(3.8), Some(4.31), Some(90.0))
+            .unwrap();
+        let longitude_at = |east_m: f64| {
+            44.8 + (east_m / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees()
+        };
+
+        assert!(
+            fusion
+                .push_gps(
+                    1_000,
+                    41.7,
+                    longitude_at(16.8),
+                    None,
+                    Some(3.9),
+                    Some(2.91),
+                    Some(90.0),
+                )
+                .is_none()
+        );
+
+        let recovered = fusion
+            .push_gps(
+                2_000,
+                41.7,
+                longitude_at(8.0),
+                None,
+                Some(3.9),
+                Some(4.0),
+                Some(90.0),
+            )
+            .unwrap();
+        let offset = project(recovered.lat, recovered.lon, 41.7, longitude_at(8.0));
+        assert!(offset[0].hypot(offset[1]) < 0.01);
     }
 
     #[test]

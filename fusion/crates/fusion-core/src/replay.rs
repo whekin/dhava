@@ -78,6 +78,7 @@ pub(crate) fn replay_parsed(recording: &ParsedRecording) -> RecordingReplay {
 
     let fusion = LiveFusion::new();
     let mut last_live_imu_ms = i64::MIN;
+    let mut live_section_id: Option<i32> = None;
     let mut fused_track = Vec::with_capacity(recording.gps.len());
     for item in items {
         match item {
@@ -96,6 +97,10 @@ pub(crate) fn replay_parsed(recording: &ParsedRecording) -> RecordingReplay {
             }
             Item::Gps(index) => {
                 let gps = &gps[index];
+                if live_section_id.is_some_and(|section_id| section_id != section_ids[index]) {
+                    fusion.start_new_section();
+                }
+                live_section_id = Some(section_ids[index]);
                 if let Some(snapshot) = fusion.push_gps(
                     gps.timestamp_ms,
                     gps.lat,

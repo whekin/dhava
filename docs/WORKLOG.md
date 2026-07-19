@@ -911,3 +911,45 @@ are plausible rather than obvious vibration false positives. Exact event recall
 or video is still needed to measure missed/merged/split detections; the raw IMU
 is preserved for replay after detector changes. No production code or raw
 activity data changed in this diagnostic pass.
+
+## 2026-07-19 — Accuracy/Doppler GPS gate and trustworthy max speed
+
+The canonical algorithm advanced to `gps-bounded-0.3`. A new shared
+`gps_quality` pass now protects both causal live/replay geometry and ride
+distance from short coordinate teleports that contradict Android's independent
+Doppler speed. For 0.2–5 s intervals with a corroborating endpoint speed of at
+least 1.5 m/s, the chord must fit inside both fixes' summed horizontal accuracy
+radii plus `(reported speed + 3 m/s) × dt`. The accuracy radii deliberately
+remain correction room rather than movement; missing/near-zero speed cannot
+reject coordinate motion because the OnePlus bus fixture proved that exact zero
+may be false on a smoothly moving platform. A rejected fix does not advance the
+anchor, so the next consistent fix recovers without a lasting hole.
+
+Replay now explicitly starts a new horizontal section at every manual
+pause/resume boundary instead of relying on an accompanying IMU gap to trigger a
+reseat. This was exposed by an altitude/pause regression containing no IMU:
+without the explicit reset, the new gate correctly saw the cross-pause
+coordinate jump as impossible continuous motion but incorrectly rejected the
+new section. Live Android already obtained the equivalent reset from the sensor
+gap; making the event boundary first-class keeps synthetic, recovered and real
+recordings aligned.
+
+Maximum speed no longer lets coordinate-derived velocity override available
+Doppler samples. Derived maxima remain available only across consecutive fixes
+with no reported speed, with average moving speed as a conservative floor so a
+coarse/sparse speed stream cannot produce `max < average`. The real Kojoring raw
+validated the whole change: exactly one additional fix was rejected beyond the
+existing 18 fixes over 20 m accuracy — the known +08:39 teleport. Max speed
+changed from the false 60.6 km/h to the supported 48.78 km/h, distance changed
+by only -0.34 m (10,992.64 → 10,992.30 m), and finalized output stayed at 19,282
+points because the removed anchor was replaced by the bounded 5 Hz interval.
+Elevation and airtime were intentionally unchanged.
+
+Added three direct gate tests plus analysis and live recovery regressions. All
+61 fusion-core unit tests, both real forest fixture tests, full Rust workspace
+tests and strict clippy pass. Regenerated committed arm64-v8a/x86_64 native
+libraries; Core Recording and Activity unit tests plus `assembleDebug` pass.
+Installed the APK on the OnePlus and opened Kojoring: schema-2 cache invalidation
+rebuilt it locally as `gps-bounded-0.3`, and Activity Detail shows 48.8 km/h
+while preserving 11.0 km and 6.6 s × 23 airtime. The temporary Mac raw copy was
+used only for the full replay validation and removed afterward.

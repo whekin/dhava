@@ -1,6 +1,6 @@
 //! On-device ride analysis: the first real analysis API exposed to Android.
 //!
-//! # Algorithm status: `gps-bounded-0.2`
+//! # Algorithm status: `gps-bounded-0.3`
 //!
 //! Everything in this module is a deliberately NAIVE, GPS-first v0 baseline,
 //! to be replaced by proper GPS+IMU+baro Kalman fusion. Every result is
@@ -15,7 +15,8 @@
 //! - **Distance**: haversine between accepted points, with an anchor filter —
 //!   moves shorter than 1 m from the last accepted point are treated as
 //!   jitter and ignored (the anchor does not advance, so slow real movement
-//!   still accumulates).
+//!   still accumulates). Short coordinate jumps that exceed both fixes'
+//!   accuracy radii and their reported Doppler speed are ignored.
 //! - **Moving time**: sum of inter-fix intervals whose speed exceeds
 //!   0.7 m/s (reported GPS speed if present, otherwise derived
 //!   distance/time). Gaps longer than 10 s never count as moving.
@@ -31,11 +32,12 @@
 
 use std::path::Path;
 
+use crate::gps_quality::{HorizontalFix, geographic_distance_m, kinematically_plausible};
 use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.2";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.3";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;
@@ -61,9 +63,6 @@ const AIRTIME_MERGE_GAP_MS: i64 = 100;
 const LANDING_SEARCH_MS: i64 = 300;
 /// Track output is decimated to roughly this interval.
 const TRACK_DECIMATION_MS: i64 = 950;
-/// Mean Earth radius, meters (haversine).
-const EARTH_RADIUS_M: f64 = 6_371_000.0;
-
 /// One detected airborne window (jump / drop).
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct AirtimeWindow {
@@ -164,12 +163,18 @@ pub fn analyze(recording: &ParsedRecording) -> Result<RideAnalysis, FusionError>
         .iter()
         .filter_map(|p| p.speed_mps)
         .fold(0.0f64, |m, s| m.max(s as f64));
-    let max_speed_mps = max_reported_mps.max(max_derived_mps);
     let avg_moving_speed_mps = if moving_time_s > 0.0 {
         distance_m / moving_time_s
     } else {
         0.0
     };
+    // A recording with Doppler speeds should not reinterpret position-radius
+    // corrections as instantaneous velocity. The distance/time average is a
+    // conservative floor so coarse or partially missing speed samples cannot
+    // make the reported maximum physically lower than the ride average.
+    let max_speed_mps = max_reported_mps
+        .max(max_derived_mps)
+        .max(avg_moving_speed_mps);
 
     let (ascent_m, descent_m) = ascent_descent(&accepted);
     let airtime_windows = detect_airtime(&imu);
@@ -227,11 +232,7 @@ fn accuracy_filter(gps: &[GpsPoint]) -> Vec<GpsPoint> {
 
 /// Great-circle distance between two fixes, meters (haversine).
 fn haversine_m(a: &GpsPoint, b: &GpsPoint) -> f64 {
-    let (lat1, lat2) = (a.lat.to_radians(), b.lat.to_radians());
-    let dlat = (b.lat - a.lat).to_radians();
-    let dlon = (b.lon - a.lon).to_radians();
-    let h = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    2.0 * EARTH_RADIUS_M * h.sqrt().asin()
+    geographic_distance_m(a.lat, a.lon, b.lat, b.lon)
 }
 
 /// Returns `(distance_m, moving_time_ms, max_derived_speed_mps)`.
@@ -256,6 +257,12 @@ fn distance_and_moving_time(
             anchor = point;
             continue;
         }
+        if !kinematically_plausible(
+            HorizontalFix::from_gps(anchor, MAX_ACCURACY_M),
+            HorizontalFix::from_gps(point, MAX_ACCURACY_M),
+        ) {
+            continue;
+        }
         let step = haversine_m(anchor, point);
         if step >= MIN_MOVE_M {
             distance_m += step;
@@ -273,9 +280,14 @@ fn distance_and_moving_time(
             continue;
         }
         let derived = haversine_m(a, b) / (dt_ms as f64 / 1000.0);
-        // Derived speed only counts toward max when plausible for MTB
-        // (a 60 m jitter jump over 1 s would read as 60 m/s = 216 km/h).
-        if derived < 40.0 {
+        let plausible = kinematically_plausible(
+            HorizontalFix::from_gps(a, MAX_ACCURACY_M),
+            HorizontalFix::from_gps(b, MAX_ACCURACY_M),
+        );
+        // Doppler speed is independent from coordinate displacement and wins
+        // whenever available. Derive a maximum only across consecutive fixes
+        // that both lack it, and only after the shared kinematic gate.
+        if a.speed_mps.is_none() && b.speed_mps.is_none() && plausible && derived < 40.0 {
             max_derived_mps = max_derived_mps.max(derived);
         }
         let speed = b.speed_mps.map(|s| s as f64).unwrap_or(derived);
@@ -461,6 +473,48 @@ fn decimate_track(gps: &[GpsPoint]) -> Vec<TrackPoint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gps_at(timestamp_ms: i64, east_m: f64, accuracy_m: f32, speed_mps: Option<f32>) -> GpsPoint {
+        let lat = 41.7;
+        GpsPoint {
+            timestamp_ms,
+            lat,
+            lon: 44.8 + (east_m / (6_371_000.0 * lat.to_radians().cos())).to_degrees(),
+            altitude_m: None,
+            accuracy_m: Some(accuracy_m),
+            speed_mps,
+            bearing_deg: Some(90.0),
+        }
+    }
+
+    #[test]
+    fn kojoring_style_jump_does_not_inflate_distance_or_max_speed() {
+        let recording = ParsedRecording {
+            gps: vec![
+                gps_at(0, 0.0, 3.8, Some(4.31)),
+                gps_at(1_000, 16.8, 3.9, Some(2.91)),
+                gps_at(2_000, 8.0, 3.9, Some(4.0)),
+            ],
+            ..ParsedRecording::default()
+        };
+
+        let analysis = analyze(&recording).unwrap();
+
+        assert!((7.5..=8.5).contains(&analysis.distance_m));
+        assert!((analysis.max_speed_mps - 4.31).abs() < 0.001);
+    }
+
+    #[test]
+    fn derived_max_speed_remains_available_without_doppler_speed() {
+        let recording = ParsedRecording {
+            gps: vec![gps_at(0, 0.0, 3.0, None), gps_at(1_000, 10.0, 3.0, None)],
+            ..ParsedRecording::default()
+        };
+
+        let analysis = analyze(&recording).unwrap();
+
+        assert!((analysis.max_speed_mps - 10.0).abs() < 0.1);
+    }
 
     #[test]
     fn manual_pause_does_not_bridge_distance() {
