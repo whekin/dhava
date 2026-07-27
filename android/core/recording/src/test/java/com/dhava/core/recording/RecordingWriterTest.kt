@@ -2,6 +2,7 @@ package com.dhava.core.recording
 
 import java.util.zip.GZIPInputStream
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,6 +45,7 @@ class RecordingWriterTest {
         )
 
         writer.close()
+        val health = writer.healthStats()
 
         val lines = GZIPInputStream(file.inputStream())
             .bufferedReader()
@@ -52,5 +54,8 @@ class RecordingWriterTest {
         assertTrue(lines.any { "\"type\":\"gps\"" in it })
         assertTrue(lines.any { "\"type\":\"imu\"" in it })
         assertTrue(lines.any { "\"action\":\"imu_overflow:" in it })
+        assertEquals(0, health.pendingCritical)
+        assertEquals(0, health.pendingImu)
+        assertTrue(health.droppedImuTotal > 0)
     }
 }

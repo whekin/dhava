@@ -1038,3 +1038,50 @@ was then finished and discarded through the normal UI; the three real recovered
 rides and all other user data were left untouched. A real 1–2 hour field ride
 is still required to measure whether OxygenOS kills become less frequent, but
 repeat recovery no longer depends on that outcome.
+
+## 2026-07-28 — Durable recorder health telemetry and 2-hour field evidence
+
+The first real ride after the repeat-recovery fix lasted 2:14:08
+(`Afternoon ride`, 27.6 MB). OxygenOS killed the foreground process seven
+times between 16:47 and 18:02, every time with reason OTHER / `o-kill(6)` and
+importance 125. All seven sticky restarts succeeded and the one recovered
+activity contains 7,711 GPS fixes, 790,096 IMU rows and seven synthetic
+pause/resume pairs. Streamed aggregate inspection only — no private raw was
+saved off the phone. Restart gaps were 16.4, 51.8, 91.7, 69.0, 17.7, 20.3 and
+105.4 seconds (6:12 total); the largest adjacent GPS/IMU gaps were about 121
+and 119 seconds. This validates repeated recovery in the field, while also
+showing why exact per-process evidence is necessary.
+
+Each new recording now gets an append-only `<id>.health.jsonl` beside immutable
+raw. Fresh start, once-per-wall-clock-minute heartbeat, Android process exit,
+sticky restart and explicit stop entries capture PSS/RSS, Java/native heap,
+process uptime/CPU, raw size, per-process sample counts, GPS age, writer queue
+depth/drop totals, thermal/battery state and restart gap. Every tiny append is
+flushed and fsynced; a later append remains readable after a truncated tail.
+Collection and I/O are strictly best-effort and cannot block raw repair or
+recording. Activity Detail offers the sidecar as a separate
+`Recording health (.jsonl)` Share artifact. Explicit deletion removes it with
+raw and the derived artifact.
+
+A five-minute physical OnePlus smoke ran with the screen off. At 60 seconds,
+writer backlog and IMU drops were both zero; PSS/RSS were 292/358 MB and native
+heap was 77.5 MB. At 120 seconds those values had plateaued (292/358/77.6 MB),
+ruling out a linear writer or live-fusion leak in that interval. One controlled
+SIGKILL produced `ApplicationExitInfo` reason SIGNALED/status 9, a new process,
+foreground `lastStartId=2`, and a health restart gap of 2.5 seconds. The next
+heartbeat continued normally with zero backlog/drops and lower
+PSS/RSS/native-heap values of 270/335/57.6 MB. Explicit Stop drained both
+queues and persisted a final checkpoint.
+
+Added health-log corruption/deduplication/optional-field tests and writer queue
+telemetry assertions. All Android debug unit tests and the full debug assembly
+pass; the instrumented APK is installed on the OnePlus. The phone reported
+thermal status 3 while plugged in during the desk smoke, so the next outdoor
+ride will distinguish charging/desk heat from field conditions.
+
+The Activity Detail export menu was visually checked on the physical
+1080 × 2412 display: all four artifacts remain readable and the two-line health
+description fits without clipping. Selecting it opened the system Share sheet
+with `dhava-de0d4fe4-health.jsonl`. Nothing was shared. The synthetic activity,
+its raw file, health sidecar and derived artifact were then deleted through the
+normal confirmed UI flow; the user's real rides were untouched.

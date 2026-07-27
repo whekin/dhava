@@ -65,6 +65,8 @@ enum class ActivityExportKind(val mimeType: String) {
     RAW_GPS("application/gpx+xml"),
     /** The raw sensor recording as-is, for diagnostics/bug reports. */
     RAW_RECORDING("application/gzip"),
+    /** Append-only process/memory/writer heartbeat; never part of fusion input. */
+    HEALTH_LOG("application/x-ndjson"),
 }
 
 /**
@@ -110,6 +112,11 @@ class ActivityDetailViewModel(
     /** Bikes for the edit sheet's picker. */
     val bikes: StateFlow<List<Bike>> = repository.bikes
 
+    private val _healthLogAvailable = MutableStateFlow(
+        repository.recordingHealthFile(recordingId).isFile,
+    )
+    val healthLogAvailable: StateFlow<Boolean> = _healthLogAvailable.asStateFlow()
+
     fun addBike(name: String, type: BikeType): Bike = repository.addBike(name, type)
 
     fun updateMetadata(title: String, description: String, bike: Bike?) {
@@ -129,6 +136,10 @@ class ActivityDetailViewModel(
     fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {
         if (kind == ActivityExportKind.RAW_RECORDING) {
             exportRawRecording(onResult)
+            return
+        }
+        if (kind == ActivityExportKind.HEALTH_LOG) {
+            exportHealthLog(onResult)
             return
         }
         val title = recording.value?.title ?: "Dhava ride"
@@ -166,6 +177,7 @@ class ActivityDetailViewModel(
                 }
             }
             ActivityExportKind.RAW_RECORDING -> null // handled above
+            ActivityExportKind.HEALTH_LOG -> null // handled above
         }
         if (points.isNullOrEmpty()) {
             onResult(Result.failure(IllegalStateException("The selected GPX track is unavailable")))
@@ -175,6 +187,7 @@ class ActivityDetailViewModel(
             ActivityExportKind.PROCESSED_5_HZ -> "processed-5hz"
             ActivityExportKind.RAW_GPS -> "raw-gps"
             ActivityExportKind.RAW_RECORDING -> error("unreachable")
+            ActivityExportKind.HEALTH_LOG -> error("unreachable")
         }
         viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching {
@@ -201,6 +214,23 @@ class ActivityDetailViewModel(
                 val output = File(
                     getApplication<Application>().cacheDir,
                     "exports/dhava-${recordingId.take(8)}-raw.jsonl.gz",
+                )
+                output.parentFile?.mkdirs()
+                source.copyTo(output, overwrite = true)
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    /** Shares the small operational sidecar without touching the raw sensor file. */
+    private fun exportHealthLog(onResult: (Result<File>) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                val source = repository.recordingHealthFile(recordingId)
+                check(source.isFile) { "No health log is available for this recording" }
+                val output = File(
+                    getApplication<Application>().cacheDir,
+                    "exports/dhava-${recordingId.take(8)}-health.jsonl",
                 )
                 output.parentFile?.mkdirs()
                 source.copyTo(output, overwrite = true)

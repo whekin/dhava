@@ -5,6 +5,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.GZIPOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -48,6 +49,9 @@ internal class RecordingWriter(
     private val criticalChannel = Channel<RecordLine>(Channel.UNLIMITED)
     private val imuChannel = Channel<RecordLine>(imuQueueCapacity)
     private val droppedImuSinceDiagnostic = AtomicInteger()
+    private val pendingCritical = AtomicInteger()
+    private val pendingImu = AtomicInteger()
+    private val droppedImuTotal = AtomicLong()
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "recording-writer")
     }
@@ -72,6 +76,7 @@ internal class RecordingWriter(
                     // every row carries its own monotonic timestamp.
                     val immediate = criticalChannel.tryReceive()
                     if (immediate.isSuccess) {
+                        pendingCritical.decrementAndGet()
                         writeLine(output, immediate.getOrThrow())
                         continue
                     }
@@ -92,10 +97,12 @@ internal class RecordingWriter(
                     val line = when (selection) {
                         is QueueSelection.Critical -> {
                             if (selection.line == null) criticalOpen = false
+                            else pendingCritical.decrementAndGet()
                             selection.line
                         }
                         is QueueSelection.Imu -> {
                             if (selection.line == null) imuOpen = false
+                            else pendingImu.decrementAndGet()
                             selection.line
                         }
                     } ?: continue
@@ -122,13 +129,26 @@ internal class RecordingWriter(
     /** Non-blocking enqueue; safe to call from sensor callbacks. */
     fun write(line: RecordLine) {
         if (line is RecordLine.Imu) {
+            pendingImu.incrementAndGet()
             if (imuChannel.trySend(line).isFailure) {
+                pendingImu.decrementAndGet()
                 droppedImuSinceDiagnostic.incrementAndGet()
+                droppedImuTotal.incrementAndGet()
             }
         } else {
-            criticalChannel.trySend(line)
+            pendingCritical.incrementAndGet()
+            if (criticalChannel.trySend(line).isFailure) {
+                pendingCritical.decrementAndGet()
+            }
         }
     }
+
+    /** Lock-free queue snapshot for the once-per-minute health heartbeat. */
+    fun healthStats(): RecordingWriterHealth = RecordingWriterHealth(
+        pendingCritical = pendingCritical.get().coerceAtLeast(0),
+        pendingImu = pendingImu.get().coerceAtLeast(0),
+        droppedImuTotal = droppedImuTotal.get(),
+    )
 
     /**
      * Persists any queue-overflow count without affecting known pause/resume
@@ -157,3 +177,9 @@ private sealed interface QueueSelection {
     data class Critical(val line: RecordLine?) : QueueSelection
     data class Imu(val line: RecordLine?) : QueueSelection
 }
+
+internal data class RecordingWriterHealth(
+    val pendingCritical: Int,
+    val pendingImu: Int,
+    val droppedImuTotal: Long,
+)

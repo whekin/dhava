@@ -115,6 +115,9 @@ class RecordingRepository private constructor(private val appContext: Context) {
 
     fun recordingFile(id: String): File = File(recordingsDir(), "$id.jsonl.gz")
 
+    /** Append-only operational heartbeat beside (but outside) immutable raw data. */
+    fun recordingHealthFile(id: String): File = File(recordingsDir(), "$id.health.jsonl")
+
     /**
      * Deletes every derived canonical artifact; raw recordings are never
      * touched. [canonicalActivity] transparently recomputes an artifact the
@@ -231,6 +234,17 @@ class RecordingRepository private constructor(private val appContext: Context) {
         for (entry in _recordings.value.filter { it.status == RecordingStatus.RECORDING }) {
             changed = true
             val file = recordingFile(entry.id)
+            runCatching {
+                val healthLog = RecordingHealthLog(recordingHealthFile(entry.id))
+                RecordingExitDiagnostics.latestAfter(appContext, entry.startedAtMs)?.let { exit ->
+                    if (!healthLog.hasProcessExit(exit.exitTimestampMs ?: exit.timestampMs)) {
+                        healthLog.append(exit)
+                    }
+                }
+            }.onFailure { error ->
+                // Diagnostics must never prevent raw repair or sticky resume.
+                Log.w(LOG_TAG, "could not persist exit diagnostics for ${entry.id}", error)
+            }
             val stats = RecordingRecovery.repairFile(file)
             if (stats == null) {
                 // Keep unreadable bytes visible instead of silently removing
@@ -392,6 +406,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
             saveIndex()
         }
         recordingFile(id).delete()
+        recordingHealthFile(id).delete()
         // Serializes on the store mutex against an in-flight artifact
         // generation for this id, so a concurrent finalization cannot
         // resurrect the artifact after this delete (a generation that loses

@@ -78,6 +78,7 @@ fun ActivityDetailScreen(
     val diagnostics by viewModel.diagnostics.collectAsState()
     val quality by viewModel.quality.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
+    val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val context = LocalContext.current
 
     // Pops the screen once the entry disappears (deleted here or elsewhere).
@@ -99,6 +100,7 @@ fun ActivityDetailScreen(
         diagnostics = diagnostics,
         quality = quality,
         bikes = bikes,
+        healthLogAvailable = healthLogAvailable,
         onBack = onBack,
         onExport = { kind ->
             viewModel.export(kind) { result ->
@@ -120,6 +122,7 @@ fun ActivityDetailScreen(
                         },
                         when (kind) {
                             ActivityExportKind.RAW_RECORDING -> "Share raw recording"
+                            ActivityExportKind.HEALTH_LOG -> "Share recording health log"
                             else -> "Share GPX"
                         },
                     ),
@@ -141,6 +144,7 @@ private fun ActivityDetailContent(
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
     bikes: List<Bike>,
+    healthLogAvailable: Boolean,
     onBack: () -> Unit,
     onExport: (ActivityExportKind) -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
@@ -265,6 +269,7 @@ private fun ActivityDetailContent(
                         // be decoded (that is the diagnostics use case) — only
                         // a missing file makes the option pointless.
                         rawRecordingAvailable = !(track is TrackState.Failed && track.rawFileMissing),
+                        healthLogAvailable = healthLogAvailable,
                         onExport = onExport,
                     )
                     ActivityOverflowMenu(
@@ -385,13 +390,15 @@ private fun ExportMenu(
     processedAvailable: Boolean,
     processedLoading: Boolean,
     rawRecordingAvailable: Boolean,
+    healthLogAvailable: Boolean,
+    initiallyExpanded: Boolean = false,
     onExport: (ActivityExportKind) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
     Box {
         IconButton(
             onClick = { expanded = true },
-            enabled = rawGpsAvailable || rawRecordingAvailable,
+            enabled = rawGpsAvailable || rawRecordingAvailable || healthLogAvailable,
         ) {
             Icon(Icons.Filled.Share, contentDescription = "Export")
         }
@@ -427,6 +434,19 @@ private fun ExportMenu(
                 onClick = {
                     expanded = false
                     onExport(ActivityExportKind.RAW_GPS)
+                },
+            )
+            DropdownMenuItem(
+                text = {
+                    ExportOptionText(
+                        title = "Recording health (.jsonl)",
+                        description = "Memory, thermal, writer and restart diagnostics",
+                    )
+                },
+                enabled = healthLogAvailable,
+                onClick = {
+                    expanded = false
+                    onExport(ActivityExportKind.HEALTH_LOG)
                 },
             )
             DropdownMenuItem(
@@ -635,11 +655,37 @@ private fun ActivityDetailContentPreview() {
             diagnostics = DiagnosticTrackState.Unavailable,
             quality = null,
             bikes = emptyList(),
+            healthLogAvailable = true,
             onBack = {},
             onExport = { _ -> },
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
             onEditSave = { _, _, _ -> },
             onDelete = {},
         )
+    }
+}
+
+@Preview(name = "Activity detail · export menu", widthDp = 412, heightDp = 760)
+@Composable
+private fun ExportMenuPreview() {
+    DhavaTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(DhavaSpacing.xLarge),
+                contentAlignment = Alignment.TopEnd,
+            ) {
+                ExportMenu(
+                    rawGpsAvailable = true,
+                    processedAvailable = true,
+                    processedLoading = false,
+                    rawRecordingAvailable = true,
+                    healthLogAvailable = true,
+                    initiallyExpanded = true,
+                    onExport = {},
+                )
+            }
+        }
     }
 }

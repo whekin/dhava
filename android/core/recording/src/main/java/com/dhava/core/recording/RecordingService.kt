@@ -40,6 +40,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground service that records GPS + IMU + barometer into a raw
@@ -73,6 +76,7 @@ class RecordingService : Service() {
         private const val BARO_INTERVAL_US = 100_000
         private const val MAX_LIVE_TRACK_POINTS = 10_800 // ~3 h at 1 Hz
         private const val PREPARE_TIMEOUT_MS = 10_000L
+        private const val HEALTH_HEARTBEAT_INTERVAL_MS = 60_000L
         private const val LOG_TAG = "RecordingService"
 
         /** How often live state is pushed to the repository (~4/s). */
@@ -111,6 +115,7 @@ class RecordingService : Service() {
      * cancels [scope] (e.g. the system kills the task mid-recording).
      */
     private val finalizeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val healthWriteMutex = Mutex()
     private lateinit var repository: RecordingRepository
     private lateinit var sensorManager: SensorManager
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -156,6 +161,8 @@ class RecordingService : Service() {
     private var liveFusion: LiveFusion? = null
     private var lastLiveImuMs = Long.MIN_VALUE
     private var lastRawImuNs = Long.MIN_VALUE
+    @Volatile private var lastGpsReceivedElapsedMs = Long.MIN_VALUE
+    private var lastHealthHeartbeatElapsedMs = Long.MIN_VALUE
 
     // Latest gyro/mag samples, paired with accelerometer events (see below).
     @Volatile private var latestGyro: FloatArray? = null
@@ -251,6 +258,8 @@ class RecordingService : Service() {
                 ),
             )
         }
+        lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
+        enqueueHealth(RecordingHealthLog.KIND_START, sessionElapsedMs = 0)
     }
 
     /**
@@ -313,6 +322,12 @@ class RecordingService : Service() {
             writer?.write(RecordLine.Event(resumedAtMs, "resume"))
 
             startCapture()
+            lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
+            enqueueHealth(
+                kind = RecordingHealthLog.KIND_RESTART,
+                sessionElapsedMs = (target.endedAtMs - target.startedAtMs).coerceAtLeast(0L),
+                restartGapMs = (resumedAtMs - target.endedAtMs).coerceAtLeast(0L),
+            )
         }
     }
 
@@ -328,6 +343,8 @@ class RecordingService : Service() {
         liveFusion = LiveFusion()
         lastLiveImuMs = Long.MIN_VALUE
         lastRawImuNs = Long.MIN_VALUE
+        lastGpsReceivedElapsedMs = Long.MIN_VALUE
+        lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
         latestGyro = null
         latestMag = null
         warmImuCount = 0
@@ -377,6 +394,7 @@ class RecordingService : Service() {
             stopSelf()
             return
         }
+        val stopElapsedMs = currentSessionElapsedMs()
         recording = false
 
         tearDownCapture()
@@ -388,6 +406,13 @@ class RecordingService : Service() {
 
         finalizeScope.launch {
             finishedWriter?.close()
+            appendHealth(
+                healthInput(
+                    kind = RecordingHealthLog.KIND_STOP,
+                    sessionElapsedMs = stopElapsedMs,
+                    writerHealth = finishedWriter?.healthStats(),
+                ),
+            )
             val summary = RecordingSummary(
                 id = id,
                 startedAtMs = startedAtMs,
@@ -408,6 +433,8 @@ class RecordingService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         sensorThread?.quitSafely()
         sensorThread = null
+        liveFusion?.close()
+        liveFusion = null
         releaseWakeLock()
     }
 
@@ -576,6 +603,7 @@ class RecordingService : Service() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             for (location in result.locations) {
+                lastGpsReceivedElapsedMs = SystemClock.elapsedRealtime()
                 if (preparing && location.hasAccuracy() && location.accuracy <= 15f) warmGpsReady = true
                 lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
                 val writer = writer
@@ -617,6 +645,63 @@ class RecordingService : Service() {
         }
     }
 
+    // --- durable health heartbeat ----------------------------------------------
+
+    private fun currentSessionElapsedMs(nowElapsedMs: Long = SystemClock.elapsedRealtime()): Long {
+        val currentPause = if (paused) nowElapsedMs - pausedAtElapsedMs else 0L
+        return (nowElapsedMs - startedElapsedMs - totalPausedMs - currentPause).coerceAtLeast(0L)
+    }
+
+    private fun healthInput(
+        kind: String,
+        sessionElapsedMs: Long,
+        writerHealth: RecordingWriterHealth? = writer?.healthStats(),
+        restartGapMs: Long? = null,
+    ): RecordingHealthInput {
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        return RecordingHealthInput(
+            timestampMs = System.currentTimeMillis(),
+            kind = kind,
+            sessionElapsedMs = sessionElapsedMs,
+            rawFile = repository.recordingFile(activityId),
+            healthFile = repository.recordingHealthFile(activityId),
+            writerHealth = writerHealth,
+            gpsCount = gpsCount,
+            imuCount = imuCount,
+            baroCount = baroCount,
+            lastGpsAgeMs = lastGpsReceivedElapsedMs
+                .takeIf { it != Long.MIN_VALUE }
+                ?.let { (nowElapsedMs - it).coerceAtLeast(0L) },
+            paused = paused,
+            restartGapMs = restartGapMs,
+        )
+    }
+
+    private fun enqueueHealth(
+        kind: String,
+        sessionElapsedMs: Long,
+        restartGapMs: Long? = null,
+    ) {
+        if (activityId.isBlank()) return
+        val input = healthInput(kind, sessionElapsedMs, restartGapMs = restartGapMs)
+        finalizeScope.launch { appendHealth(input) }
+    }
+
+    private suspend fun appendHealth(input: RecordingHealthInput) {
+        withContext(Dispatchers.IO) {
+            healthWriteMutex.withLock {
+                runCatching {
+                    val entry = RecordingHealthMetrics.capture(this@RecordingService, input)
+                    RecordingHealthLog(input.healthFile).append(entry)
+                }.onFailure { error ->
+                    // Health telemetry is strictly best-effort and must never
+                    // make the recorder less reliable.
+                    Log.w(LOG_TAG, "could not write recording health heartbeat", error)
+                }
+            }
+        }
+    }
+
     // --- live state + notification ------------------------------------------------
 
     private fun startTicker() {
@@ -654,9 +739,11 @@ class RecordingService : Service() {
                 if (second != lastNotifiedSecond) {
                     lastNotifiedSecond = second
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(elapsedMs))
-                    if (second % 60L == 0L) {
-                        writer?.flushDiagnostics(System.currentTimeMillis())
-                    }
+                }
+                if (now - lastHealthHeartbeatElapsedMs >= HEALTH_HEARTBEAT_INTERVAL_MS) {
+                    lastHealthHeartbeatElapsedMs = now
+                    writer?.flushDiagnostics(System.currentTimeMillis())
+                    enqueueHealth(RecordingHealthLog.KIND_HEARTBEAT, elapsedMs)
                 }
                 delay(STATE_PUSH_INTERVAL_MS)
             }

@@ -284,3 +284,21 @@ activity results are always recomputed canonically from the raw on-device file.
 - Raw accelerometer/gyro acquisition is capped at 200 Hz. A 4,096-line bounded IMU
   queue contains short storage stalls; GPS, meta, barometer and lifecycle events use
   a separate lossless queue. Any IMU overflow is recorded as a diagnostic event.
+
+## 2026-07-28 — Recorder health is a durable local sidecar
+
+- Operational telemetry must never modify immutable raw sensor input or invalidate
+  Rust-derived artifacts. Store it as an append-only
+  `recordings/<id>.health.jsonl` sidecar, keep it local, and remove it only with the
+  same explicit activity deletion that removes raw.
+- Write a heartbeat once per wall-clock minute, including while paused. Persist PSS,
+  RSS, Java/native heap, process CPU/uptime, thermal and battery state, raw size,
+  per-process sensor counts, GPS age, writer queue depths and cumulative IMU drops.
+  Flush and fsync each tiny checkpoint so a process kill cannot erase the evidence.
+- On recovery, attach the latest public `ApplicationExitInfo` after the ride start,
+  deduplicated by system timestamp, then append a restart checkpoint with the exact
+  recording gap. Diagnostics are best-effort: any collection or I/O failure is logged
+  and must never block raw repair, sticky restart or explicit Stop.
+- Activity Detail exposes the health JSONL separately from raw recording and GPX
+  exports. This preserves clear artifact semantics while making field evidence
+  shareable without ADB.

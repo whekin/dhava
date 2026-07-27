@@ -2,6 +2,9 @@
 
 One recording = one **gzip-compressed JSON Lines** file (`.jsonl.gz`).
 Field names match the serde types in `fusion/crates/fusion-core` exactly.
+Operational process/writer telemetry is deliberately stored in the separate
+local sidecar described by `proto/recording-health-format.md`; it is never
+mixed into immutable fusion input.
 
 Every line is a JSON object with a `type` discriminator:
 

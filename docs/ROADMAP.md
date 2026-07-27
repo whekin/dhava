@@ -16,8 +16,9 @@ skeleton and deployment scaffolding.
 - Manual pause/resume with explicit raw events and guarded Finish ✅
 - Screen-off/background survival, wake lock and battery exemption ✅
 - Real settings: keep-screen-awake, sensor diagnostics, offline-only save ✅
+- Durable memory/thermal/writer heartbeat and process-exit diagnostics ✅
 - Automated lifecycle tests: prepare → record → pause → resume → finish
-- Storage/free-space guard and a 1–2 hour physical-device field test
+- Storage/free-space guard and a 1–2 hour physical-device field test ✅
 
 ## Phase 2 — Complete local activity
 
