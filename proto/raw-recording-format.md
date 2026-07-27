@@ -23,11 +23,15 @@ Rules:
 - `meta` line first; order of other lines is best-effort chronological, readers
   must not assume strict global ordering (sensor callbacks interleave).
 - Units: SI. accel m/s² (raw, gravity included), gyro rad/s, mag µT, pressure hPa.
-- Target rates: GPS — max device rate (~1 Hz), IMU — 100 Hz+ (SENSOR_DELAY_FASTEST
-  with HIGH_SAMPLING_RATE_SENSORS), baro — max available (~10–25 Hz).
+- Target rates: GPS — max device rate (~1 Hz), IMU — capped at 200 Hz (5 ms
+  samples), baro — approximately 10 Hz. The IMU rate preserves jump/impact
+  timing while bounding CPU, allocation, storage and writer-backlog pressure.
 - `event` lines mark manual `pause` / `resume`. No sensor samples are written while
   paused. An unmatched `pause` extends to the end of the recording. Analysis must
   not add distance, moving time or airtime across paused intervals.
+- `event` action `imu_overflow:<count>` is diagnostic only: it reports IMU rows
+  dropped since the previous writer health checkpoint because the bounded queue
+  was full. Readers must not treat it as a pause boundary.
 
 ## Upload API (Phase 1, no auth yet)
 

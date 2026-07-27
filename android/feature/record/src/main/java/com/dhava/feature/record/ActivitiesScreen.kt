@@ -28,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingStatus
 import com.dhava.core.recording.UploadState
+import com.dhava.core.recording.needsRecoveryAttention
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaEmptyState
 import com.dhava.core.ui.DhavaScreenHeader
@@ -45,9 +46,11 @@ fun ActivitiesScreen(
     val recordings by viewModel.recordings.collectAsState()
     val uploads by viewModel.uploads.collectAsState()
     val finished = recordings.filter { it.status != RecordingStatus.RECORDING }
+    val needsAttention = finished.count(LocalRecording::needsRecoveryAttention)
 
     ActivitiesContent(
         recordings = finished,
+        needsAttention = needsAttention,
         uploads = uploads,
         onOpenActivity = onOpenActivity,
         onFinishSaving = onFinishSaving,
@@ -59,6 +62,7 @@ fun ActivitiesScreen(
 @Composable
 private fun ActivitiesContent(
     recordings: List<LocalRecording>,
+    needsAttention: Int,
     uploads: Map<String, UploadState>,
     onOpenActivity: (String) -> Unit,
     onFinishSaving: (String) -> Unit,
@@ -71,6 +75,8 @@ private fun ActivitiesContent(
             title = "Activities",
             description = if (recordings.isEmpty()) {
                 null
+            } else if (needsAttention > 0) {
+                "${recordings.size} rides · $needsAttention need attention"
             } else {
                 "${recordings.size} recorded ${if (recordings.size == 1) "ride" else "rides"}"
             },
@@ -142,9 +148,17 @@ private fun ActivityRow(
             )
             if (recording.recovered) {
                 Text(
-                    "Recovered after interruption",
+                    if (recording.recoveryFailed) {
+                        "Interrupted · raw file kept"
+                    } else {
+                        "Interrupted · raw data recovered"
+                    },
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.tertiary,
+                    color = if (recording.recoveryFailed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.tertiary
+                    },
                 )
             }
         }
@@ -192,6 +206,7 @@ private fun ActivitiesContentPreview() {
                     bikeName = "Enduro",
                 ),
             ),
+            needsAttention = 0,
             uploads = emptyMap(),
             onOpenActivity = {},
             onFinishSaving = {},

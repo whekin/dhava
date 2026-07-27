@@ -11,7 +11,7 @@ skeleton and deployment scaffolding.
 
 ## Phase 1 — Field-ready recording (in progress)
 
-- Foreground GPS + full-rate IMU + barometer raw capture with crash recovery ✅
+- Foreground GPS + high-rate IMU + barometer raw capture with crash recovery ✅
 - Five-second-bounded sensor warm-up, live fused telemetry and map ✅
 - Manual pause/resume with explicit raw events and guarded Finish ✅
 - Screen-off/background survival, wake lock and battery exemption ✅

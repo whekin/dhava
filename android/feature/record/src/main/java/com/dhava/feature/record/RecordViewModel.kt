@@ -45,13 +45,22 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     val startError: StateFlow<String?> = _startError.asStateFlow()
 
     fun startRecording() {
-        val free = getApplication<Application>().filesDir.usableSpace
-        if (free < 250L * 1024 * 1024) {
-            _startError.value = "Not enough free storage. Keep at least 250 MB available."
-            return
-        }
+        if (!hasRecordingStorage()) return
         _startError.value = null
         RecordingService.start(getApplication())
+    }
+
+    fun continueRecording(id: String) {
+        if (!hasRecordingStorage()) return
+        _startError.value = null
+        RecordingService.continueRecording(getApplication(), id)
+    }
+
+    private fun hasRecordingStorage(): Boolean {
+        val free = getApplication<Application>().filesDir.usableSpace
+        if (free >= 250L * 1024 * 1024) return true
+        _startError.value = "Not enough free storage. Keep at least 250 MB available."
+        return false
     }
 
     /**

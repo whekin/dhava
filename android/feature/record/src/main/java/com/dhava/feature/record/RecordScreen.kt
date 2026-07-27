@@ -56,7 +56,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingState
+import com.dhava.core.recording.canContinueRecording
+import com.dhava.core.recording.needsRecoveryAttention
 import com.dhava.core.ui.DhavaControlTone
 import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaPanel
@@ -73,11 +76,13 @@ import java.util.Locale
 fun RecordScreen(
     modifier: Modifier = Modifier,
     onImmersiveChanged: (Boolean) -> Unit = {},
+    onSaveRecovered: (String) -> Unit = {},
     viewModel: RecordViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
+    val recordings by viewModel.recordings.collectAsState()
     val lastUsedBikeId by viewModel.lastUsedBikeId.collectAsState()
     val startError by viewModel.startError.collectAsState()
     val diagnosticsEnabled = remember {
@@ -91,6 +96,11 @@ fun RecordScreen(
     var mapFollowing by remember { mutableStateOf(true) }
     var recenterRequest by remember { mutableIntStateOf(0) }
     var previewAccuracyM by remember { mutableStateOf<Float?>(null) }
+    var pendingContinueId by remember { mutableStateOf<String?>(null) }
+
+    val interruptedRecording = recordings.firstOrNull {
+        it.needsRecoveryAttention()
+    }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var mapVisible by remember {
@@ -109,7 +119,8 @@ fun RecordScreen(
     }
 
     fun startAndMaybeAskBattery() {
-        viewModel.startRecording()
+        pendingContinueId?.let(viewModel::continueRecording) ?: viewModel.startRecording()
+        pendingContinueId = null
         if (viewModel.shouldAskBatteryExemption()) showBatteryDialog = true
     }
 
@@ -151,7 +162,8 @@ fun RecordScreen(
         if (locationGranted) continueAfterForegroundLocation()
     }
 
-    fun startWithPermissions() {
+    fun startWithPermissions(continueId: String? = null) {
+        pendingContinueId = continueId
         val hasLocation = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -186,7 +198,7 @@ fun RecordScreen(
                 cameraBottomPadding = when (state) {
                     is RecordingState.Recording -> 300.dp
                     is RecordingState.Preparing -> 260.dp
-                    else -> 190.dp
+                    else -> if (interruptedRecording != null) 320.dp else 190.dp
                 },
                 following = mapFollowing,
                 recenterRequest = recenterRequest,
@@ -240,12 +252,19 @@ fun RecordScreen(
             )
             else -> IdleContent(
                 gpsAccuracyM = previewAccuracyM,
+                interruptedRecording = interruptedRecording,
                 errorMessage = startError ?: if (permissionDenied) {
                     "Precise location is required to record a ride."
                 } else {
                     null
                 },
-                onStart = ::startWithPermissions,
+                onContinue = {
+                    interruptedRecording?.id?.let(::startWithPermissions)
+                },
+                onSaveRecovered = {
+                    interruptedRecording?.id?.let(onSaveRecovered)
+                },
+                onStart = { startWithPermissions() },
             )
         }
     }
@@ -283,7 +302,14 @@ fun RecordScreen(
 private data class SaveTarget(val id: String, val startedAtMs: Long, val durationMs: Long)
 
 @Composable
-private fun IdleContent(gpsAccuracyM: Float?, errorMessage: String?, onStart: () -> Unit) {
+private fun IdleContent(
+    gpsAccuracyM: Float?,
+    interruptedRecording: LocalRecording?,
+    errorMessage: String?,
+    onContinue: () -> Unit,
+    onSaveRecovered: () -> Unit,
+    onStart: () -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     Box(Modifier.fillMaxSize()) {
         DhavaPanel(
@@ -293,38 +319,53 @@ private fun IdleContent(gpsAccuracyM: Float?, errorMessage: String?, onStart: ()
                 .padding(DhavaSpacing.medium),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Row(
-                modifier = Modifier.padding(DhavaSpacing.xLarge),
-                horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.large),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    DhavaSectionLabel("Mountain bike")
-                    Spacer(Modifier.height(DhavaSpacing.small))
-                    Text("Ready to ride", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(DhavaSpacing.small))
-                    Text(
-                        when {
-                            gpsAccuracyM == null -> "GPS warming up while this screen is open."
-                            gpsAccuracyM <= 15f -> "GPS ready · ±${gpsAccuracyM.toInt()} m"
-                            else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (gpsAccuracyM != null && gpsAccuracyM <= 15f) {
-                            MaterialTheme.colorScheme.tertiary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-                DhavaRideControl(
-                    icon = Icons.Filled.PlayArrow,
-                    contentDescription = "Start recording",
-                    onClick = {
+            if (interruptedRecording != null) {
+                InterruptedRecordingContent(
+                    recording = interruptedRecording,
+                    onContinue = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onContinue()
+                    },
+                    onSave = onSaveRecovered,
+                    onStartNew = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         onStart()
                     },
                 )
+            } else {
+                Row(
+                    modifier = Modifier.padding(DhavaSpacing.xLarge),
+                    horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.large),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        DhavaSectionLabel("Mountain bike")
+                        Spacer(Modifier.height(DhavaSpacing.small))
+                        Text("Ready to ride", style = MaterialTheme.typography.headlineSmall)
+                        Spacer(Modifier.height(DhavaSpacing.small))
+                        Text(
+                            when {
+                                gpsAccuracyM == null -> "GPS warming up while this screen is open."
+                                gpsAccuracyM <= 15f -> "GPS ready · ±${gpsAccuracyM.toInt()} m"
+                                else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (gpsAccuracyM != null && gpsAccuracyM <= 15f) {
+                                MaterialTheme.colorScheme.tertiary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    DhavaRideControl(
+                        icon = Icons.Filled.PlayArrow,
+                        contentDescription = "Start recording",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onStart()
+                        },
+                    )
+                }
             }
         }
         if (errorMessage != null) {
@@ -343,6 +384,92 @@ private fun IdleContent(gpsAccuracyM: Float?, errorMessage: String?, onStart: ()
                     modifier = Modifier.padding(DhavaSpacing.large),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun InterruptedRecordingContent(
+    recording: LocalRecording,
+    onContinue: () -> Unit,
+    onSave: () -> Unit,
+    onStartNew: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(DhavaSpacing.xLarge),
+        verticalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                DhavaSectionLabel("Ride interrupted")
+                Spacer(Modifier.height(DhavaSpacing.small))
+                Text(
+                    if (recording.recoveryFailed) "Raw file kept" else "Your ride data is safe",
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+            }
+            DhavaStatusPill(
+                text = if (recording.recoveryFailed) "Raw only" else "Recovered",
+                containerColor = if (recording.recoveryFailed) {
+                    MaterialTheme.colorScheme.errorContainer
+                } else {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                },
+                contentColor = if (recording.recoveryFailed) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                },
+            )
+        }
+        Text(
+            "${formatElapsed(recording.endedAtMs - recording.startedAtMs)} · " +
+                formatSize(recording.sizeBytes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (recording.recoveryFailed) {
+                "The original bytes are still on this phone. Save the entry to keep it visible and export diagnostics."
+            } else {
+                "Dhava stopped unexpectedly. Continue this ride or save everything recorded so far."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (recording.canContinueRecording()) {
+                Button(
+                    onClick = onContinue,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text("Continue ride")
+                }
+            }
+            TextButton(
+                onClick = onSave,
+                modifier = Modifier.height(DhavaSizes.primaryActionHeight),
+            ) {
+                Text(if (recording.recoveryFailed) "Save raw" else "Save")
+            }
+        }
+        TextButton(
+            onClick = onStartNew,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text("Start a new ride")
         }
     }
 }
@@ -577,7 +704,37 @@ private fun BackgroundLocationDialog(
 private fun IdleContentPreview() {
     DhavaTheme(darkTheme = true) {
         Surface(color = MaterialTheme.colorScheme.background) {
-            IdleContent(gpsAccuracyM = 6f, errorMessage = null, onStart = {})
+            IdleContent(
+                gpsAccuracyM = 6f,
+                interruptedRecording = null,
+                errorMessage = null,
+                onContinue = {},
+                onSaveRecovered = {},
+                onStart = {},
+            )
+        }
+    }
+}
+
+@Preview(name = "Record · interrupted", widthDp = 412, heightDp = 760)
+@Composable
+private fun InterruptedContentPreview() {
+    DhavaTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            IdleContent(
+                gpsAccuracyM = 6f,
+                interruptedRecording = LocalRecording(
+                    id = "recovered",
+                    startedAtMs = 1_780_000_000_000,
+                    endedAtMs = 1_780_001_800_000,
+                    sizeBytes = 24_500_000,
+                    recovered = true,
+                ),
+                errorMessage = null,
+                onContinue = {},
+                onSaveRecovered = {},
+                onStart = {},
+            )
         }
     }
 }

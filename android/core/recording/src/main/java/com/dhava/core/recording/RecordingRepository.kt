@@ -174,6 +174,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
             loaded.await()
             indexMutex.withLock {
                 _recordings.update { list ->
+                    val previous = list.firstOrNull { it.id == summary.id }
                     val entry = LocalRecording(
                         id = summary.id,
                         startedAtMs = summary.startedAtMs,
@@ -181,7 +182,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
                         sizeBytes = summary.sizeBytes,
                         status = RecordingStatus.RECORDED,
                         // A resumed-after-crash ride keeps its recovered mark.
-                        recovered = list.firstOrNull { it.id == summary.id }?.recovered ?: false,
+                        recovered = previous?.recovered ?: false,
+                        // Reaching Stop means this interruption was resolved;
+                        // preserve its history but do not offer Continue again.
+                        continuationAllowed = if (previous?.recovered == true) false else null,
                     )
                     listOf(entry) + list.filterNot { it.id == summary.id }
                 }
@@ -229,10 +233,24 @@ class RecordingRepository private constructor(private val appContext: Context) {
             val file = recordingFile(entry.id)
             val stats = RecordingRecovery.repairFile(file)
             if (stats == null) {
-                // Not a single complete line survived: drop the entry. The
-                // file (if any) stays on disk — raw data is never deleted
-                // automatically.
-                _recordings.update { list -> list.filterNot { it.id == entry.id } }
+                // Keep unreadable bytes visible instead of silently removing
+                // the index entry and leaving an orphan the UI cannot reach.
+                val endedAtMs = file
+                    .takeIf(File::isFile)
+                    ?.lastModified()
+                    ?.coerceAtLeast(entry.startedAtMs)
+                    ?: entry.startedAtMs
+                val rawOnly = entry.copy(
+                    endedAtMs = endedAtMs,
+                    sizeBytes = file.takeIf(File::isFile)?.length() ?: 0,
+                    status = RecordingStatus.RECORDED,
+                    recovered = true,
+                    recoveryFailed = true,
+                    continuationAllowed = false,
+                )
+                _recordings.update { list ->
+                    list.map { if (it.id == entry.id) rawOnly else it }
+                }
                 continue
             }
             val repaired = entry.copy(
@@ -240,6 +258,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 sizeBytes = file.length(),
                 status = RecordingStatus.RECORDED,
                 recovered = true,
+                continuationAllowed = true,
             )
             _recordings.update { list -> list.map { if (it.id == entry.id) repaired else it } }
             if (resumable == null || repaired.startedAtMs > resumable.startedAtMs) {
@@ -253,17 +272,17 @@ class RecordingRepository private constructor(private val appContext: Context) {
             .listFiles { f -> f.name.endsWith(".jsonl.gz") }
             ?.filter { it.name.removeSuffix(".jsonl.gz") !in known }
             ?.forEach { file ->
-                // Unreadable orphans are skipped (and kept) — retrying on the
-                // next launch is cheap and never destructive.
-                val stats = RecordingRecovery.repairFile(file) ?: return@forEach
-                val startedAtMs = stats.startedAtMs ?: file.lastModified()
+                val stats = RecordingRecovery.repairFile(file)
+                val startedAtMs = stats?.startedAtMs ?: file.lastModified()
                 val entry = LocalRecording(
                     id = file.name.removeSuffix(".jsonl.gz"),
                     startedAtMs = startedAtMs,
-                    endedAtMs = stats.endedAtMs ?: startedAtMs,
+                    endedAtMs = stats?.endedAtMs ?: startedAtMs,
                     sizeBytes = file.length(),
                     status = RecordingStatus.RECORDED,
                     recovered = true,
+                    recoveryFailed = stats == null,
+                    continuationAllowed = stats != null,
                 )
                 _recordings.update { listOf(entry) + it }
                 changed = true
@@ -277,7 +296,11 @@ class RecordingRepository private constructor(private val appContext: Context) {
     }
 
     /** What a restarted service needs to continue an interrupted ride. */
-    internal data class ResumeTarget(val id: String, val startedAtMs: Long)
+    internal data class ResumeTarget(
+        val id: String,
+        val startedAtMs: Long,
+        val endedAtMs: Long,
+    )
 
     /**
      * Claims the interrupted recording for a resume (START_STICKY restart
@@ -287,20 +310,25 @@ class RecordingRepository private constructor(private val appContext: Context) {
      * Returns null when there is nothing (safely) resumable; the entry then
      * simply stays in the list as a recovered ride.
      */
-    internal suspend fun takeResumableRecording(): ResumeTarget? {
+    internal suspend fun takeResumableRecording(requestedId: String? = null): ResumeTarget? {
         loaded.await()
-        val id = resumableId.getAndSet(null) ?: return null
+        val id = requestedId ?: resumableId.getAndSet(null) ?: return null
+        if (requestedId != null) resumableId.compareAndSet(requestedId, null)
         return indexMutex.withLock {
             val entry = _recordings.value.firstOrNull { it.id == id }
-            // Only resume what the user has not touched since recovery.
-            if (entry == null || entry.status != RecordingStatus.RECORDED || entry.savedAtMs != null) {
+            // Only resume a readable interrupted ride the user has not saved.
+            if (entry == null || !entry.canContinueRecording()) {
                 return@withLock null
             }
             _recordings.update { list ->
                 list.map { if (it.id == id) it.copy(status = RecordingStatus.RECORDING) else it }
             }
             saveIndex()
-            ResumeTarget(id = entry.id, startedAtMs = entry.startedAtMs)
+            ResumeTarget(
+                id = entry.id,
+                startedAtMs = entry.startedAtMs,
+                endedAtMs = entry.endedAtMs,
+            )
         }
     }
 

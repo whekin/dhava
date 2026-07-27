@@ -4,7 +4,6 @@
     <!--
         Permissions for ride recording (:core:recording):
         - ACCESS_FINE_LOCATION: GPS traces of downhill runs
-        - HIGH_SAMPLING_RATE_SENSORS: >200 Hz accelerometer/gyro for jump & roughness detection
         - FOREGROUND_SERVICE(_LOCATION): keep recording with the screen off
         - POST_NOTIFICATIONS: persistent "recording in progress" notification (API 33+)
         - INTERNET: raw recording upload to the backend
@@ -19,7 +18,6 @@
          foreground service after an OEM process kill while the screen/app is
          backgrounded. A normal user-started ride still works without it. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

@@ -988,3 +988,53 @@ tests and regenerated both committed Android native libraries. Rust formatting,
 all 62 fusion-core unit tests, both forest fixtures, the full workspace tests
 and strict all-target clippy pass. Activity and Recording unit tests plus the
 full debug Android assembly also pass.
+
+## 2026-07-27 — Repeated OEM-kill recovery and visible interrupted rides
+
+The attached OnePlus supplied decisive evidence for the latest lost-ride
+reports. `ApplicationExitInfo` contains foreground-process OxygenOS
+`o-kill(6)` exits (reason OTHER, importance 125) on July 23 and three times on
+July 25, including 17:38, 18:15 and 18:44. There is no corresponding Dhava
+Java/native crash. The app is present in the device-idle user whitelist and
+fine/background location plus notification permissions are granted, confirming
+the rider's settings were already correct.
+
+No private raw was copied off the device. Streaming only counts and timestamps
+showed that the three newest visible recovered entries preserve 0:36, 49:18
+and 29:50. The two long files contain 3,021 GPS / 1,385,937 IMU rows and
+2,008 GPS / 863,255 IMU rows respectively. Their maximum IMU gaps of about
+190 s and 66 s prove START_STICKY did restart and append after an earlier kill.
+The root logic bug was that the restarted service began its repair/claim in a
+coroutine but immediately evaluated `recording == false` and returned
+START_NOT_STICKY. A second OEM kill therefore became terminal.
+
+RecordingService now has an explicit asynchronous `recovering` lifecycle state,
+so both automatic and user-requested recovery remain START_STICKY until the
+recording has been claimed. Manual Continue can claim any readable, recovered,
+unsaved entry, append a fresh RFC 1952 gzip member and add pause/resume events
+around the process gap. Live elapsed time excludes restart downtime. An
+explicit Finish preserves recovery history but disables another Continue.
+
+Recovery no longer removes an unreadable entry from `recordings.json` or skips
+an unreadable orphan. The original bytes remain visible as `Raw only`, allowing
+the rider to save the entry and reach raw diagnostics/export. The Record screen
+now gives interrupted data first-class priority with `Continue ride`, `Save`
+and `Start a new ride`; Activities reports how many rides need attention and
+uses clearer recovered/raw-only copy. The new state was visually checked on the
+physical 1080 × 2412 OnePlus screen.
+
+To reduce the sustained resource profile that makes an OEM kill more likely,
+raw accel/gyro capture is capped at 200 Hz (5 ms, still finer than jump/landing
+timing needs) and live Rust input remains 50 Hz. RecordingWriter now separates
+lossless GPS/meta/barometer/events from a bounded 4,096-row IMU queue; an
+overflow is preserved as an `imu_overflow:<count>` diagnostic event instead of
+allowing unbounded process-memory growth.
+
+All Android debug unit tests and the full debug assembly pass. On-device, a fresh
+test recording survived two consecutive `SIGKILL`s: Android restarted the
+foreground service both times (`lastStartId` reached 3), the same indexed entry
+returned to `recording`, and its raw file resumed growing. The test activity
+was then finished and discarded through the normal UI; the three real recovered
+rides and all other user data were left untouched. A real 1–2 hour field ride
+is still required to measure whether OxygenOS kills become less frequent, but
+repeat recovery no longer depends on that outcome.

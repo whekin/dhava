@@ -90,6 +90,48 @@ class LocalRecordingTest {
     }
 
     @Test
+    fun `failed recovery stays explicit and cannot be continued`() {
+        val rawOnly = json.decodeFromString<LocalRecording>(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3,""" +
+                """"recovered":true,"recovery_failed":true}""",
+        )
+        assertEquals(true, rawOnly.recoveryFailed)
+        assertEquals(false, rawOnly.canContinueRecording())
+        assertEquals(
+            """{"id":"a","started_at_ms":1,"ended_at_ms":2,"size_bytes":3,""" +
+                """"recovered":true,"recovery_failed":true}""",
+            json.encodeToString(rawOnly),
+        )
+    }
+
+    @Test
+    fun `only readable unsaved recovered recording can continue`() {
+        val recovered = LocalRecording(
+            id = "a",
+            startedAtMs = 1,
+            endedAtMs = 2,
+            sizeBytes = 3,
+            recovered = true,
+        )
+        assertEquals(true, recovered.canContinueRecording())
+        assertEquals(true, recovered.needsRecoveryAttention())
+        assertEquals(false, recovered.copy(recovered = false).canContinueRecording())
+        assertEquals(false, recovered.copy(savedAtMs = 3).canContinueRecording())
+        assertEquals(
+            false,
+            recovered.copy(continuationAllowed = false).canContinueRecording(),
+        )
+        assertEquals(
+            false,
+            recovered.copy(continuationAllowed = false).needsRecoveryAttention(),
+        )
+        assertEquals(
+            false,
+            recovered.copy(status = RecordingStatus.PENDING_UPLOAD).canContinueRecording(),
+        )
+    }
+
+    @Test
     fun `legacy entry without status decodes as recorded`() {
         // Pre-save-flow index shape (the old `uploaded` boolean is ignored).
         val entry = json.decodeFromString<LocalRecording>(

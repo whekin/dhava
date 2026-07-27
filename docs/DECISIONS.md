@@ -40,15 +40,15 @@ Short log of architecture/product decisions. Newest last.
   accepted: history recompute happens on-device; lost phone = lost raw (results
   survive). Optional raw cloud backup may come later. Phase 1 raw-upload endpoints
   stay for now (dev convenience) but are no longer the product path.
-- **Battery strategy**: recording is always full-rate (raw file, cheap IO); the
-  live fusion filter consumes ~100 Hz (decimated at filter input only). Screen off →
-  no UI compute + hardware sensor batching (1–2 s FIFO flushes, CPU sleeps); only a
-  cheap gate-proximity geofence stays on to wake live mode near segment starts.
+- **Battery strategy (revised 2026-07-27)**: raw IMU is explicitly capped at
+  200 Hz; the live fusion filter consumes 50 Hz. Screen off removes map/UI work.
+  The writer keeps lossless low-rate GPS/meta/events separate from a bounded IMU
+  backlog, preventing temporary storage stalls from growing memory without limit.
 ## 2026-07-12 — Live telemetry uses fusion-core at reduced input rate
 
 Real-time values shown during recording are Rust fusion results, never direct
-Android GPS-derived metrics. Raw sensors remain recorded at hardware rate, while
-the live pipeline may downsample IMU input (currently 50 Hz) and publish UI
+Android GPS-derived metrics. Raw IMU is recorded at the configured acquisition
+rate (currently 200 Hz), while the live pipeline downsamples it to 50 Hz and publishes UI
 snapshots at display/GPS rate. Map rendering is foreground-UI-only; background
 recording keeps raw capture and low-cost fusion state without rendering. Final
 activity results are always recomputed canonically from the raw on-device file.
@@ -59,7 +59,7 @@ activity results are always recomputed canonically from the raw on-device file.
   Strava export are dependable; `docs/ROADMAP.md` is now recorder-first.
 - Manual pause/resume is part of the raw contract via explicit `event` lines.
   Sensor samples are absent during a manual pause, and analysis must not bridge it.
-- `STILL` is not a recording pause. Full-rate IMU remains captured while stationary
+- `STILL` is not a recording pause. High-rate IMU remains captured while stationary
   during the calibration/field-test period because it is required to validate
   stationarity, preserve motion-onset evidence and tune device-specific noise.
   Adaptive stationary sampling is allowed later only with heartbeat plus pre-roll.
@@ -270,3 +270,17 @@ activity results are always recomputed canonically from the raw on-device file.
   GPS-only uncertainty is a conservative display heuristic of `max(7 m, p90 horizontal
   accuracy × 2)`; it describes the reported net metric and must not feed timing,
   segment matching or corrections.
+
+## 2026-07-27 — Interrupted recordings remain visible and repeatedly resumable
+
+- A killed foreground recorder is expected to be restartable more than once.
+  START_STICKY includes the asynchronous repair/claim window; returning
+  START_NOT_STICKY before that claim completes makes the next process kill terminal.
+- Every interrupted index entry and orphan raw file remains visible. Readable files
+  may be continued or saved; undecodable bytes are surfaced as `Raw only` and may be
+  retained/exported instead of becoming invisible disk orphans.
+- Continue appends a new RFC 1952 gzip member and writes pause/resume boundary events,
+  preserving raw history without drawing or analyzing across process downtime.
+- Raw accelerometer/gyro acquisition is capped at 200 Hz. A 4,096-line bounded IMU
+  queue contains short storage stalls; GPS, meta, barometer and lifecycle events use
+  a separate lossless queue. Any IMU overflow is recorded as a diagnostic event.

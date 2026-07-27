@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  * Runs with `foregroundServiceType="location"` and a persistent notification,
  * plus a partial wake lock (OEM killers, see [wakeLock]); START_STICKY so the
  * system restarts it if the process is killed mid-ride, in which case the
- * interrupted recording is repaired and resumed ([resumeAfterRestart]).
+ * interrupted recording is repaired and resumed ([resumeRecovered]).
  * Sensor callbacks are delivered on a dedicated [HandlerThread] and only
  * enqueue lines into [RecordingWriter] — no I/O or allocation-heavy work on
  * the callback path.
@@ -60,12 +60,17 @@ class RecordingService : Service() {
         private const val ACTION_STOP = "com.dhava.core.recording.action.STOP"
         private const val ACTION_PAUSE = "com.dhava.core.recording.action.PAUSE"
         private const val ACTION_RESUME = "com.dhava.core.recording.action.RESUME"
+        private const val ACTION_CONTINUE = "com.dhava.core.recording.action.CONTINUE"
+        private const val EXTRA_RECORDING_ID = "recording_id"
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
 
         private const val GPS_INTERVAL_MS = 1_000L
         private const val GPS_MIN_INTERVAL_MS = 500L
         private const val LIVE_IMU_INTERVAL_MS = 20L
+        private const val RAW_IMU_INTERVAL_US = 5_000
+        private const val MAG_INTERVAL_US = 20_000
+        private const val BARO_INTERVAL_US = 100_000
         private const val MAX_LIVE_TRACK_POINTS = 10_800 // ~3 h at 1 Hz
         private const val PREPARE_TIMEOUT_MS = 10_000L
         private const val LOG_TAG = "RecordingService"
@@ -90,6 +95,13 @@ class RecordingService : Service() {
         fun resume(context: Context) = context.startService(
             Intent(context, RecordingService::class.java).setAction(ACTION_RESUME),
         )
+
+        fun continueRecording(context: Context, recordingId: String) {
+            val intent = Intent(context, RecordingService::class.java)
+                .setAction(ACTION_CONTINUE)
+                .putExtra(EXTRA_RECORDING_ID, recordingId)
+            ContextCompat.startForegroundService(context, intent)
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -143,6 +155,7 @@ class RecordingService : Service() {
     @Volatile private var liveTrack: List<LiveTrackPoint> = emptyList()
     private var liveFusion: LiveFusion? = null
     private var lastLiveImuMs = Long.MIN_VALUE
+    private var lastRawImuNs = Long.MIN_VALUE
 
     // Latest gyro/mag samples, paired with accelerometer events (see below).
     @Volatile private var latestGyro: FloatArray? = null
@@ -150,6 +163,7 @@ class RecordingService : Service() {
 
     private var recording = false
     @Volatile private var preparing = false
+    @Volatile private var recovering = false
     @Volatile private var paused = false
     private var prepareStartedElapsedMs = 0L
     private var warmImuCount = 0
@@ -172,13 +186,23 @@ class RecordingService : Service() {
             ACTION_STOP -> stopRecording()
             ACTION_PAUSE -> pauseRecording()
             ACTION_RESUME -> resumeRecording()
+            ACTION_CONTINUE -> if (!recording && !preparing && !recovering) {
+                recovering = true
+                resumeRecovered(intent.getStringExtra(EXTRA_RECORDING_ID))
+            }
             // Null intent: START_STICKY restart after the system killed the
             // process mid-ride (seen in the wild: OnePlus "o-kill"). The
             // repository has already repaired the interrupted file at index
             // load; pick the ride back up and keep appending to it.
-            null -> if (!recording && !preparing) resumeAfterRestart()
+            null -> if (!recording && !preparing && !recovering) {
+                recovering = true
+                resumeRecovered()
+            }
         }
-        return if (recording || preparing) START_STICKY else START_NOT_STICKY
+        // Recovery claims the repaired entry asynchronously. Include that
+        // window in the sticky state: returning NOT_STICKY here caused a
+        // second OxygenOS kill to end an otherwise successfully resumed ride.
+        return if (recording || preparing || recovering) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -186,7 +210,7 @@ class RecordingService : Service() {
     // --- recording lifecycle ------------------------------------------------
 
     private fun startRecording() {
-        if (recording || preparing) return
+        if (recording || preparing || recovering) return
         if (!hasLocationPermission()) {
             // UI is responsible for requesting permissions before starting.
             stopSelf()
@@ -237,10 +261,11 @@ class RecordingService : Service() {
      * unreadable, or the user already touched it), the entry — if any — has
      * been finalized through the recovery path; just stop gracefully.
      */
-    private fun resumeAfterRestart() {
+    private fun resumeRecovered(requestedId: String? = null) {
         // Foreground first: a restarted foreground service must promote
         // itself promptly, and the resume decision below is asynchronous.
         if (!goForeground()) {
+            recovering = false
             // Android 14+ rejects a background-created location FGS when the
             // user granted only while-in-use location. The repository has
             // already repaired the interrupted file; stop without a crash
@@ -249,8 +274,13 @@ class RecordingService : Service() {
             return
         }
         scope.launch {
-            val target = if (hasLocationPermission()) repository.takeResumableRecording() else null
+            val target = if (hasLocationPermission()) {
+                repository.takeResumableRecording(requestedId)
+            } else {
+                null
+            }
             if (target == null || recording) {
+                recovering = false
                 if (!recording) {
                     ServiceCompat.stopForeground(
                         this@RecordingService,
@@ -261,14 +291,15 @@ class RecordingService : Service() {
                 return@launch
             }
             recording = true
+            recovering = false
 
             activityId = target.id
             startedAtMs = target.startedAtMs
-            // Elapsed time keeps counting from the ORIGINAL start: project
-            // the wall-clock start onto the current elapsed-realtime clock
-            // (also correct across a reboot, where elapsedRealtime resets).
+            // Preserve already-recorded ride time without counting the
+            // process-restart gap as active live time.
             startedElapsedMs =
-                SystemClock.elapsedRealtime() - (System.currentTimeMillis() - target.startedAtMs)
+                SystemClock.elapsedRealtime() -
+                (target.endedAtMs - target.startedAtMs).coerceAtLeast(0L)
             // Fresh anchor for the new samples; see the field docs.
             epochAnchorMs = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
@@ -277,6 +308,9 @@ class RecordingService : Service() {
             // line — samples only; epoch timestamps make ordering across the
             // gap unambiguous.
             writer = RecordingWriter(repository.recordingFile(activityId), append = true)
+            val resumedAtMs = System.currentTimeMillis()
+            writer?.write(RecordLine.Event(target.endedAtMs, "pause"))
+            writer?.write(RecordLine.Event(resumedAtMs, "resume"))
 
             startCapture()
         }
@@ -293,6 +327,7 @@ class RecordingService : Service() {
         liveTrack = emptyList()
         liveFusion = LiveFusion()
         lastLiveImuMs = Long.MIN_VALUE
+        lastRawImuNs = Long.MIN_VALUE
         latestGyro = null
         latestMag = null
         warmImuCount = 0
@@ -427,9 +462,9 @@ class RecordingService : Service() {
 
     private fun registerSensors() {
         val handler = sensorThread?.let { HandlerCompat.createAsync(it.looper) } ?: return
-        // SENSOR_DELAY_FASTEST + the HIGH_SAMPLING_RATE_SENSORS permission
-        // gives 100 Hz+ on most devices. Missing sensors are simply skipped —
-        // we record whatever hardware exists.
+        // 200 Hz retains 5 ms airtime/impact timing while avoiding the
+        // sustained 500 Hz allocation and I/O load seen before OxygenOS
+        // killed several long foreground recordings.
         listOf(
             Sensor.TYPE_ACCELEROMETER,
             Sensor.TYPE_GYROSCOPE,
@@ -440,7 +475,13 @@ class RecordingService : Service() {
                 sensorManager.registerListener(
                     sensorListener,
                     sensor,
-                    SensorManager.SENSOR_DELAY_FASTEST,
+                    when (type) {
+                        Sensor.TYPE_ACCELEROMETER,
+                        Sensor.TYPE_GYROSCOPE,
+                        -> RAW_IMU_INTERVAL_US
+                        Sensor.TYPE_MAGNETIC_FIELD -> MAG_INTERVAL_US
+                        else -> BARO_INTERVAL_US
+                    },
                     handler,
                 )
             }
@@ -461,9 +502,16 @@ class RecordingService : Service() {
                 // re-interpolates anyway, and far simpler than a merge queue.
                 Sensor.TYPE_ACCELEROMETER -> {
                     if (writer == null || paused) return
-                    imuCount++
+                    if (
+                        lastRawImuNs != Long.MIN_VALUE &&
+                        event.timestamp - lastRawImuNs < RAW_IMU_INTERVAL_US * 1_000L
+                    ) {
+                        return
+                    }
+                    lastRawImuNs = event.timestamp
                     val timestampMs = epochAnchorMs + event.timestamp / 1_000_000
-                    // JNI at raw 500 Hz would waste battery. 50 Hz retains
+                    imuCount++
+                    // JNI at the raw sensor rate would waste battery. 50 Hz retains
                     // more than enough bandwidth for attitude/EKF and ZUPT.
                     if (
                         lastLiveImuMs == Long.MIN_VALUE ||
@@ -606,6 +654,9 @@ class RecordingService : Service() {
                 if (second != lastNotifiedSecond) {
                     lastNotifiedSecond = second
                     notificationManager.notify(NOTIFICATION_ID, buildNotification(elapsedMs))
+                    if (second % 60L == 0L) {
+                        writer?.flushDiagnostics(System.currentTimeMillis())
+                    }
                 }
                 delay(STATE_PUSH_INTERVAL_MS)
             }

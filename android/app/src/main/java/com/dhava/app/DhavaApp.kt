@@ -107,6 +107,7 @@ fun DhavaApp() {
             composable(DhavaDestination.Record.route) {
                 RecordScreen(
                     onImmersiveChanged = { recordImmersive = it },
+                    onSaveRecovered = { id -> navController.navigate("save/$id") },
                 )
             }
             composable(DhavaDestination.Activities.route) {

@@ -60,6 +60,18 @@ data class LocalRecording(
      * list; omitted from JSON when false.
      */
     val recovered: Boolean = false,
+    /**
+     * Recovery found the raw file but could not decode one complete line.
+     * The entry stays visible so the rider can keep/export the original bytes
+     * instead of leaving an invisible orphan on disk.
+     */
+    @SerialName("recovery_failed") val recoveryFailed: Boolean = false,
+    /**
+     * Whether the interrupted tail may still be appended to. Null keeps old
+     * recovered index entries backward-compatible (treated as allowed).
+     * An explicit Finish writes false while preserving the recovery history.
+     */
+    @SerialName("continuation_allowed") val continuationAllowed: Boolean? = null,
     // Save-time metadata, attached by the save sheet.
     val title: String? = null,
     val description: String? = null,
@@ -74,6 +86,21 @@ data class LocalRecording(
      */
     @SerialName("server_id") val serverId: String? = null,
 )
+
+/** An interrupted, unsaved recording that is safe to append to. */
+fun LocalRecording.canContinueRecording(): Boolean =
+    recovered &&
+        !recoveryFailed &&
+        continuationAllowed != false &&
+        status == RecordingStatus.RECORDED &&
+        savedAtMs == null
+
+/** Whether an unsaved interruption still needs a decision on the Record screen. */
+fun LocalRecording.needsRecoveryAttention(): Boolean =
+    recovered &&
+        status == RecordingStatus.RECORDED &&
+        savedAtMs == null &&
+        (recoveryFailed || continuationAllowed != false)
 
 /**
  * Applies save-sheet/edit metadata to an entry. Blank title/description clear
