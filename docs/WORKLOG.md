@@ -1274,11 +1274,13 @@ current OnePlus exercises the API 34+ cleaner branch.
 ## 2026-07-28 — Activity map legends use progressive disclosure
 
 The always-visible track-state and GPS-accuracy cards no longer cover the map. Activity
-Detail now starts with one right-aligned 48 dp `KEY` control below GPS/Fusion/Compare.
-It opens a single anchored popup with no scrim; tapping outside or pressing Back
-dismisses it. GPS exposes only its accuracy scale, Fusion only its state key and
-Compare combines both sections with one divider. Selecting another track mode also
-returns the key to its collapsed state.
+Detail now starts with one right-aligned 48 dp outlined information control below
+GPS/Fusion/Compare. The first physical draft labeled it `KEY`, but that read as
+unnecessary jargon; the final standard icon keeps the same touch target and explains
+its purpose through Show/Hide map legend semantics. It opens a single anchored popup
+with no scrim; tapping outside or pressing Back dismisses it. GPS exposes only its
+accuracy scale, Fusion only its state key and Compare combines both sections with one
+divider. Selecting another track mode also returns the key to its collapsed state.
 
 The state and accuracy drawings were separated from their old Surface wrappers so the
 popup is one strong surface rather than nested cards. The GPS key no longer has a

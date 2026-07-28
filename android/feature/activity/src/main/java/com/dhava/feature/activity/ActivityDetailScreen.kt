@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
@@ -779,12 +780,14 @@ private fun MapLegendControl(
     Box(modifier = modifier) {
         Surface(
             onClick = { onExpandedChange(!expanded) },
-            modifier = Modifier.semantics {
-                contentDescription = if (expanded) "Hide map key" else "Show map key"
-                stateDescription = if (expanded) "Expanded" else "Collapsed"
-                role = Role.Button
-            },
-            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .size(48.dp)
+                .semantics {
+                    contentDescription = if (expanded) "Hide map legend" else "Show map legend"
+                    stateDescription = if (expanded) "Expanded" else "Collapsed"
+                    role = Role.Button
+                },
+            shape = CircleShape,
             color = if (expanded) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
@@ -797,17 +800,11 @@ private fun MapLegendControl(
             },
             shadowElevation = 3.dp,
         ) {
-            Row(
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .padding(horizontal = DhavaSpacing.medium),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "KEY",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+            Icon(
+                imageVector = Icons.Outlined.Info,
+                contentDescription = null,
+                modifier = Modifier.padding(12.dp),
+            )
         }
 
         DropdownMenu(
