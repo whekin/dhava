@@ -20,4 +20,10 @@ class SegmentEditorScaleTest {
         assertEquals(0..110, focusedSliderWindow(0, 100, 1_000))
         assertEquals(890..1_000, focusedSliderWindow(900, 1_000, 1_000))
     }
+
+    @Test
+    fun `precision movement applies one fifth of the raw handle delta`() {
+        assertEquals(501f, scaledPrecisionValue(500f, 105f, 100f))
+        assertEquals(499f, scaledPrecisionValue(500f, 95f, 100f))
+    }
 }

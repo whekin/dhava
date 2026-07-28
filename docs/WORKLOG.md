@@ -1404,3 +1404,26 @@ normal UI, leaving the original 2.41 km segment as the only authored segment. Re
 pre-trust work is field-calibrating gates/corridor/coverage on independent runs and
 adding an explicit raw-GPS sample-density component to timing uncertainty before
 leaderboards.
+
+## 2026-07-29 — Hold-to-precision segment trimming
+
+The focused slider's text-heavy `Show full ride` action is now the standard
+zoom-out-map icon with a `Show full ride` accessibility description. It returns only
+the slider domain to the complete recording and does not disturb the rider's map
+camera.
+
+Both range handles now expose a real precision gesture. Holding a handle for 700 ms
+activates Android long-press haptic feedback, adds a visible halo and wider active
+handle, selects the corresponding Start/Finish control, and changes the status to
+`Precision · 5× slower`. Movement after activation is integrated at 20% of the raw
+finger delta and anchors on the first drag event, so entering precision does not jump
+the gate. Releasing or cancelling returns to the normal control. The existing focused
+domain and one-point buttons remain complementary: domain focus provides roughly
+point-level screen resolution, hold precision handles shaky one-handed movement, and
+buttons provide deterministic final steps.
+
+The scaling rule has a unit test. Segment tests, feature lint and the debug app
+assembly pass. The APK was installed with data preservation on the physical OnePlus.
+The full-range state, long-held Finish handle, haptic-triggered visual state and
+zoom-out-map return were exercised; the map camera stayed fixed and no segment was
+saved during the interaction test.

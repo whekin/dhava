@@ -58,8 +58,8 @@ skeleton and deployment scaffolding.
   checks, per-gate timing uncertainty, rejection reasons ✅
 - Longest-descent proposal reusing the ActivityState pass ✅
 - Index-based start/finish editor launched from Activity Detail ✅
-- Coarse selection plus point-level gate adjustment that preserves the user's
-  map zoom and pan ✅
+- Coarse selection, haptic hold-to-precision and point-level gate adjustment
+  that preserve the user's map zoom and pan ✅
 - Map-led segment editor with an always-visible selection slider and expandable
   details sheet ✅
 - Rust-authored elevation profile with accumulated climb and descent ✅

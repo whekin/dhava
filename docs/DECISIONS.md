@@ -411,9 +411,12 @@ activity results are always recomputed canonically from the raw on-device file.
 - Editor camera state is independent from selection state: moving a gate updates map
   layers but never reframes the camera. The slider begins as a full-ride overview, then
   shortly after a completed drag expands the selected interval across almost its full
-  width. `Show full ride` is the explicit, discoverable way back; start/finish controls
-  still move by one canonical 5 Hz point for final adjustment without pretending that
-  every point is a speed-independent meter.
+  width. A standard zoom-out-map action is the explicit way back. Holding either handle
+  for 700 ms enters a haptic-confirmed precision mode where subsequent finger movement
+  is scaled to 20%; the active handle and status text change together so precision is
+  never encoded by haptic or color alone. Start/finish controls still move by one
+  canonical 5 Hz point for final adjustment without pretending that every point is a
+  speed-independent meter.
 - An attempt is never silently dropped. A rejected gate pair is surfaced with a reason
   (`NoFinish`, `PausedInside`, `GapInside`, `OffCorridor`, `Backtracked`, `Incomplete`),
   and a countable attempt can carry non-fatal flags (`DefiningRide`, `LowGpsQuality`,
