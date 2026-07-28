@@ -363,3 +363,16 @@ activity results are always recomputed canonically from the raw on-device file.
   window can also lose that onset. This bounded trade-off is accepted for the first
   field iteration. A tiny crash-safe circular sidecar is the upgrade path if field
   evidence shows that boundary loss matters.
+
+## 2026-07-28 — Android UniFFI bindings use the Android-aware cleaner
+
+- Dhava supports Android API 26, so generated Kotlin bindings must not directly
+  reference the API 33 `java.lang.ref.Cleaner` path selected by UniFFI's
+  platform-neutral default.
+- Keep `android_cleaner = true` in `fusion-core/uniffi.toml`. Generated bindings use
+  `android.system.SystemCleaner` on API 34+ and the packaged JNA cleaner on older
+  Android versions. `androidx.annotation` remains a compile-only dependency for the
+  generated SDK guard; JNA remains a runtime AAR dependency.
+- Regenerate the committed Kotlin binding through `fusion/scripts/build-android.sh`
+  after changing the UDL, UniFFI version or bindgen configuration. App-level lint is
+  the release gate for verifying the guard against Android's minSdk.

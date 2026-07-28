@@ -1244,3 +1244,29 @@ module compiles. The combined all-module Gradle command and final OnePlus instal
 could not be repeated after the host's Codex execution/approval quota was exhausted;
 this is an environment limitation rather than a failing check. A physical
 long-stationary/long-ride validation of the adaptive persistence policy remains open.
+
+## 2026-07-28 — Activity-state device verification and minSdk-safe UniFFI cleanup
+
+Completed the verification that was previously blocked by the host. All Android debug
+unit tests, app-level debug lint and the full debug assembly pass. Lint exposed a
+separate generated-binding issue: UniFFI's default Kotlin cleaner directly referenced
+`java.lang.ref.Cleaner`, which is unavailable below API 33 despite Dhava's minSdk 26.
+`android_cleaner = true` now generates the Android-aware implementation: API 34+ uses
+`android.system.SystemCleaner`, while API 26–33 falls back to the already packaged JNA
+cleaner. `androidx.annotation` is compile-only metadata for the generated API guard.
+
+The rebuilt APK was installed with `install -r` on the API 36 OnePlus 9 Pro, preserving
+all 37 visible local rides and raw recovery entries. Real `in bus` and `udzo 1`
+artifacts were opened without changing their source data. The bus overview visibly
+contains cyan dashed tentative transport, thinner transit and stop rings; `udzo 1`
+shows its downhill path, raw GPS dots above fusion in Compare and aggregated stop
+rings without the previous large fusion loops. GPS and Fusion modes expose only their
+relevant legend, and overview zoom continues to hide synthetic fusion sample dots.
+Process-only logcat contained no crash or application exception after both replays.
+
+The first physical screenshot also caught a real layout defect: the 190 dp state card
+truncated `Transport?` and `Uncertain`. The overlay is now 220 dp wide, line samples
+are more compact and the final uncertain row can use the full width. The corrected
+legend was rebuilt, reinstalled and visually rechecked on both recordings. A runtime
+smoke test on API 26–33 remains useful specifically for UniFFI's JNA fallback; the
+current OnePlus exercises the API 34+ cleaner branch.

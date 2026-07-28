@@ -133,7 +133,7 @@ internal fun ActivityStateLegend(
                 label = "Uncertain",
                 color = colors.unknown,
                 kind = StateSampleKind.Dotted,
-                modifier = Modifier.fillMaxWidth(0.5f),
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
@@ -150,9 +150,9 @@ private fun StateLegendItem(
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Canvas(modifier = Modifier.size(width = 28.dp, height = 16.dp)) {
+        Canvas(modifier = Modifier.size(width = 24.dp, height = 16.dp)) {
             val centerY = size.height / 2f
             when (kind) {
                 StateSampleKind.Stop -> {

@@ -332,7 +332,7 @@ private fun ActivityDetailContent(
                             top = if (fusedPoints.isNotEmpty()) 84.dp else DhavaSpacing.medium,
                             end = DhavaSpacing.medium,
                         )
-                        .width(190.dp),
+                        .width(220.dp),
                     verticalArrangement = Arrangement.spacedBy(DhavaSpacing.small),
                 ) {
                     if (effectiveTrackMode != TrackMode.Gps && hasActivityStates) {

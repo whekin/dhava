@@ -30,6 +30,7 @@ dependencies {
     // Must be the @aar artifact: it bundles the per-ABI libjnidispatch.so
     // that the plain jar lacks.
     implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
+    compileOnly(libs.androidx.annotation)
     implementation(libs.kotlinx.coroutines.android)
 }
 
