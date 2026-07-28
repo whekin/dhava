@@ -56,6 +56,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val indexMutex = Mutex()
     private val uploader = ActivityUploader()
+    private val stravaApi = StravaApi(StravaCredentialStore(appContext))
     private val canonicalStore = CanonicalActivityStore(
         artifactsDir = File(appContext.filesDir, ARTIFACTS_DIR),
         currentAlgorithmVersion = { FusionCore.algorithmVersion },
@@ -73,6 +74,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
 
     private val _uploads = MutableStateFlow<Map<String, UploadState>>(emptyMap())
     val uploads: StateFlow<Map<String, UploadState>> = _uploads.asStateFlow()
+
+    private val _stravaConnection =
+        MutableStateFlow<StravaConnectionState>(StravaConnectionState.Loading)
+    val stravaConnection: StateFlow<StravaConnectionState> = _stravaConnection.asStateFlow()
 
     private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
     val bikes: StateFlow<List<Bike>> = _bikes.asStateFlow()
@@ -104,6 +109,13 @@ class RecordingRepository private constructor(private val appContext: Context) {
             _recordings.value
                 .filter { it.status == RecordingStatus.PENDING_UPLOAD }
                 .forEach { UploadWorker.enqueue(appContext, it.id) }
+            _recordings.value
+                .filter {
+                    it.stravaExportStatus == StravaExportStatus.QUEUED ||
+                        it.stravaExportStatus == StravaExportStatus.PROCESSING
+                }
+                .forEach { StravaExportWorker.enqueue(appContext, it.id) }
+            refreshStravaConnection()
         }
     }
 
@@ -401,6 +413,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         // files underneath it are being removed. A no-op when nothing is
         // queued; a worker that already ran to completion is unaffected.
         UploadWorker.cancel(appContext, id)
+        StravaExportWorker.cancel(appContext, id)
         indexMutex.withLock {
             _recordings.update { list -> list.filterNot { it.id == id } }
             saveIndex()
@@ -432,6 +445,129 @@ class RecordingRepository private constructor(private val appContext: Context) {
             UploadWorker.enqueue(appContext, id)
         }
     }
+
+    // --- Strava connection/export ------------------------------------------
+
+    /** Returns the mobile OAuth URL; the caller opens it with ACTION_VIEW. */
+    suspend fun beginStravaConnect(): String {
+        _stravaConnection.value = StravaConnectionState.Connecting
+        return runCatching { stravaApi.beginConnect() }
+            .onFailure { error ->
+                _stravaConnection.value = StravaConnectionState.Unavailable(
+                    stravaConnectionError(error),
+                )
+            }
+            .getOrThrow()
+    }
+
+    /** Rechecks server-owned OAuth state after app launch or deep-link return. */
+    fun refreshStravaConnection() {
+        scope.launch {
+            _stravaConnection.value = runCatching { stravaApi.connection() }
+                .getOrElse { error ->
+                    StravaConnectionState.Unavailable(
+                        stravaConnectionError(error),
+                    )
+                }
+        }
+    }
+
+    fun onStravaOAuthRedirect(result: String?) {
+        when (result) {
+            "connected" -> refreshStravaConnection()
+            "denied" -> _stravaConnection.value = StravaConnectionState.Disconnected
+            else -> _stravaConnection.value = StravaConnectionState.Unavailable(
+                "Could not connect Strava",
+            )
+        }
+    }
+
+    /** One tap is durable: persist queued before asking WorkManager to run. */
+    fun exportToStrava(id: String) {
+        scope.launch {
+            updateEntry(id) {
+                it.copy(
+                    stravaExportStatus = StravaExportStatus.QUEUED,
+                    stravaError = null,
+                )
+            }
+            StravaExportWorker.enqueue(appContext, id)
+        }
+    }
+
+    fun retryStravaExport(id: String) = exportToStrava(id)
+
+    internal suspend fun performStravaExport(recording: LocalRecording): StravaExportStatus {
+        val artifact = canonicalActivity(recording.id)
+            ?: throw IllegalStateException("Processed track is unavailable")
+        check(artifact.finalizedTrack.isNotEmpty()) { "Processed track is empty" }
+        val output = File(
+            appContext.cacheDir,
+            "strava/dhava-${recording.id.take(8)}-processed.gpx",
+        )
+        GpxExporter.write(
+            points = artifact.finalizedTrack.map { point ->
+                GpxTrackPoint(
+                    timestampMs = point.timestampMs,
+                    lat = point.lat,
+                    lon = point.lon,
+                    altitudeM = point.altitudeM,
+                    sectionId = point.sectionId,
+                )
+            },
+            name = recording.title ?: "Dhava ride",
+            output = output,
+        )
+        val response = try {
+            stravaApi.export(recording, artifact.algorithmVersion, output)
+        } finally {
+            output.delete()
+        }
+        val status = when (response.status) {
+            "uploaded" -> StravaExportStatus.UPLOADED
+            "failed" -> StravaExportStatus.FAILED
+            else -> StravaExportStatus.PROCESSING
+        }
+        updateEntry(recording.id) {
+            it.copy(
+                stravaExportStatus = status,
+                stravaUploadId = response.stravaUploadId ?: it.stravaUploadId,
+                stravaActivityId = response.stravaActivityId ?: it.stravaActivityId,
+                stravaError = response.error,
+            )
+        }
+        return status
+    }
+
+    internal suspend fun onStravaExportRetry(id: String, message: String) {
+        updateEntry(id) {
+            it.copy(
+                stravaExportStatus = StravaExportStatus.PROCESSING,
+                stravaError = message.takeIf(String::isNotBlank),
+            )
+        }
+    }
+
+    internal suspend fun onStravaExportFailed(id: String, message: String) {
+        updateEntry(id) {
+            it.copy(
+                stravaExportStatus = StravaExportStatus.FAILED,
+                stravaError = message.takeIf(String::isNotBlank) ?: "Strava export failed",
+            )
+        }
+    }
+
+    internal suspend fun onStravaConnectionLost(id: String, message: String) {
+        _stravaConnection.value = StravaConnectionState.Disconnected
+        onStravaExportFailed(id, message.ifBlank { "Connect Strava again" })
+    }
+
+    private fun stravaConnectionError(error: Throwable): String =
+        if (error is StravaApiException) {
+            error.message ?: "Strava connection is unavailable"
+        } else {
+            "Dhava backend is unreachable"
+        }
 
     /** Adds a bike to the local garage and returns it. */
     fun addBike(name: String, type: BikeType): Bike {

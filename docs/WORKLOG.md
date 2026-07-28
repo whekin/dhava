@@ -1085,3 +1085,44 @@ description fits without clipping. Selecting it opened the system Share sheet
 with `dhava-de0d4fe4-health.jsonl`. Nothing was shared. The synthetic activity,
 its raw file, health sidecar and derived artifact were then deleted through the
 normal confirmed UI flow; the user's real rides were untouched.
+
+## 2026-07-28 — One-tap Strava export implemented, live credentials pending
+
+Implemented the previously specified Strava path end to end without weakening the
+offline recorder. `proto/openapi.yaml` now defines connection, status, OAuth callback
+and idempotent multipart GPX export. Migration 0004 adds hashed anonymous-device
+credentials, server-owned rotating OAuth tokens and unique export jobs. The Go broker
+uses mobile OAuth with only `activity:write`, ten-minute hashed state, six-hour access
+tokens with early refresh, asynchronous upload polling and a stable external id. It
+recognizes Strava's documented `duplicate of activity <id>` result after an ambiguous
+network retry and recovers the existing activity instead of reporting a false failure.
+Only the canonical processed GPX is accepted; raw GPS/IMU/barometer and recorder health
+remain device-local.
+
+Android generates and retains a random 256-bit connection credential, handles the
+server-to-`dhava://strava/connected` return, and exposes a dedicated Activity Detail
+action. Its explicit states are Connect, ready to Export, queued/processing, retryable
+failure and `View on Strava`. Export creates the same Rust-finalized 5 Hz GPX used by
+local sharing, queues network-constrained unique WorkManager work, persists Strava
+upload/activity ids in `recordings.json`, and cleans its temporary GPX. A ride on an
+e-bike is labeled `EMountainBikeRide`; other current bike classes use
+`MountainBikeRide`.
+
+Backend tests cover OAuth URL/state/scope, rotating refresh tokens, create/poll
+idempotency, duplicate recovery, multipart contract and real HTTP request shapes.
+Go vet, all Go tests/build, all Android debug unit tests and the full debug assembly
+pass; Android debug lint also passes. Docker Compose and OpenAPI YAML validate.
+The APK was installed on the physical
+OnePlus; the deep link was delivered to the existing singleTop activity, and the
+unconfigured/disconnected action was visually inspected on the real 1080 × 2412
+Activity Detail screen without clipping or touching ride data.
+
+Live OAuth/upload is intentionally not claimed yet. It requires the owner to create a
+Strava API application (Strava currently requires a subscription), provide its client
+id/secret, choose the backend HTTPS hostname as Authorization Callback Domain, run
+migration 0004 and deploy/configure the Go API. The current phone build still targets
+the local development API default, so it honestly reports that the Dhava backend is
+unreachable until rebuilt with that deployed HTTPS base URL.
+An attached-device integration test can happen before deployment by using Strava's
+whitelisted `127.0.0.1` callback plus `adb reverse tcp:8080 tcp:8080`; the README
+documents the exact local origin and Gradle override.

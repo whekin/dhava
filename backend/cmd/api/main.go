@@ -17,6 +17,7 @@ import (
 	"github.com/whekin/dhava/backend/internal/blob"
 	"github.com/whekin/dhava/backend/internal/config"
 	"github.com/whekin/dhava/backend/internal/store"
+	dhavastrava "github.com/whekin/dhava/backend/internal/strava"
 )
 
 func main() {
@@ -65,9 +66,37 @@ func main() {
 		logger.Info("blob storage: filesystem", "dir", cfg.BlobDir)
 	}
 
+	var routerOptions []api.RouterOption
+	if cfg.StravaConfigured() && pool != nil {
+		stravaClient := dhavastrava.NewClient(
+			&http.Client{Timeout: 30 * time.Second},
+			cfg.StravaClientID,
+			cfg.StravaClientSecret,
+		)
+		stravaService := dhavastrava.NewService(
+			store.New(pool),
+			stravaClient,
+			dhavastrava.Config{
+				ClientID:       cfg.StravaClientID,
+				PublicBaseURL:  cfg.PublicBaseURL,
+				AppRedirectURL: cfg.StravaAppRedirectURL,
+			},
+		)
+		routerOptions = append(routerOptions, api.WithStravaBroker(stravaService))
+		logger.Info("strava broker enabled", "callback_origin", cfg.PublicBaseURL)
+	} else {
+		logger.Warn(
+			"strava broker disabled; requires database and Strava configuration",
+			"database_configured",
+			pool != nil,
+			"strava_configured",
+			cfg.StravaConfigured(),
+		)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           api.NewRouter(logger, pool, blobs),
+		Handler:           api.NewRouter(logger, pool, blobs, routerOptions...),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

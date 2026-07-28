@@ -18,6 +18,7 @@ import com.dhava.core.recording.GpxTrackPoint
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordLine
 import com.dhava.core.recording.RecordingRepository
+import com.dhava.core.recording.StravaConnectionState
 import com.dhava.core.recording.rawGpsPoints
 import com.dhava.core.recording.toRecordingReplay
 import com.dhava.core.recording.toRideAnalysis
@@ -112,6 +113,8 @@ class ActivityDetailViewModel(
     /** Bikes for the edit sheet's picker. */
     val bikes: StateFlow<List<Bike>> = repository.bikes
 
+    val stravaConnection: StateFlow<StravaConnectionState> = repository.stravaConnection
+
     private val _healthLogAvailable = MutableStateFlow(
         repository.recordingHealthFile(recordingId).isFile,
     )
@@ -131,6 +134,20 @@ class ActivityDetailViewModel(
      */
     fun deleteActivity() {
         viewModelScope.launch { repository.deleteActivity(recordingId) }
+    }
+
+    fun beginStravaConnect(onResult: (Result<String>) -> Unit) {
+        viewModelScope.launch {
+            onResult(runCatching { repository.beginStravaConnect() })
+        }
+    }
+
+    fun exportToStrava() {
+        repository.exportToStrava(recordingId)
+    }
+
+    fun retryStravaExport() {
+        repository.retryStravaExport(recordingId)
     }
 
     fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {

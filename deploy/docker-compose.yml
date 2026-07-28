@@ -14,6 +14,10 @@ services:
       S3_BUCKET: raw-recordings
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dhava}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dhava-dev-secret}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-dhava://strava/connected}
     ports:
       - "8080:8080"
     depends_on:

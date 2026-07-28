@@ -34,9 +34,10 @@ skeleton and deployment scaffolding.
 - Canonical finalized horizontal GPX with explicit pause sections ✅
 - Add Rust-finalized elevation to the processed GPX ✅
 - One-time `Connect with Strava`, then one-tap per-activity export with offline queue,
-  retry and duplicate protection
-- Minimal Go OAuth/upload broker for Strava credentials; the recorder itself remains
-  fully usable without Dhava backend connectivity
+  retry and duplicate protection — implemented locally; live OAuth/upload verification
+  awaits a registered Strava app and public backend callback
+- Minimal Go OAuth/upload broker for Strava credentials; implemented and tested
+  locally, while the recorder itself remains fully usable without backend connectivity
 - FIT export with pause semantics and sport metadata
 - Upgrade Strava uploads from GPX to FIT once canonical pause and device metadata are
   stable

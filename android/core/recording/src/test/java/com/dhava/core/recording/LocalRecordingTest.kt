@@ -140,6 +140,30 @@ class LocalRecordingTest {
         assertEquals(RecordingStatus.RECORDED, entry.status)
         assertNull(entry.title)
         assertNull(entry.serverId)
+        assertNull(entry.stravaExportStatus)
+        assertNull(entry.stravaActivityId)
+    }
+
+    @Test
+    fun `strava export state round-trips independently of raw upload`() {
+        val entry = LocalRecording(
+            id = "a",
+            startedAtMs = 1,
+            status = RecordingStatus.RECORDED,
+            stravaExportStatus = StravaExportStatus.UPLOADED,
+            stravaUploadId = 9001,
+            stravaActivityId = 7002,
+        )
+        val encoded = json.encodeToString(entry)
+        assertEquals(
+            """{"id":"a","started_at_ms":1,"strava_export_status":"uploaded",""" +
+                """"strava_upload_id":9001,"strava_activity_id":7002}""",
+            encoded,
+        )
+        val decoded = json.decodeFromString<LocalRecording>(encoded)
+        assertEquals(RecordingStatus.RECORDED, decoded.status)
+        assertEquals(StravaExportStatus.UPLOADED, decoded.stravaExportStatus)
+        assertEquals(7002L, decoded.stravaActivityId)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.dhava.feature.activity
 
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,20 +10,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,12 +55,15 @@ import com.dhava.core.recording.BikeType
 import com.dhava.core.recording.CanonicalQuality
 import com.dhava.core.recording.LocalRecording
 import com.dhava.core.recording.RecordingStatus
+import com.dhava.core.recording.StravaConnectionState
+import com.dhava.core.recording.StravaExportStatus
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaEmptyState
 import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaSpacing
 import com.dhava.core.ui.DhavaStatusPill
+import com.dhava.core.ui.DhavaSizes
 import com.dhava.core.ui.DhavaTheme
 import com.dhava.fusion.RideAnalysis
 import java.time.Instant
@@ -79,6 +89,7 @@ fun ActivityDetailScreen(
     val quality by viewModel.quality.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
+    val stravaConnection by viewModel.stravaConnection.collectAsState()
     val context = LocalContext.current
 
     // Pops the screen once the entry disappears (deleted here or elsewhere).
@@ -101,6 +112,7 @@ fun ActivityDetailScreen(
         quality = quality,
         bikes = bikes,
         healthLogAvailable = healthLogAvailable,
+        stravaConnection = stravaConnection,
         onBack = onBack,
         onExport = { kind ->
             viewModel.export(kind) { result ->
@@ -132,6 +144,29 @@ fun ActivityDetailScreen(
         onAddBike = viewModel::addBike,
         onEditSave = viewModel::updateMetadata,
         onDelete = viewModel::deleteActivity,
+        onConnectStrava = {
+            viewModel.beginStravaConnect { result ->
+                val authorizeUrl = result.getOrElse { error ->
+                    Toast.makeText(
+                        context,
+                        error.message ?: "Could not connect Strava",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    return@beginStravaConnect
+                }
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizeUrl)))
+            }
+        },
+        onExportStrava = viewModel::exportToStrava,
+        onRetryStrava = viewModel::retryStravaExport,
+        onViewStrava = { activityId ->
+            context.startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://www.strava.com/activities/$activityId"),
+                ),
+            )
+        },
         modifier = modifier,
     )
 }
@@ -145,11 +180,16 @@ private fun ActivityDetailContent(
     quality: CanonicalQuality?,
     bikes: List<Bike>,
     healthLogAvailable: Boolean,
+    stravaConnection: StravaConnectionState,
     onBack: () -> Unit,
     onExport: (ActivityExportKind) -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
     onEditSave: (title: String, description: String, bike: Bike?) -> Unit,
     onDelete: () -> Unit,
+    onConnectStrava: () -> Unit,
+    onExportStrava: () -> Unit,
+    onRetryStrava: () -> Unit,
+    onViewStrava: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
@@ -288,6 +328,16 @@ private fun ActivityDetailContent(
                         modifier = Modifier.padding(top = DhavaSpacing.large),
                     )
                 }
+                DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
+                StravaAction(
+                    connection = stravaConnection,
+                    recording = recording,
+                    processedAvailable = processedExportAvailable,
+                    onConnect = onConnectStrava,
+                    onExport = onExportStrava,
+                    onRetry = onRetryStrava,
+                    onView = onViewStrava,
+                )
             }
         }
     }
@@ -314,6 +364,138 @@ private fun ActivityDetailContent(
             },
             onDismiss = { confirmDelete = false },
         )
+    }
+}
+
+@Composable
+private fun StravaAction(
+    connection: StravaConnectionState,
+    recording: LocalRecording?,
+    processedAvailable: Boolean,
+    onConnect: () -> Unit,
+    onExport: () -> Unit,
+    onRetry: () -> Unit,
+    onView: (Long) -> Unit,
+) {
+    val exportStatus = recording?.stravaExportStatus
+    val activityId = recording?.stravaActivityId
+
+    Column(verticalArrangement = Arrangement.spacedBy(DhavaSpacing.small)) {
+        when {
+            exportStatus == StravaExportStatus.UPLOADED && activityId != null -> {
+                OutlinedButton(
+                    onClick = { onView(activityId) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text("View on Strava")
+                }
+            }
+            exportStatus == StravaExportStatus.QUEUED ||
+                exportStatus == StravaExportStatus.PROCESSING -> {
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text(
+                        if (exportStatus == StravaExportStatus.QUEUED) {
+                            "Queued for Strava"
+                        } else {
+                            "Sending to Strava…"
+                        },
+                    )
+                }
+            }
+            exportStatus == StravaExportStatus.FAILED &&
+                connection is StravaConnectionState.Connected -> {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    Icon(Icons.Filled.Sync, contentDescription = null)
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text("Retry Strava export")
+                }
+                recording.stravaError?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            connection is StravaConnectionState.Connected -> {
+                Button(
+                    onClick = onExport,
+                    enabled = recording != null && processedAvailable,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    Icon(Icons.Filled.Upload, contentDescription = null)
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text("Export to Strava")
+                }
+                if (connection.athleteName.isNotBlank()) {
+                    Text(
+                        text = "Connected as ${connection.athleteName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            connection == StravaConnectionState.Loading ||
+                connection == StravaConnectionState.Connecting -> {
+                OutlinedButton(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.size(DhavaSpacing.small))
+                    Text("Checking Strava…")
+                }
+            }
+            else -> {
+                OutlinedButton(
+                    onClick = onConnect,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(DhavaSizes.primaryActionHeight),
+                ) {
+                    Text("Connect Strava")
+                }
+                if (connection is StravaConnectionState.Unavailable) {
+                    Text(
+                        text = connection.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -656,11 +838,16 @@ private fun ActivityDetailContentPreview() {
             quality = null,
             bikes = emptyList(),
             healthLogAvailable = true,
+            stravaConnection = StravaConnectionState.Connected("Alex Rider"),
             onBack = {},
             onExport = { _ -> },
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
             onEditSave = { _, _, _ -> },
             onDelete = {},
+            onConnectStrava = {},
+            onExportStrava = {},
+            onRetryStrava = {},
+            onViewStrava = {},
         )
     }
 }
@@ -684,6 +871,73 @@ private fun ExportMenuPreview() {
                     healthLogAvailable = true,
                     initiallyExpanded = true,
                     onExport = {},
+                )
+            }
+        }
+    }
+}
+
+@Preview(name = "Strava actions", widthDp = 412, heightDp = 520)
+@Composable
+private fun StravaActionStatesPreview() {
+    val recording = LocalRecording(
+        id = "preview",
+        startedAtMs = 1_767_000_000_000,
+        title = "Forest ride",
+    )
+    DhavaTheme(darkTheme = true) {
+        Surface(color = MaterialTheme.colorScheme.background) {
+            Column(
+                modifier = Modifier.padding(DhavaSpacing.xLarge),
+                verticalArrangement = Arrangement.spacedBy(DhavaSpacing.large),
+            ) {
+                Text("READY", style = MaterialTheme.typography.labelSmall)
+                StravaAction(
+                    connection = StravaConnectionState.Connected("Alex Rider"),
+                    recording = recording,
+                    processedAvailable = true,
+                    onConnect = {},
+                    onExport = {},
+                    onRetry = {},
+                    onView = {},
+                )
+                Text("PROCESSING", style = MaterialTheme.typography.labelSmall)
+                StravaAction(
+                    connection = StravaConnectionState.Connected("Alex Rider"),
+                    recording = recording.copy(
+                        stravaExportStatus = StravaExportStatus.PROCESSING,
+                    ),
+                    processedAvailable = true,
+                    onConnect = {},
+                    onExport = {},
+                    onRetry = {},
+                    onView = {},
+                )
+                Text("COMPLETE", style = MaterialTheme.typography.labelSmall)
+                StravaAction(
+                    connection = StravaConnectionState.Connected("Alex Rider"),
+                    recording = recording.copy(
+                        stravaExportStatus = StravaExportStatus.UPLOADED,
+                        stravaActivityId = 123456,
+                    ),
+                    processedAvailable = true,
+                    onConnect = {},
+                    onExport = {},
+                    onRetry = {},
+                    onView = {},
+                )
+                Text("FAILED", style = MaterialTheme.typography.labelSmall)
+                StravaAction(
+                    connection = StravaConnectionState.Connected("Alex Rider"),
+                    recording = recording.copy(
+                        stravaExportStatus = StravaExportStatus.FAILED,
+                        stravaError = "Strava could not process this GPX",
+                    ),
+                    processedAvailable = true,
+                    onConnect = {},
+                    onExport = {},
+                    onRetry = {},
+                    onView = {},
                 )
             }
         }

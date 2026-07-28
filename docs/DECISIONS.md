@@ -302,3 +302,24 @@ activity results are always recomputed canonically from the raw on-device file.
 - Activity Detail exposes the health JSONL separately from raw recording and GPX
   exports. This preserves clear artifact semantics while making field evidence
   shareable without ADB.
+
+## 2026-07-28 — Strava connection is anonymous-device authenticated
+
+- Dhava does not yet require a product account just to export a local ride. Android
+  generates a random 256-bit installation credential and sends it as a bearer token;
+  the backend stores only its SHA-256 hash. This credential authorizes only that
+  installation's Strava connection and exports, not any future Dhava social API.
+- Strava's client secret, rotating refresh token and short-lived access token stay in
+  the Go broker. OAuth returns first to its public HTTPS callback, which consumes a
+  ten-minute random state and redirects only a success/denied/failure result through
+  `dhava://strava/connected`. No OAuth token enters the APK or deep link.
+- Each export sends only Rust's canonical processed GPX and uses
+  `dhava-<recording-id>-<algorithm-version>.gpx` as its stable external id. A unique
+  database row persists Strava upload/activity ids; retries poll an accepted upload
+  instead of resubmitting it. If an ambiguous network retry reaches Strava twice, its
+  documented duplicate response is resolved back to the existing activity id.
+- Strava upload completion is asynchronous. Network-constrained WorkManager owns the
+  durable phone-side queue; the broker persists server-side progress, refreshes tokens
+  within Strava's one-hour threshold, updates the completed activity to
+  `MountainBikeRide`/`EMountainBikeRide`, and returns the final activity id for
+  `View on Strava`.

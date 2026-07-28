@@ -113,7 +113,113 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /strava/connect:
+    post:
+      summary: Start or restart the one-time Strava OAuth connection
+      operationId: beginStravaConnect
+      security: [{ deviceBearer: [] }]
+      responses:
+        "200":
+          description: Mobile OAuth URL to open outside the app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StravaConnectResponse" }
+        "401":
+          description: Missing or invalid anonymous device credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Strava broker is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /strava/connection:
+    get:
+      summary: Get this app installation's Strava connection state
+      operationId: getStravaConnection
+      security: [{ deviceBearer: [] }]
+      responses:
+        "200":
+          description: Current connection state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StravaConnection" }
+        "401":
+          description: Missing or invalid anonymous device credential
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /strava/oauth/callback:
+    get:
+      summary: Strava browser callback; exchanges code server-side and redirects to Dhava
+      operationId: completeStravaConnect
+      parameters:
+        - { name: state, in: query, schema: { type: string } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "302":
+          description: Redirect to `dhava://strava/connected?result=...`
+  /strava/exports:
+    post:
+      summary: Idempotently export one canonical processed GPX to Strava
+      description: >
+        Raw GPS, IMU, barometer and health data are never accepted. Repeating the
+        same external_id polls the existing Strava upload instead of submitting
+        a second activity.
+      operationId: exportActivityToStrava
+      security: [{ deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, external_id, title, sport_type]
+              properties:
+                file: { type: string, format: binary, description: Canonical processed GPX }
+                external_id: { type: string, maxLength: 200 }
+                title: { type: string, maxLength: 200 }
+                description: { type: string, maxLength: 5000 }
+                sport_type:
+                  type: string
+                  enum: [MountainBikeRide, EMountainBikeRide]
+      responses:
+        "200":
+          description: Strava activity is ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StravaExportStatus" }
+        "202":
+          description: Upload accepted and still processing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StravaExportStatus" }
+        "409":
+          description: Strava has not been connected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: GPX exceeds 32 MB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Strava rejected or could not process the GPX
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StravaExportStatus" }
 components:
+  securitySchemes:
+    deviceBearer:
+      type: http
+      scheme: bearer
+      description: >
+        Random per-installation credential generated and retained by Android.
+        The backend stores only its SHA-256 hash; it is not a Dhava user account.
   schemas:
     CreateActivityRequest:
       type: object
@@ -152,6 +258,26 @@ components:
       required: [error]
       properties:
         error: { type: string, examples: [db_unavailable] }
+    StravaConnectResponse:
+      type: object
+      required: [authorize_url]
+      properties:
+        authorize_url: { type: string, format: uri }
+    StravaConnection:
+      type: object
+      required: [connected]
+      properties:
+        connected: { type: boolean }
+        athlete_id: { type: integer, format: int64 }
+        athlete_name: { type: string }
+    StravaExportStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [processing, uploaded, failed] }
+        strava_upload_id: { type: integer, format: int64 }
+        strava_activity_id: { type: integer, format: int64 }
+        error: { type: string }
     GpsPoint:
       type: object
       required: [timestampMs, lat, lon]

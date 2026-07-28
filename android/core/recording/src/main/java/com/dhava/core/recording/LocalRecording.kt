@@ -37,6 +37,14 @@ enum class RecordingStatus {
     @SerialName("failed") FAILED,
 }
 
+@Serializable
+enum class StravaExportStatus {
+    @SerialName("queued") QUEUED,
+    @SerialName("processing") PROCESSING,
+    @SerialName("uploaded") UPLOADED,
+    @SerialName("failed") FAILED,
+}
+
 /**
  * One entry of the on-device recording index (`recordings.json`).
  *
@@ -85,6 +93,11 @@ data class LocalRecording(
      * WorkManager retries: create runs at most once per recording).
      */
     @SerialName("server_id") val serverId: String? = null,
+    /** Independent one-tap Strava delivery state; never changes raw upload state. */
+    @SerialName("strava_export_status") val stravaExportStatus: StravaExportStatus? = null,
+    @SerialName("strava_upload_id") val stravaUploadId: Long? = null,
+    @SerialName("strava_activity_id") val stravaActivityId: Long? = null,
+    @SerialName("strava_error") val stravaError: String? = null,
 )
 
 /** An interrupted, unsaved recording that is safe to append to. */
