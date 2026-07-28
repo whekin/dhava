@@ -37,6 +37,9 @@ internal const val ACTIVITY_STATE_DOWNHILL = "downhill"
 internal const val ACTIVITY_STATE_TRANSIT = "transit"
 internal const val ACTIVITY_STATE_LIKELY_MOTORIZED = "likely_motorized"
 
+private const val ACTIVITY_STATE_LEGEND_DESCRIPTION =
+    "Track state: orange solid downhill, beige solid transit, blue dashed likely transport, ring stop, gray dotted uncertain"
+
 internal data class ActivityStateColors(
     val downhill: Color,
     val transit: Color,
@@ -75,67 +78,74 @@ internal fun ActivityStateLegend(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.semantics {
-            contentDescription =
-                "Track state: orange solid downhill, beige solid transit, blue dashed likely transport, ring stop, gray dotted uncertain"
-        },
+        modifier = modifier,
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
         shadowElevation = 3.dp,
     ) {
-        Column(
-            modifier = Modifier.padding(
+        ActivityStateLegendContent(colors = colors)
+    }
+}
+
+@Composable
+internal fun ActivityStateLegendContent(
+    colors: ActivityStateColors,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .semantics { contentDescription = ACTIVITY_STATE_LEGEND_DESCRIPTION }
+            .padding(
                 horizontal = DhavaSpacing.medium,
                 vertical = DhavaSpacing.small,
             ),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "TRACK STATE",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = "TRACK STATE",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StateLegendItem(
-                    label = "DH",
-                    color = colors.downhill,
-                    kind = StateSampleKind.Solid,
-                    modifier = Modifier.weight(1f),
-                )
-                StateLegendItem(
-                    label = "Transit",
-                    color = colors.transit,
-                    kind = StateSampleKind.SolidThin,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StateLegendItem(
-                    label = "Transport?",
-                    color = colors.likelyMotorized,
-                    kind = StateSampleKind.Dashed,
-                    modifier = Modifier.weight(1f),
-                )
-                StateLegendItem(
-                    label = "Stop",
-                    color = colors.still,
-                    kind = StateSampleKind.Stop,
-                    modifier = Modifier.weight(1f),
-                )
-            }
             StateLegendItem(
-                label = "Uncertain",
-                color = colors.unknown,
-                kind = StateSampleKind.Dotted,
-                modifier = Modifier.fillMaxWidth(),
+                label = "DH",
+                color = colors.downhill,
+                kind = StateSampleKind.Solid,
+                modifier = Modifier.weight(1f),
+            )
+            StateLegendItem(
+                label = "Transit",
+                color = colors.transit,
+                kind = StateSampleKind.SolidThin,
+                modifier = Modifier.weight(1f),
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StateLegendItem(
+                label = "Transport?",
+                color = colors.likelyMotorized,
+                kind = StateSampleKind.Dashed,
+                modifier = Modifier.weight(1f),
+            )
+            StateLegendItem(
+                label = "Stop",
+                color = colors.still,
+                kind = StateSampleKind.Stop,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        StateLegendItem(
+            label = "Uncertain",
+            color = colors.unknown,
+            kind = StateSampleKind.Dotted,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

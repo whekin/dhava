@@ -1270,3 +1270,25 @@ are more compact and the final uncertain row can use the full width. The correct
 legend was rebuilt, reinstalled and visually rechecked on both recordings. A runtime
 smoke test on API 26–33 remains useful specifically for UniFFI's JNA fallback; the
 current OnePlus exercises the API 34+ cleaner branch.
+
+## 2026-07-28 — Activity map legends use progressive disclosure
+
+The always-visible track-state and GPS-accuracy cards no longer cover the map. Activity
+Detail now starts with one right-aligned 48 dp `KEY` control below GPS/Fusion/Compare.
+It opens a single anchored popup with no scrim; tapping outside or pressing Back
+dismisses it. GPS exposes only its accuracy scale, Fusion only its state key and
+Compare combines both sections with one divider. Selecting another track mode also
+returns the key to its collapsed state.
+
+The state and accuracy drawings were separated from their old Surface wrappers so the
+popup is one strong surface rather than nested cards. The GPS key no longer has a
+fixed 72 dp height, allowing larger text to determine its own height. Existing detailed
+TalkBack descriptions remain on each section, while the control reports Show/Hide and
+Collapsed/Expanded semantics. A pure selector test covers all three modes, ordering
+and missing-data behavior without adding a Compose test stack.
+
+Activity unit tests and feature lint pass, as do app debug lint and the full debug
+assembly. The APK was installed with data preservation on the physical 360 dp OnePlus.
+Collapsed Compare, expanded Compare, GPS-only, Fusion-only, outside-tap dismissal and
+Back dismissal were visually checked on `udzo 1`; labels remain readable and the map
+is unobstructed by default.

@@ -28,6 +28,9 @@ import com.dhava.core.ui.DhavaTheme
 internal const val GPS_ACCURACY_PROPERTY = "accuracy_m"
 internal const val UNKNOWN_GPS_ACCURACY_STYLE_VALUE = -1.0
 
+private const val GPS_ACCURACY_LEGEND_DESCRIPTION =
+    "GPS accuracy scale: green 5 meters or better, yellow 10 meters, gold 20 meters, red above 20 meters"
+
 internal data class GpsAccuracyColors(
     val good: Color,
     val fair: Color,
@@ -57,53 +60,60 @@ internal fun GpsAccuracyLegend(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.semantics {
-            contentDescription =
-                "GPS accuracy scale: green 5 meters or better, yellow 10 meters, gold 20 meters, red above 20 meters"
-        },
+        modifier = modifier,
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
         shadowElevation = 3.dp,
     ) {
-        Column(
-            modifier = Modifier.padding(
+        GpsAccuracyLegendContent(colors = colors)
+    }
+}
+
+@Composable
+internal fun GpsAccuracyLegendContent(
+    colors: GpsAccuracyColors,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .semantics { contentDescription = GPS_ACCURACY_LEGEND_DESCRIPTION }
+            .padding(
                 horizontal = DhavaSpacing.medium,
                 vertical = DhavaSpacing.small,
             ),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = "GPS ACCURACY",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            colorStops = arrayOf(
-                                0f to colors.good,
-                                0.25f to colors.good,
-                                0.5f to colors.fair,
-                                0.85f to colors.weak,
-                                0.96f to colors.weak,
-                                1f to colors.rejected,
-                            ),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "GPS ACCURACY",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to colors.good,
+                            0.25f to colors.good,
+                            0.5f to colors.fair,
+                            0.85f to colors.weak,
+                            0.96f to colors.weak,
+                            1f to colors.rejected,
                         ),
-                        shape = CircleShape,
                     ),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                AccuracyLegendLabel("≤5", colors.good)
-                AccuracyLegendLabel("10", colors.fair)
-                AccuracyLegendLabel("20", colors.weak)
-                AccuracyLegendLabel(">20 m", colors.rejected)
-            }
+                    shape = CircleShape,
+                ),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            AccuracyLegendLabel("≤5", colors.good)
+            AccuracyLegendLabel("10", colors.fair)
+            AccuracyLegendLabel("20", colors.weak)
+            AccuracyLegendLabel(">20 m", colors.rejected)
         }
     }
 }
