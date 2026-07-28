@@ -1140,3 +1140,27 @@ Activity unit tests and the full debug assembly pass. The APK was installed on t
 physical 1080 × 2412 OnePlus. Both the compact Activity Detail card and expanded Share
 menu were visually checked; the current unavailable backend message is readable and no
 export action or user ride mutation was triggered.
+
+## 2026-07-28 — Map-first Activity Detail bottom sheet
+
+Replaced the fixed floating Activity Detail card with a persistent Material standard
+bottom sheet. It opens at a 112 dp peek that shows only the drag handle, activity
+identity, local status and Share/overflow actions; no metric is left visibly clipped.
+Dragging it upward reveals the full metric and quality content. The expanded height
+wraps short content instead of leaving an empty panel, caps at 72% of the viewport for
+long content and gives the body a nested vertical scroll while the action header stays
+pinned. The sheet cannot be fully hidden and has no modal scrim, so the exposed map
+remains the primary working surface.
+
+The physical 1080 × 2412 OnePlus was used for both collapsed and expanded visual checks.
+A horizontal gesture over the exposed map left the sheet anchor unchanged; handle
+swipes moved it reliably between expanded and partial anchors. Share remained available
+from the collapsed header and opened the complete export menu without triggering an
+export. Activity unit tests, feature lint and the full debug assembly pass, and the
+final APK is installed on the phone.
+
+Updated the repository `dhava-ui-design` skill with the reusable map-led detail pattern:
+standard rather than modal sheets, compact identity/action peeks, pinned headers,
+bounded nested scrolling, preserved map gestures and explicit device verification.
+Its metadata remains current and the frontmatter passed an equivalent local YAML check;
+the bundled Python validator itself could not run because the host Python lacks PyYAML.

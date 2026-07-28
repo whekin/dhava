@@ -36,6 +36,23 @@ Build a dark-first field instrument for downhill riders, not a generic fitness d
 - Preserve map gestures: user pan or zoom must suspend follow mode, and an obvious recenter action must restore it.
 - Keep navigation secondary while recording; never let chrome compete with the live instrument panel.
 
+## Keep map-led details progressive
+
+- For a map-led detail screen, prefer a persistent standard bottom sheet over a
+  fixed card or modal sheet. Keep the map full-bleed and interactive outside the
+  sheet; do not add a scrim.
+- Start partially expanded with a compact peek that contains identity, status and
+  frequent actions. Do not spend the collapsed height on verbose metrics.
+- Keep the sheet header pinned and put longer metrics, quality explanations and
+  secondary actions in a nested vertical scroll region. A large font or compact
+  screen must not clip the last item.
+- Leave a deliberate strip of map visible when expanded and keep top map controls
+  outside that extent. Account for gesture-navigation insets inside the sheet.
+- Verify all three gesture paths on a device: drag the sheet from its handle/header,
+  scroll its expanded content, and pan/zoom the exposed map without moving the sheet.
+  If the detail identity or its actions are essential, do not allow the sheet to
+  become fully hidden.
+
 ## Cover the complete state model
 
 For changed surfaces, handle the applicable states explicitly:

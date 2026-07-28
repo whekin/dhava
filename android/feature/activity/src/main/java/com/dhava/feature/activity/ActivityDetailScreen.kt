@@ -3,30 +3,42 @@ package com.dhava.feature.activity
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -53,7 +65,6 @@ import com.dhava.core.recording.StravaExportStatus
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaEmptyState
 import com.dhava.core.ui.DhavaMetric
-import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaSpacing
 import com.dhava.core.ui.DhavaStatusPill
 import com.dhava.core.ui.DhavaTheme
@@ -163,6 +174,7 @@ fun ActivityDetailScreen(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ActivityDetailContent(
     recording: LocalRecording?,
@@ -203,129 +215,103 @@ private fun ActivityDetailContent(
     val accuracyColors = rememberGpsAccuracyColors()
     val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
     val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        skipHiddenState = true,
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
 
-    Box(modifier = modifier.fillMaxSize()) {
-        when (track) {
-            TrackState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetContent = {
+            ActivityDetailsSheet(
+                recording = recording,
+                track = track,
+                analysis = analysis,
+                diagnostics = diagnostics,
+                quality = quality,
+                processedExportAvailable = processedExportAvailable,
+                healthLogAvailable = healthLogAvailable,
+                stravaConnection = stravaConnection,
+                onExport = onExport,
+                onConnectStrava = onConnectStrava,
+                onExportStrava = onExportStrava,
+                onRetryStrava = onRetryStrava,
+                onViewStrava = onViewStrava,
+                onEdit = { showEdit = true },
+                onDelete = { confirmDelete = true },
+            )
+        },
+        modifier = modifier.fillMaxSize(),
+        sheetPeekHeight = ActivitySheetPeekHeight,
+        sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetContentColor = MaterialTheme.colorScheme.onSurface,
+        sheetTonalElevation = 0.dp,
+        sheetShadowElevation = 8.dp,
+        sheetDragHandle = {
+            BottomSheetDefaults.DragHandle(
+                color = MaterialTheme.colorScheme.outline,
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (track) {
+                TrackState.Loading -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+                TrackState.Empty -> DhavaEmptyState(
+                    title = "No usable GPS track",
+                    description = "The raw recording is still preserved on this phone.",
+                    modifier = Modifier.fillMaxSize(),
+                )
+                is TrackState.Failed -> DhavaEmptyState(
+                    title = "Activity data unavailable",
+                    description = track.message,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                is TrackState.Loaded -> TrackMap(
+                    rawPoints = rawPoints,
+                    fusedPoints = fusedPoints,
+                    mode = if (fusedPoints.isEmpty()) TrackMode.Gps else trackMode,
+                    rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fusedColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-            TrackState.Empty -> DhavaEmptyState(
-                title = "No usable GPS track",
-                description = "The raw recording is still preserved on this phone.",
-                modifier = Modifier.fillMaxSize(),
-            )
-            is TrackState.Failed -> DhavaEmptyState(
-                title = "Activity data unavailable",
-                description = track.message,
-                modifier = Modifier.fillMaxSize(),
-            )
-            is TrackState.Loaded -> TrackMap(
-                rawPoints = rawPoints,
-                fusedPoints = fusedPoints,
-                mode = if (fusedPoints.isEmpty()) TrackMode.Gps else trackMode,
-                rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                fusedColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
 
-        DetailTopBar(
-            onBack = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(DhavaSpacing.medium),
-        )
-
-        if (fusedPoints.isNotEmpty()) {
-            TrackModeControl(
-                selected = trackMode,
-                onSelected = { trackMode = it },
+            DetailTopBar(
+                onBack = onBack,
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(Alignment.TopStart)
                     .padding(DhavaSpacing.medium),
             )
-        }
 
-        if (trackMode != TrackMode.Fusion && hasAccuracy) {
-            GpsAccuracyLegend(
-                colors = accuracyColors,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(
-                        top = if (fusedPoints.isNotEmpty()) 84.dp else DhavaSpacing.medium,
-                        end = DhavaSpacing.medium,
-                    )
-                    .size(width = 176.dp, height = 72.dp),
-            )
-        }
+            if (fusedPoints.isNotEmpty()) {
+                TrackModeControl(
+                    selected = trackMode,
+                    onSelected = { trackMode = it },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(DhavaSpacing.medium),
+                )
+            }
 
-        DhavaPanel(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(DhavaSpacing.medium),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(modifier = Modifier.padding(DhavaSpacing.xLarge)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = recording?.title
-                                ?: recording?.let { formatStartTime(it.startedAtMs) }
-                                ?: "Activity",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+            if (trackMode != TrackMode.Fusion && hasAccuracy) {
+                GpsAccuracyLegend(
+                    colors = accuracyColors,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            top = if (fusedPoints.isNotEmpty()) 84.dp else DhavaSpacing.medium,
+                            end = DhavaSpacing.medium,
                         )
-                        recording?.let {
-                            Text(
-                                text = activitySubtitle(it),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    recording?.let { RecordingStatusPill(it.status) }
-                    ExportMenu(
-                        rawGpsAvailable = track is TrackState.Loaded,
-                        processedAvailable = processedExportAvailable,
-                        processedLoading = diagnostics is DiagnosticTrackState.Loading,
-                        // The raw file is worth exporting even when it cannot
-                        // be decoded (that is the diagnostics use case) — only
-                        // a missing file makes the option pointless.
-                        rawRecordingAvailable = !(track is TrackState.Failed && track.rawFileMissing),
-                        healthLogAvailable = healthLogAvailable,
-                        stravaConnection = stravaConnection,
-                        recording = recording,
-                        onExport = onExport,
-                        onConnectStrava = onConnectStrava,
-                        onExportStrava = onExportStrava,
-                        onRetryStrava = onRetryStrava,
-                        onViewStrava = onViewStrava,
-                    )
-                    ActivityOverflowMenu(
-                        enabled = recording != null,
-                        onEdit = { showEdit = true },
-                        onDelete = { confirmDelete = true },
-                    )
-                }
-                DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
-                ActivityMetrics(recording, analysis, quality)
-                // Hidden until the canonical artifact provides real numbers,
-                // so a computing or legacy artifact never flashes wrong data.
-                quality?.let {
-                    ActivityQualityRow(
-                        quality = it,
-                        modifier = Modifier.padding(top = DhavaSpacing.large),
-                    )
-                }
+                        .size(width = 176.dp, height = 72.dp),
+                )
             }
         }
     }
@@ -352,6 +338,107 @@ private fun ActivityDetailContent(
             },
             onDismiss = { confirmDelete = false },
         )
+    }
+}
+
+private val ActivitySheetPeekHeight = 112.dp
+
+@Composable
+private fun ActivityDetailsSheet(
+    recording: LocalRecording?,
+    track: TrackState,
+    analysis: RideAnalysis?,
+    diagnostics: DiagnosticTrackState,
+    quality: CanonicalQuality?,
+    processedExportAvailable: Boolean,
+    healthLogAvailable: Boolean,
+    stravaConnection: StravaConnectionState,
+    onExport: (ActivityExportKind) -> Unit,
+    onConnectStrava: () -> Unit,
+    onExportStrava: () -> Unit,
+    onRetryStrava: () -> Unit,
+    onViewStrava: (Long) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxHeight * 0.72f)
+                .navigationBarsPadding(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = DhavaSpacing.xLarge),
+                horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = recording?.title
+                            ?: recording?.let { formatStartTime(it.startedAtMs) }
+                            ?: "Activity",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    recording?.let {
+                        Text(
+                            text = activitySubtitle(it),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                recording?.let { RecordingStatusPill(it.status) }
+                ExportMenu(
+                    rawGpsAvailable = track is TrackState.Loaded,
+                    processedAvailable = processedExportAvailable,
+                    processedLoading = diagnostics is DiagnosticTrackState.Loading,
+                    // The raw file is worth exporting even when it cannot
+                    // be decoded (that is the diagnostics use case) — only
+                    // a missing file makes the option pointless.
+                    rawRecordingAvailable = !(track is TrackState.Failed && track.rawFileMissing),
+                    healthLogAvailable = healthLogAvailable,
+                    stravaConnection = stravaConnection,
+                    recording = recording,
+                    onExport = onExport,
+                    onConnectStrava = onConnectStrava,
+                    onExportStrava = onExportStrava,
+                    onRetryStrava = onRetryStrava,
+                    onViewStrava = onViewStrava,
+                )
+                ActivityOverflowMenu(
+                    enabled = recording != null,
+                    onEdit = onEdit,
+                    onDelete = onDelete,
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = DhavaSpacing.xLarge),
+            ) {
+                DhavaDivider(Modifier.padding(vertical = DhavaSpacing.large))
+                ActivityMetrics(recording, analysis, quality)
+                // Hidden until the canonical artifact provides real numbers,
+                // so a computing or legacy artifact never flashes wrong data.
+                quality?.let {
+                    ActivityQualityRow(
+                        quality = it,
+                        modifier = Modifier.padding(top = DhavaSpacing.large),
+                    )
+                }
+                Box(Modifier.size(DhavaSpacing.xLarge))
+            }
+        }
     }
 }
 
