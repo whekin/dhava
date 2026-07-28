@@ -732,6 +732,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -751,9 +761,19 @@ internal interface IntegrityCheckingUniffiLib : Library {
 ): Short
 fun uniffi_fusion_core_checksum_func_analyze_recording(
 ): Short
+fun uniffi_fusion_core_checksum_func_build_segment(
+): Short
 fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
+fun uniffi_fusion_core_checksum_func_match_segment(
+): Short
+fun uniffi_fusion_core_checksum_func_propose_segment(
+): Short
 fun uniffi_fusion_core_checksum_func_replay_recording(
+): Short
+fun uniffi_fusion_core_checksum_func_segment_match_version(
+): Short
+fun uniffi_fusion_core_checksum_func_segment_search_bounds(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
 ): Short
@@ -828,9 +848,19 @@ fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallS
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_build_segment(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startIndex`: Int,`endIndex`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_match_segment(`definition`: RustBuffer.ByValue,`recordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_propose_segment(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_segment_match_version(uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_segment_search_bounds(`definition`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -964,10 +994,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_analyze_recording() != 175.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_build_segment() != 33460.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_match_segment() != 58736.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_propose_segment() != 32802.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_replay_recording() != 45909.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_segment_match_version() != 63275.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_segment_search_bounds() != 21236.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_push_gps() != 56011.toShort()) {
@@ -1816,6 +1861,84 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
 
 
 
+/**
+ * Geographic bounds, used by callers as a cheap candidate prefilter.
+ */
+data class GeoBounds (
+    var `minLat`: kotlin.Double,
+    var `minLon`: kotlin.Double,
+    var `maxLat`: kotlin.Double,
+    var `maxLon`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeGeoBounds: FfiConverterRustBuffer<GeoBounds> {
+    override fun read(buf: ByteBuffer): GeoBounds {
+        return GeoBounds(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: GeoBounds) = (
+            FfiConverterDouble.allocationSize(value.`minLat`) +
+            FfiConverterDouble.allocationSize(value.`minLon`) +
+            FfiConverterDouble.allocationSize(value.`maxLat`) +
+            FfiConverterDouble.allocationSize(value.`maxLon`)
+    )
+
+    override fun write(value: GeoBounds, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`minLat`, buf)
+            FfiConverterDouble.write(value.`minLon`, buf)
+            FfiConverterDouble.write(value.`maxLat`, buf)
+            FfiConverterDouble.write(value.`maxLon`, buf)
+    }
+}
+
+
+
+/**
+ * A geographic coordinate (degrees, WGS84).
+ */
+data class LatLon (
+    var `lat`: kotlin.Double,
+    var `lon`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLatLon: FfiConverterRustBuffer<LatLon> {
+    override fun read(buf: ByteBuffer): LatLon {
+        return LatLon(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LatLon) = (
+            FfiConverterDouble.allocationSize(value.`lat`) +
+            FfiConverterDouble.allocationSize(value.`lon`)
+    )
+
+    override fun write(value: LatLon, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`lat`, buf)
+            FfiConverterDouble.write(value.`lon`, buf)
+    }
+}
+
+
+
 data class LiveSnapshot (
     var `timestampMs`: kotlin.Long,
     var `lat`: kotlin.Double,
@@ -2002,6 +2125,52 @@ public object FfiConverterTypeRecordingReplay: FfiConverterRustBuffer<RecordingR
 
 
 /**
+ * A gate pair that was found but did not qualify.
+ */
+data class RejectedAttempt (
+    var `recordingId`: kotlin.String,
+    var `startedAtMs`: kotlin.Long,
+    var `reason`: AttemptRejection,
+    /**
+     * Human-readable specifics, e.g. the measured deviation.
+     */
+    var `detail`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRejectedAttempt: FfiConverterRustBuffer<RejectedAttempt> {
+    override fun read(buf: ByteBuffer): RejectedAttempt {
+        return RejectedAttempt(
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterTypeAttemptRejection.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RejectedAttempt) = (
+            FfiConverterString.allocationSize(value.`recordingId`) +
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterTypeAttemptRejection.allocationSize(value.`reason`) +
+            FfiConverterString.allocationSize(value.`detail`)
+    )
+
+    override fun write(value: RejectedAttempt, buf: ByteBuffer) {
+            FfiConverterString.write(value.`recordingId`, buf)
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterTypeAttemptRejection.write(value.`reason`, buf)
+            FfiConverterString.write(value.`detail`, buf)
+    }
+}
+
+
+
+/**
  * Full analysis of one raw recording.
  */
 data class RideAnalysis (
@@ -2130,6 +2299,338 @@ public object FfiConverterTypeRideAnalysis: FfiConverterRustBuffer<RideAnalysis>
 
 
 /**
+ * One completed run of a segment.
+ */
+data class SegmentAttempt (
+    var `recordingId`: kotlin.String,
+    /**
+     * Interpolated start-gate crossing, Unix epoch milliseconds.
+     */
+    var `startedAtMs`: kotlin.Long,
+    /**
+     * Interpolated finish-gate crossing, Unix epoch milliseconds.
+     */
+    var `finishedAtMs`: kotlin.Long,
+    var `elapsedMs`: kotlin.Long,
+    /**
+     * Symmetric ± timing uncertainty, milliseconds.
+     */
+    var `uncertaintyMs`: kotlin.Long,
+    /**
+     * Continuous recording section the attempt belongs to.
+     */
+    var `sectionId`: kotlin.Int,
+    /**
+     * Inclusive index range in the matched finalized track, for rendering.
+     */
+    var `startIndex`: kotlin.Int,
+    var `endIndex`: kotlin.Int,
+    var `maxDeviationM`: kotlin.Double,
+    var `medianAccuracyM`: kotlin.Double?,
+    var `quality`: AttemptQuality,
+    var `flags`: List<AttemptFlag>,
+    /**
+     * Geometry version this attempt was matched against.
+     */
+    var `matchedGeometryVersion`: kotlin.Int,
+    /**
+     * Matching rules that produced it.
+     */
+    var `matchVersion`: kotlin.String
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentAttempt: FfiConverterRustBuffer<SegmentAttempt> {
+    override fun read(buf: ByteBuffer): SegmentAttempt {
+        return SegmentAttempt(
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterTypeAttemptQuality.read(buf),
+            FfiConverterSequenceTypeAttemptFlag.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentAttempt) = (
+            FfiConverterString.allocationSize(value.`recordingId`) +
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`finishedAtMs`) +
+            FfiConverterLong.allocationSize(value.`elapsedMs`) +
+            FfiConverterLong.allocationSize(value.`uncertaintyMs`) +
+            FfiConverterInt.allocationSize(value.`sectionId`) +
+            FfiConverterInt.allocationSize(value.`startIndex`) +
+            FfiConverterInt.allocationSize(value.`endIndex`) +
+            FfiConverterDouble.allocationSize(value.`maxDeviationM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`medianAccuracyM`) +
+            FfiConverterTypeAttemptQuality.allocationSize(value.`quality`) +
+            FfiConverterSequenceTypeAttemptFlag.allocationSize(value.`flags`) +
+            FfiConverterInt.allocationSize(value.`matchedGeometryVersion`) +
+            FfiConverterString.allocationSize(value.`matchVersion`)
+    )
+
+    override fun write(value: SegmentAttempt, buf: ByteBuffer) {
+            FfiConverterString.write(value.`recordingId`, buf)
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`finishedAtMs`, buf)
+            FfiConverterLong.write(value.`elapsedMs`, buf)
+            FfiConverterLong.write(value.`uncertaintyMs`, buf)
+            FfiConverterInt.write(value.`sectionId`, buf)
+            FfiConverterInt.write(value.`startIndex`, buf)
+            FfiConverterInt.write(value.`endIndex`, buf)
+            FfiConverterDouble.write(value.`maxDeviationM`, buf)
+            FfiConverterOptionalDouble.write(value.`medianAccuracyM`, buf)
+            FfiConverterTypeAttemptQuality.write(value.`quality`, buf)
+            FfiConverterSequenceTypeAttemptFlag.write(value.`flags`, buf)
+            FfiConverterInt.write(value.`matchedGeometryVersion`, buf)
+            FfiConverterString.write(value.`matchVersion`, buf)
+    }
+}
+
+
+
+/**
+ * A directed segment as authored on the device.
+ *
+ * `centerline` is an ordered start-to-finish polyline. In this draft version
+ * it is copied verbatim from one ride's finalized track.
+ */
+data class SegmentDefinition (
+    var `id`: kotlin.String,
+    var `name`: kotlin.String,
+    /**
+     * Recording the draft geometry was authored from.
+     */
+    var `sourceRecordingId`: kotlin.String,
+    /**
+     * Geometry version. Increments whenever the centerline changes; attempts
+     * store the version that scored them.
+     */
+    var `geometryVersion`: kotlin.Int,
+    var `centerline`: List<LatLon>,
+    /**
+     * Half-width of both gate lines, meters.
+     */
+    var `gateHalfWidthM`: kotlin.Double,
+    /**
+     * Allowed lateral deviation from the centerline, meters.
+     */
+    var `corridorM`: kotlin.Double,
+    var `lengthM`: kotlin.Double,
+    /**
+     * Accumulated climb over the selection using the canonical 2 m
+     * hysteresis, when altitude is available.
+     */
+    var `ascentM`: kotlin.Double?,
+    /**
+     * Accumulated descent over the selection using the canonical 2 m
+     * hysteresis, when altitude is available.
+     */
+    var `descentM`: kotlin.Double?,
+    /**
+     * Downsampled distance/elevation series for the local detail chart.
+     */
+    var `elevationProfile`: List<SegmentElevationPoint>,
+    /**
+     * `false` while the geometry is a single-ride draft. A draft never
+     * corrects GPS and is not authoritative geometry.
+     */
+    var `trusted`: kotlin.Boolean
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentDefinition: FfiConverterRustBuffer<SegmentDefinition> {
+    override fun read(buf: ByteBuffer): SegmentDefinition {
+        return SegmentDefinition(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterSequenceTypeLatLon.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterSequenceTypeSegmentElevationPoint.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentDefinition) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`sourceRecordingId`) +
+            FfiConverterInt.allocationSize(value.`geometryVersion`) +
+            FfiConverterSequenceTypeLatLon.allocationSize(value.`centerline`) +
+            FfiConverterDouble.allocationSize(value.`gateHalfWidthM`) +
+            FfiConverterDouble.allocationSize(value.`corridorM`) +
+            FfiConverterDouble.allocationSize(value.`lengthM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`ascentM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`descentM`) +
+            FfiConverterSequenceTypeSegmentElevationPoint.allocationSize(value.`elevationProfile`) +
+            FfiConverterBoolean.allocationSize(value.`trusted`)
+    )
+
+    override fun write(value: SegmentDefinition, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`sourceRecordingId`, buf)
+            FfiConverterInt.write(value.`geometryVersion`, buf)
+            FfiConverterSequenceTypeLatLon.write(value.`centerline`, buf)
+            FfiConverterDouble.write(value.`gateHalfWidthM`, buf)
+            FfiConverterDouble.write(value.`corridorM`, buf)
+            FfiConverterDouble.write(value.`lengthM`, buf)
+            FfiConverterOptionalDouble.write(value.`ascentM`, buf)
+            FfiConverterOptionalDouble.write(value.`descentM`, buf)
+            FfiConverterSequenceTypeSegmentElevationPoint.write(value.`elevationProfile`, buf)
+            FfiConverterBoolean.write(value.`trusted`, buf)
+    }
+}
+
+
+
+/**
+ * One sample of a segment's authored elevation profile.
+ */
+data class SegmentElevationPoint (
+    /**
+     * Distance from the start gate along the source centerline.
+     */
+    var `distanceM`: kotlin.Double,
+    var `altitudeM`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentElevationPoint: FfiConverterRustBuffer<SegmentElevationPoint> {
+    override fun read(buf: ByteBuffer): SegmentElevationPoint {
+        return SegmentElevationPoint(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentElevationPoint) = (
+            FfiConverterDouble.allocationSize(value.`distanceM`) +
+            FfiConverterDouble.allocationSize(value.`altitudeM`)
+    )
+
+    override fun write(value: SegmentElevationPoint, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`distanceM`, buf)
+            FfiConverterDouble.write(value.`altitudeM`, buf)
+    }
+}
+
+
+
+/**
+ * Everything one recording contributed to one segment.
+ */
+data class SegmentMatchResult (
+    var `attempts`: List<SegmentAttempt>,
+    var `rejected`: List<RejectedAttempt>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentMatchResult: FfiConverterRustBuffer<SegmentMatchResult> {
+    override fun read(buf: ByteBuffer): SegmentMatchResult {
+        return SegmentMatchResult(
+            FfiConverterSequenceTypeSegmentAttempt.read(buf),
+            FfiConverterSequenceTypeRejectedAttempt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentMatchResult) = (
+            FfiConverterSequenceTypeSegmentAttempt.allocationSize(value.`attempts`) +
+            FfiConverterSequenceTypeRejectedAttempt.allocationSize(value.`rejected`)
+    )
+
+    override fun write(value: SegmentMatchResult, buf: ByteBuffer) {
+            FfiConverterSequenceTypeSegmentAttempt.write(value.`attempts`, buf)
+            FfiConverterSequenceTypeRejectedAttempt.write(value.`rejected`, buf)
+    }
+}
+
+
+
+/**
+ * A suggested selection for the segment editor.
+ */
+data class SegmentProposal (
+    /**
+     * Inclusive index into the finalized track the proposal came from.
+     */
+    var `startIndex`: kotlin.Int,
+    /**
+     * Inclusive index into the finalized track the proposal came from.
+     */
+    var `endIndex`: kotlin.Int,
+    var `lengthM`: kotlin.Double,
+    var `descentM`: kotlin.Double?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentProposal: FfiConverterRustBuffer<SegmentProposal> {
+    override fun read(buf: ByteBuffer): SegmentProposal {
+        return SegmentProposal(
+            FfiConverterInt.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentProposal) = (
+            FfiConverterInt.allocationSize(value.`startIndex`) +
+            FfiConverterInt.allocationSize(value.`endIndex`) +
+            FfiConverterDouble.allocationSize(value.`lengthM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`descentM`)
+    )
+
+    override fun write(value: SegmentProposal, buf: ByteBuffer) {
+            FfiConverterInt.write(value.`startIndex`, buf)
+            FfiConverterInt.write(value.`endIndex`, buf)
+            FfiConverterDouble.write(value.`lengthM`, buf)
+            FfiConverterOptionalDouble.write(value.`descentM`, buf)
+    }
+}
+
+
+
+/**
  * One decimated track point for map display (~1 Hz).
  */
 data class TrackPoint (
@@ -2223,6 +2724,142 @@ public object FfiConverterTypeActivityState: FfiConverterRustBuffer<ActivityStat
     override fun allocationSize(value: ActivityState) = 4UL
 
     override fun write(value: ActivityState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Non-fatal observations that make an attempt suspicious but keep it visible.
+ */
+
+enum class AttemptFlag {
+
+    /**
+     * This ride authored the segment geometry, so it cannot be an independent
+     * confirmation of it.
+     */
+    DEFINING_RIDE,
+    /**
+     * Median horizontal accuracy inside the attempt is poor.
+     */
+    LOW_GPS_QUALITY,
+    /**
+     * The post-ride classifier saw tentative motorized evidence inside.
+     */
+    LIKELY_MOTORIZED,
+    /**
+     * Timing uncertainty is large relative to the result.
+     */
+    HIGH_UNCERTAINTY;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAttemptFlag: FfiConverterRustBuffer<AttemptFlag> {
+    override fun read(buf: ByteBuffer) = try {
+        AttemptFlag.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AttemptFlag) = 4UL
+
+    override fun write(value: AttemptFlag, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Coarse verdict derived from [`AttemptFlag`]s.
+ */
+
+enum class AttemptQuality {
+
+    GOOD,
+    UNCERTAIN;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAttemptQuality: FfiConverterRustBuffer<AttemptQuality> {
+    override fun read(buf: ByteBuffer) = try {
+        AttemptQuality.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AttemptQuality) = 4UL
+
+    override fun write(value: AttemptQuality, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Why a gate pair did not become a countable attempt.
+ */
+
+enum class AttemptRejection {
+
+    /**
+     * The start gate was crossed but the finish gate never was afterwards.
+     */
+    NO_FINISH,
+    /**
+     * A manual pause boundary lies inside the candidate.
+     */
+    PAUSED_INSIDE,
+    /**
+     * A sensor/GPS gap longer than the allowed bridge lies inside.
+     */
+    GAP_INSIDE,
+    /**
+     * The ride left the segment corridor.
+     */
+    OFF_CORRIDOR,
+    /**
+     * The ride moved backwards along the segment more than noise allows.
+     */
+    BACKTRACKED,
+    /**
+     * The ride crossed both gates without covering the segment.
+     */
+    INCOMPLETE;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeAttemptRejection: FfiConverterRustBuffer<AttemptRejection> {
+    override fun read(buf: ByteBuffer) = try {
+        AttemptRejection.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: AttemptRejection) = 4UL
+
+    override fun write(value: AttemptRejection, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -2388,6 +3025,71 @@ public object FfiConverterTypeFusionError : FfiConverterRustBuffer<FusionExcepti
 
 
 
+
+/**
+ * Errors specific to authoring and matching segments.
+ */
+sealed class SegmentException: kotlin.Exception() {
+
+    /**
+     * The requested start/finish selection cannot describe a segment.
+     */
+    class InvalidSelection(
+
+        val `msg`: kotlin.String
+        ) : SegmentException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<SegmentException> {
+        override fun lift(error_buf: RustBuffer.ByValue): SegmentException = FfiConverterTypeSegmentError.lift(error_buf)
+    }
+
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentError : FfiConverterRustBuffer<SegmentException> {
+    override fun read(buf: ByteBuffer): SegmentException {
+
+
+        return when(buf.getInt()) {
+            1 -> SegmentException.InvalidSelection(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: SegmentException): ULong {
+        return when(value) {
+            is SegmentException.InvalidSelection -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+        }
+    }
+
+    override fun write(value: SegmentException, buf: ByteBuffer) {
+        when(value) {
+            is SegmentException.InvalidSelection -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+
 /**
  * @suppress
  */
@@ -2455,6 +3157,38 @@ public object FfiConverterOptionalBoolean: FfiConverterRustBuffer<kotlin.Boolean
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeGeoBounds: FfiConverterRustBuffer<GeoBounds?> {
+    override fun read(buf: ByteBuffer): GeoBounds? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeGeoBounds.read(buf)
+    }
+
+    override fun allocationSize(value: GeoBounds?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeGeoBounds.allocationSize(value)
+        }
+    }
+
+    override fun write(value: GeoBounds?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeGeoBounds.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveSnapshot?> {
     override fun read(buf: ByteBuffer): LiveSnapshot? {
         if (buf.get().toInt() == 0) {
@@ -2477,6 +3211,38 @@ public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveS
         } else {
             buf.put(1)
             FfiConverterTypeLiveSnapshot.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeSegmentProposal: FfiConverterRustBuffer<SegmentProposal?> {
+    override fun read(buf: ByteBuffer): SegmentProposal? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSegmentProposal.read(buf)
+    }
+
+    override fun allocationSize(value: SegmentProposal?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSegmentProposal.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SegmentProposal?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSegmentProposal.write(value, buf)
         }
     }
 }
@@ -2631,6 +3397,118 @@ public object FfiConverterSequenceTypeDiagnosticTrackPoint: FfiConverterRustBuff
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeLatLon: FfiConverterRustBuffer<List<LatLon>> {
+    override fun read(buf: ByteBuffer): List<LatLon> {
+        val len = buf.getInt()
+        return List<LatLon>(len) {
+            FfiConverterTypeLatLon.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LatLon>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLatLon.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LatLon>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLatLon.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeRejectedAttempt: FfiConverterRustBuffer<List<RejectedAttempt>> {
+    override fun read(buf: ByteBuffer): List<RejectedAttempt> {
+        val len = buf.getInt()
+        return List<RejectedAttempt>(len) {
+            FfiConverterTypeRejectedAttempt.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RejectedAttempt>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRejectedAttempt.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RejectedAttempt>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRejectedAttempt.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeSegmentAttempt: FfiConverterRustBuffer<List<SegmentAttempt>> {
+    override fun read(buf: ByteBuffer): List<SegmentAttempt> {
+        val len = buf.getInt()
+        return List<SegmentAttempt>(len) {
+            FfiConverterTypeSegmentAttempt.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<SegmentAttempt>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeSegmentAttempt.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<SegmentAttempt>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeSegmentAttempt.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeSegmentElevationPoint: FfiConverterRustBuffer<List<SegmentElevationPoint>> {
+    override fun read(buf: ByteBuffer): List<SegmentElevationPoint> {
+        val len = buf.getInt()
+        return List<SegmentElevationPoint>(len) {
+            FfiConverterTypeSegmentElevationPoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<SegmentElevationPoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeSegmentElevationPoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<SegmentElevationPoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeSegmentElevationPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<TrackPoint>> {
     override fun read(buf: ByteBuffer): List<TrackPoint> {
         val len = buf.getInt()
@@ -2649,6 +3527,34 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeTrackPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<AttemptFlag>> {
+    override fun read(buf: ByteBuffer): List<AttemptFlag> {
+        val len = buf.getInt()
+        return List<AttemptFlag>(len) {
+            FfiConverterTypeAttemptFlag.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<AttemptFlag>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeAttemptFlag.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<AttemptFlag>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeAttemptFlag.write(it, buf)
         }
     }
 }
@@ -2682,6 +3588,22 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
 
 
         /**
+         * Builds a draft segment definition from a selection on one finalized track.
+         *
+         * Gate widths and the corridor are derived here, from the source ride's own
+         * horizontal accuracy, so the matching policy stays in Rust.
+         */
+    @Throws(SegmentException::class) fun `buildSegment`(`id`: kotlin.String, `name`: kotlin.String, `sourceRecordingId`: kotlin.String, `track`: List<CanonicalTrackPoint>, `startIndex`: kotlin.Int, `endIndex`: kotlin.Int): SegmentDefinition {
+            return FfiConverterTypeSegmentDefinition.lift(
+    uniffiRustCallWithError(SegmentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_build_segment(
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`sourceRecordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterInt.lower(`startIndex`),FfiConverterInt.lower(`endIndex`),_status)
+}
+    )
+    }
+
+
+        /**
          * Parses one raw recording once and produces its canonical processed result.
          */
     @Throws(FusionException::class) fun `finalizeRecording`(`path`: kotlin.String): CanonicalActivity {
@@ -2694,11 +3616,65 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
     }
 
 
+        /**
+         * Finds every attempt of `definition` inside one recording's finalized track.
+         */ fun `matchSegment`(`definition`: SegmentDefinition, `recordingId`: kotlin.String, `track`: List<CanonicalTrackPoint>): SegmentMatchResult {
+            return FfiConverterTypeSegmentMatchResult.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_match_segment(
+        FfiConverterTypeSegmentDefinition.lower(`definition`),FfiConverterString.lower(`recordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Suggests the longest continuous descent in `track` as a default selection.
+         *
+         * Uses the existing conservative [`ActivityState`] pass, so the suggestion
+         * never crosses a pause boundary or a gap and never invents its own notion of
+         * downhill.
+         */ fun `proposeSegment`(`track`: List<CanonicalTrackPoint>): SegmentProposal? {
+            return FfiConverterOptionalTypeSegmentProposal.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_propose_segment(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),_status)
+}
+    )
+    }
+
+
     @Throws(FusionException::class) fun `replayRecording`(`path`: kotlin.String): RecordingReplay {
             return FfiConverterTypeRecordingReplay.lift(
     uniffiRustCallWithError(FusionException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_replay_recording(
         FfiConverterString.lower(`path`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Current matching rules identifier.
+         */ fun `segmentMatchVersion`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_segment_match_version(
+        _status)
+}
+    )
+    }
+
+
+        /**
+         * Search bounds for `definition`, already padded by its own corridor and gate
+         * width. A recording whose track bounds do not intersect these can be skipped
+         * without decompressing or matching it.
+         */ fun `segmentSearchBounds`(`definition`: SegmentDefinition): GeoBounds? {
+            return FfiConverterOptionalTypeGeoBounds.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_segment_search_bounds(
+        FfiConverterTypeSegmentDefinition.lower(`definition`),_status)
 }
     )
     }

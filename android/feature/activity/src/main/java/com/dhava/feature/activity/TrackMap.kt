@@ -5,31 +5,24 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dhava.core.map.DhavaMapPalette
 import com.dhava.core.map.configureDhavaMapChrome
-import com.dhava.core.map.initDhavaMap
 import com.dhava.core.map.rememberDhavaMapPalette
+import com.dhava.core.map.rememberDhavaMapView
 import com.dhava.core.map.setDhavaMapStyle
 import com.dhava.fusion.ActivityState
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
@@ -119,7 +112,7 @@ internal fun TrackMap(
     fusedColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    val mapView = rememberMapViewWithLifecycle()
+    val mapView = rememberDhavaMapView()
     val palette = rememberDhavaMapPalette()
     val accuracyColors = rememberGpsAccuracyColors()
     val activityStateColors = rememberActivityStateColors()
@@ -727,35 +720,4 @@ private fun fitCamera(map: MapLibreMap, points: List<MapTrackPoint>) {
         .apply { points.forEach { include(LatLng(it.lat, it.lon)) } }
         .build()
     map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, BOUNDS_PADDING_PX), 1_000)
-}
-
-@Composable
-private fun rememberMapViewWithLifecycle(): MapView {
-    val context = LocalContext.current
-    val mapView = remember {
-        initDhavaMap(context)
-        MapView(context).also { it.onCreate(null) }
-    }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, mapView) {
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) mapView.onStart()
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onResume()
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
-                else -> Unit
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onPause()
-            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) mapView.onStop()
-            mapView.onDestroy()
-        }
-    }
-    return mapView
 }

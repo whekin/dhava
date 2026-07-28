@@ -40,6 +40,7 @@ dependencies {
     implementation(project(":core:recording"))
     implementation(project(":feature:record"))
     implementation(project(":feature:activity"))
+    implementation(project(":feature:segments"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -161,7 +161,7 @@ private fun ActivityState.toCanonicalActivityState(): CanonicalActivityState = w
     ActivityState.LIKELY_MOTORIZED -> CanonicalActivityState.LIKELY_MOTORIZED
 }
 
-private fun CanonicalActivityState.toActivityState(): ActivityState = when (this) {
+internal fun CanonicalActivityState.toFusionActivityState(): ActivityState = when (this) {
     CanonicalActivityState.UNKNOWN -> ActivityState.UNKNOWN
     CanonicalActivityState.STILL -> ActivityState.STILL
     CanonicalActivityState.DOWNHILL -> ActivityState.DOWNHILL
@@ -251,7 +251,7 @@ fun CanonicalActivityArtifact.toRecordingReplay(): RecordingReplay {
         accuracyM = accuracyM,
         stationary = stationary,
         sectionId = sectionId,
-        activityState = activityState.toActivityState().takeIf { classified },
+        activityState = activityState.toFusionActivityState().takeIf { classified },
         activityConfidence = activityConfidence.takeIf { classified },
     )
     val finalized = finalizedTrack.map { it.diagnostic(classified = true) }

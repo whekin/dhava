@@ -1,0 +1,243 @@
+package com.dhava.feature.segments
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.dhava.core.fusion.FusionCore
+import com.dhava.core.recording.CanonicalPoint
+import com.dhava.core.recording.RecordingRepository
+import com.dhava.core.recording.toCanonicalTrack
+import com.dhava.fusion.CanonicalTrackPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** Loading/authoring state of the segment editor. */
+sealed interface SegmentEditorState {
+    data object Loading : SegmentEditorState
+
+    /** The ride has no finalized track to author a segment from. */
+    data class Unavailable(val message: String) : SegmentEditorState
+
+    data class Editing(
+        val rideTitle: String,
+        /** Finalized track points, indexed exactly as the selection is. */
+        val track: List<CanonicalPoint>,
+        val startIndex: Int,
+        val endIndex: Int,
+        val name: String,
+        /** Rust-derived preview of the current selection, or its rejection. */
+        val preview: SelectionPreview,
+        val saving: Boolean = false,
+    ) : SegmentEditorState
+}
+
+/** What Rust says about the current selection. */
+sealed interface SelectionPreview {
+    data class Valid(
+        val lengthM: Double,
+        val ascentM: Double?,
+        val descentM: Double?,
+        val gateWidthM: Double,
+        val corridorM: Double,
+        val durationMs: Long,
+    ) : SelectionPreview
+
+    data class Invalid(val message: String) : SelectionPreview
+}
+
+enum class SelectionHandle { START, FINISH }
+
+/**
+ * Authoring one segment from one ride.
+ *
+ * The selection is expressed as two indexes into the ride's finalized track,
+ * never as free map coordinates: an index is unambiguous, always lies on the
+ * recorded line and cannot silently pick a point from a different pass. Every
+ * geometry judgement — length, drop, gate width, corridor and whether the
+ * selection is legal at all — comes from Rust `build_segment`, so the preview
+ * shown here is exactly what gets persisted.
+ */
+class SegmentEditorViewModel(
+    application: Application,
+    private val recordingId: String,
+) : AndroidViewModel(application) {
+
+    private val repository = RecordingRepository.getInstance(application)
+
+    private val _state = MutableStateFlow<SegmentEditorState>(SegmentEditorState.Loading)
+    val state: StateFlow<SegmentEditorState> = _state.asStateFlow()
+
+    /** Cached Rust-side track so a slider drag does not re-convert 5 Hz points. */
+    @Volatile
+    private var fusionTrack: List<CanonicalTrackPoint> = emptyList()
+
+    private var previewJob: kotlinx.coroutines.Job? = null
+
+    init {
+        viewModelScope.launch {
+            val recording = repository.recording(recordingId)
+            val artifact = withContext(Dispatchers.IO) {
+                repository.canonicalActivity(recordingId)
+            }
+            val track = artifact?.finalizedTrack.orEmpty()
+            if (track.size < 2) {
+                _state.value = SegmentEditorState.Unavailable(
+                    "This ride has no finalized track yet, so a segment cannot be timed on it.",
+                )
+                return@launch
+            }
+            fusionTrack = withContext(Dispatchers.Default) { track.toCanonicalTrack() }
+            val proposal = withContext(Dispatchers.Default) {
+                runCatching { FusionCore.proposeSegment(fusionTrack) }.getOrNull()
+            }
+            val start = proposal?.startIndex ?: 0
+            val end = proposal?.endIndex ?: (track.size - 1)
+            val title = repository.recordings.value
+                .firstOrNull { it.id == recordingId }
+                ?.title
+                ?.takeIf { it.isNotBlank() }
+                ?: "Ride"
+            _state.value = SegmentEditorState.Editing(
+                rideTitle = title,
+                track = track,
+                startIndex = start,
+                endIndex = end,
+                name = defaultName(title),
+                preview = preview(track, start, end),
+            )
+            // The ride entry may be renamed while the editor is open; the
+            // selection itself does not depend on it, so nothing else re-runs.
+            recording.collect { entry ->
+                val editing = _state.value as? SegmentEditorState.Editing ?: return@collect
+                val updated = entry?.title?.takeIf { it.isNotBlank() } ?: editing.rideTitle
+                if (updated != editing.rideTitle) {
+                    _state.value = editing.copy(rideTitle = updated)
+                }
+            }
+        }
+    }
+
+    fun setSelection(startIndex: Int, endIndex: Int) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        val start = startIndex.coerceIn(0, editing.track.lastIndex)
+        val end = endIndex.coerceIn(0, editing.track.lastIndex)
+        if (start == editing.startIndex && end == editing.endIndex) return
+        // The handles follow the drag immediately; the Rust preview of a
+        // multi-thousand-point selection is recomputed off the main thread and
+        // superseded by the next drag position.
+        _state.value = editing.copy(startIndex = start, endIndex = end)
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            val computed = withContext(Dispatchers.Default) { preview(editing.track, start, end) }
+            val current = _state.value as? SegmentEditorState.Editing ?: return@launch
+            if (current.startIndex == start && current.endIndex == end) {
+                _state.value = current.copy(preview = computed)
+            }
+        }
+    }
+
+    /** Moves one gate by exactly one canonical 5 Hz point. */
+    fun nudgeSelection(handle: SelectionHandle, direction: Int) {
+        if (direction == 0) return
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        when (handle) {
+            SelectionHandle.START -> setSelection(
+                startIndex = (editing.startIndex + direction)
+                    .coerceIn(0, (editing.endIndex - 1).coerceAtLeast(0)),
+                endIndex = editing.endIndex,
+            )
+
+            SelectionHandle.FINISH -> setSelection(
+                startIndex = editing.startIndex,
+                endIndex = (editing.endIndex + direction)
+                    .coerceIn(
+                        (editing.startIndex + 1).coerceAtMost(editing.track.lastIndex),
+                        editing.track.lastIndex,
+                    ),
+            )
+        }
+    }
+
+    fun setName(name: String) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        _state.value = editing.copy(name = name)
+    }
+
+    /** Persists the selection; [onSaved] receives the new segment id. */
+    fun save(onSaved: (String) -> Unit, onError: (String) -> Unit) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        if (editing.saving) return
+        _state.value = editing.copy(saving = true)
+        viewModelScope.launch {
+            val result = runCatching {
+                repository.createSegment(
+                    recordingId = recordingId,
+                    name = editing.name,
+                    startIndex = editing.startIndex,
+                    endIndex = editing.endIndex,
+                )
+            }
+            val current = _state.value as? SegmentEditorState.Editing
+            if (current != null) _state.value = current.copy(saving = false)
+            result.fold(
+                onSuccess = { segment -> onSaved(segment.id) },
+                onFailure = { error ->
+                    onError(error.message ?: "The selection could not be saved")
+                },
+            )
+        }
+    }
+
+    private fun preview(
+        track: List<CanonicalPoint>,
+        startIndex: Int,
+        endIndex: Int,
+    ): SelectionPreview = runCatching {
+        FusionCore.buildSegment(
+            id = PREVIEW_ID,
+            name = "preview",
+            sourceRecordingId = recordingId,
+            track = fusionTrack,
+            startIndex = startIndex,
+            endIndex = endIndex,
+        )
+    }.fold(
+        onSuccess = { definition ->
+            SelectionPreview.Valid(
+                lengthM = definition.lengthM,
+                ascentM = definition.ascentM,
+                descentM = definition.descentM,
+                gateWidthM = definition.gateHalfWidthM * 2.0,
+                corridorM = definition.corridorM,
+                durationMs = track[endIndex].timestampMs - track[startIndex].timestampMs,
+            )
+        },
+        onFailure = { error ->
+            SelectionPreview.Invalid(
+                error.message?.removePrefix("invalid selection: ")
+                    ?: "This selection cannot become a segment",
+            )
+        },
+    )
+
+    private fun defaultName(rideTitle: String): String = "$rideTitle segment"
+
+    companion object {
+        private const val PREVIEW_ID = "preview"
+
+        fun factory(recordingId: String): ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
+                    ?: error("APPLICATION_KEY missing from ViewModel CreationExtras")
+                SegmentEditorViewModel(application as Application, recordingId)
+            }
+        }
+    }
+}

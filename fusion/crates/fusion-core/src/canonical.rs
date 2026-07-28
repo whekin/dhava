@@ -535,7 +535,7 @@ fn finalized_speeds(
         .collect()
 }
 
-fn ascent_descent(track: &[CanonicalTrackPoint]) -> (f64, f64) {
+pub(crate) fn ascent_descent(track: &[CanonicalTrackPoint]) -> (f64, f64) {
     let mut ascent = 0.0;
     let mut descent = 0.0;
     let mut reference: Option<(i32, f64)> = None;

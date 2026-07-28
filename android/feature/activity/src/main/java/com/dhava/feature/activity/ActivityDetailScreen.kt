@@ -89,6 +89,7 @@ import java.util.Locale
 fun ActivityDetailScreen(
     recordingId: String,
     onBack: () -> Unit,
+    onCreateSegment: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ActivityDetailViewModel = viewModel(
         key = "activity-detail-$recordingId",
@@ -154,6 +155,7 @@ fun ActivityDetailScreen(
                 )
             }
         },
+        onCreateSegment = onCreateSegment,
         onAddBike = viewModel::addBike,
         onEditSave = viewModel::updateMetadata,
         onDelete = viewModel::deleteActivity,
@@ -197,6 +199,7 @@ private fun ActivityDetailContent(
     stravaConnection: StravaConnectionState,
     onBack: () -> Unit,
     onExport: (ActivityExportKind) -> Unit,
+    onCreateSegment: () -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
     onEditSave: (title: String, description: String, bike: Bike?) -> Unit,
     onDelete: () -> Unit,
@@ -269,6 +272,7 @@ private fun ActivityDetailContent(
                 healthLogAvailable = healthLogAvailable,
                 stravaConnection = stravaConnection,
                 onExport = onExport,
+                onCreateSegment = onCreateSegment,
                 onConnectStrava = onConnectStrava,
                 onExportStrava = onExportStrava,
                 onRetryStrava = onRetryStrava,
@@ -395,6 +399,7 @@ private fun ActivityDetailsSheet(
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
     onExport: (ActivityExportKind) -> Unit,
+    onCreateSegment: () -> Unit,
     onConnectStrava: () -> Unit,
     onExportStrava: () -> Unit,
     onRetryStrava: () -> Unit,
@@ -456,7 +461,11 @@ private fun ActivityDetailsSheet(
                 )
                 ActivityOverflowMenu(
                     enabled = recording != null,
+                    // A segment is timed on the canonical finalized track, so
+                    // it can only be authored once that track exists.
+                    canCreateSegment = processedExportAvailable,
                     onEdit = onEdit,
+                    onCreateSegment = onCreateSegment,
                     onDelete = onDelete,
                 )
             }
@@ -520,7 +529,9 @@ private fun DeleteActivityDialog(
 @Composable
 private fun ActivityOverflowMenu(
     enabled: Boolean,
+    canCreateSegment: Boolean,
     onEdit: () -> Unit,
+    onCreateSegment: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -537,6 +548,14 @@ private fun ActivityOverflowMenu(
                 onClick = {
                     expanded = false
                     onEdit()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Create segment") },
+                enabled = canCreateSegment,
+                onClick = {
+                    expanded = false
+                    onCreateSegment()
                 },
             )
             DropdownMenuItem(
@@ -1018,6 +1037,7 @@ private fun ActivityDetailContentPreview() {
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),
             onBack = {},
             onExport = { _ -> },
+            onCreateSegment = {},
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
             onEditSave = { _, _, _ -> },
             onDelete = {},

@@ -52,8 +52,28 @@ skeleton and deployment scaffolding.
 - Adaptive stationary IMU disk persistence with two-second full-rate pre-roll —
   implemented locally; long physical-device validation pending
 
+## Phase 5 — Local segments (in progress)
+
+- Rust gate model: directed start/finish gates, corridor, coverage and progress
+  checks, per-gate timing uncertainty, rejection reasons ✅
+- Longest-descent proposal reusing the ActivityState pass ✅
+- Index-based start/finish editor launched from Activity Detail ✅
+- Coarse selection plus point-level gate adjustment that preserves the user's
+  map zoom and pan ✅
+- Map-led segment editor with an always-visible selection slider and expandable
+  details sheet ✅
+- Rust-authored elevation profile with accumulated climb and descent ✅
+- Segments screen: segment map, best/latest with `± margin`, run count,
+  uncertain runs and not-counted runs with their reason ✅
+- Draft-only geometry: no GPS correction, no centerline averaging yet ✅
+- Trusted multi-pass centerline: averaged geometry from three or more quality
+  rides, uncertainty corridor, GPS correction inside reported accuracy, and
+  geometry updates that never let a ride influence the version that scored it
+- Field validation of gate/corridor thresholds against repeated real runs of the
+  same trail
+
 ## Frozen future work
 
-Segments and gates, uncertainty/anti-cheat evidence, leaderboards, live deltas,
-social features and server verification remain part of the long-term vision but
-are deliberately out of the current product path.
+Shared/server-side segments, leaderboards, KOM verification, uncertainty and
+anti-cheat evidence upload, live deltas and social features remain part of the
+long-term vision but are deliberately out of the current product path.

@@ -1,12 +1,22 @@
 package com.dhava.core.fusion
 
 import com.dhava.fusion.CanonicalActivity
+import com.dhava.fusion.CanonicalTrackPoint
+import com.dhava.fusion.GeoBounds
 import com.dhava.fusion.RideAnalysis
 import com.dhava.fusion.RecordingReplay
+import com.dhava.fusion.SegmentDefinition
+import com.dhava.fusion.SegmentMatchResult
+import com.dhava.fusion.SegmentProposal
 import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
+import com.dhava.fusion.buildSegment as ffiBuildSegment
 import com.dhava.fusion.finalizeRecording as ffiFinalizeRecording
+import com.dhava.fusion.matchSegment as ffiMatchSegment
+import com.dhava.fusion.proposeSegment as ffiProposeSegment
 import com.dhava.fusion.replayRecording as ffiReplayRecording
+import com.dhava.fusion.segmentMatchVersion as ffiSegmentMatchVersion
+import com.dhava.fusion.segmentSearchBounds as ffiSegmentSearchBounds
 
 /**
  * Thin facade over the Rust `fusion-core` crate (UniFFI bindings in
@@ -52,4 +62,51 @@ object FusionCore {
      * an engineering comparison surface, never the source of saved stats.
      */
     fun replay(path: String): RecordingReplay = ffiReplayRecording(path)
+
+    /**
+     * Version tag of the segment matching rules (e.g. `"gates-0.2"`), stored
+     * on every attempt. Segment results computed by an older version are
+     * recomputed rather than trusted.
+     */
+    val segmentMatchVersion: String by lazy { ffiSegmentMatchVersion() }
+
+    /**
+     * Suggests the longest continuous descent of a finalized track as the
+     * default start/finish selection for the segment editor.
+     */
+    fun proposeSegment(track: List<CanonicalTrackPoint>): SegmentProposal? =
+        ffiProposeSegment(track)
+
+    /**
+     * Builds a draft segment from a selection on one finalized track. Gate
+     * widths and the corridor are derived in Rust from the source ride's own
+     * horizontal accuracy.
+     *
+     * @throws com.dhava.fusion.SegmentException.InvalidSelection when the
+     *   selection is too short, inverted, or crosses a pause/gap.
+     */
+    fun buildSegment(
+        id: String,
+        name: String,
+        sourceRecordingId: String,
+        track: List<CanonicalTrackPoint>,
+        startIndex: Int,
+        endIndex: Int,
+    ): SegmentDefinition =
+        ffiBuildSegment(id, name, sourceRecordingId, track, startIndex, endIndex)
+
+    /** Corridor-padded bounds of a segment, for cheap candidate prefiltering. */
+    fun segmentSearchBounds(definition: SegmentDefinition): GeoBounds? =
+        ffiSegmentSearchBounds(definition)
+
+    /**
+     * Finds every attempt of [definition] in one recording's finalized track,
+     * plus the gate pairs that were rejected and why. Gate timing, corridor,
+     * coverage and uncertainty rules live in Rust only.
+     */
+    fun matchSegment(
+        definition: SegmentDefinition,
+        recordingId: String,
+        track: List<CanonicalTrackPoint>,
+    ): SegmentMatchResult = ffiMatchSegment(definition, recordingId, track)
 }

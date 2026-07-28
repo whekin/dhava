@@ -24,6 +24,7 @@ pub mod live;
 pub mod orientation;
 pub mod recording;
 pub mod replay;
+pub mod segment;
 
 pub use live::{LiveFusion, LiveSnapshot};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
@@ -38,6 +39,13 @@ pub use analysis::{
     analyze_recording,
 };
 pub use recording::{ParsedRecording, RecordingMeta, parse_recording, parse_recording_file};
+
+pub use segment::{
+    AttemptFlag, AttemptQuality, AttemptRejection, GeoBounds, RejectedAttempt,
+    SEGMENT_MATCH_VERSION, SegmentAttempt, SegmentDefinition, SegmentElevationPoint, SegmentError,
+    SegmentMatchResult, SegmentProposal, build_segment, match_segment, propose_segment,
+    segment_match_version, segment_search_bounds,
+};
 
 /// Errors surfaced across the FFI boundary (Kotlin exceptions).
 #[derive(Debug, uniffi::Error)]
@@ -107,7 +115,7 @@ pub struct BaroSample {
 }
 
 /// A geographic coordinate (degrees, WGS84).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct LatLon {
     pub lat: f64,
     pub lon: f64,
@@ -140,7 +148,7 @@ pub struct GateCrossing {
 /// Projects a lat/lon point to local planar meters using an equirectangular
 /// projection centered at `origin`. Accurate enough for gate-sized geometry
 /// (tens of meters).
-fn project(p: LatLon, origin: LatLon) -> [f64; 2] {
+pub(crate) fn project(p: LatLon, origin: LatLon) -> [f64; 2] {
     let lat0 = origin.lat.to_radians();
     let x = (p.lon - origin.lon).to_radians() * lat0.cos() * EARTH_RADIUS_M;
     let y = (p.lat - origin.lat).to_radians() * EARTH_RADIUS_M;
@@ -148,7 +156,7 @@ fn project(p: LatLon, origin: LatLon) -> [f64; 2] {
 }
 
 /// Smallest absolute difference between two bearings, degrees, in `[0, 180]`.
-fn bearing_diff_deg(a: f64, b: f64) -> f64 {
+pub(crate) fn bearing_diff_deg(a: f64, b: f64) -> f64 {
     let d = (a - b).rem_euclid(360.0);
     if d > 180.0 { 360.0 - d } else { d }
 }
@@ -161,7 +169,12 @@ fn cross(a: [f64; 2], b: [f64; 2]) -> f64 {
 /// Intersects segments `p -> p + r` and `q -> q + s`.
 /// Returns `(t, u)` such that the intersection is at `p + t*r` and `q + u*s`,
 /// with both parameters in `[0, 1]`. Collinear/parallel segments yield `None`.
-fn segment_intersection(p: [f64; 2], r: [f64; 2], q: [f64; 2], s: [f64; 2]) -> Option<(f64, f64)> {
+pub(crate) fn segment_intersection(
+    p: [f64; 2],
+    r: [f64; 2],
+    q: [f64; 2],
+    s: [f64; 2],
+) -> Option<(f64, f64)> {
     let denom = cross(r, s);
     if denom.abs() < f64::EPSILON {
         return None;

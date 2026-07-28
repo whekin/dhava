@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -33,6 +34,9 @@ import com.dhava.feature.activity.ActivityDetailScreen
 import com.dhava.feature.record.RecordScreen
 import com.dhava.feature.record.ActivitiesScreen
 import com.dhava.feature.record.SaveRecordingScreen
+import com.dhava.feature.segments.SegmentDetailScreen
+import com.dhava.feature.segments.SegmentEditorScreen
+import com.dhava.feature.segments.SegmentsScreen
 
 /** Top-level bottom-navigation destinations. */
 private enum class DhavaDestination(
@@ -42,6 +46,7 @@ private enum class DhavaDestination(
 ) {
     Record("record", "Record", Icons.Filled.PlayArrow),
     Activities("activities", "Activities", Icons.AutoMirrored.Filled.List),
+    Segments("segments", "Segments", Icons.Filled.Timer),
     Settings("settings", "Settings", Icons.Filled.Settings),
 }
 
@@ -126,6 +131,11 @@ fun DhavaApp(openRecorderRequest: Long = 0L) {
                     onFinishSaving = { id -> navController.navigate("save/$id") },
                 )
             }
+            composable(DhavaDestination.Segments.route) {
+                SegmentsScreen(
+                    onOpenSegment = { id -> navController.navigate("segment/$id") },
+                )
+            }
             composable(DhavaDestination.Settings.route) { SettingsScreen() }
             // Detail screen for one recorded activity; pushed on top of the
             // Record tab, so system/app back both return to the list.
@@ -133,9 +143,36 @@ fun DhavaApp(openRecorderRequest: Long = 0L) {
                 route = "activity/{id}",
                 arguments = listOf(navArgument("id") { type = NavType.StringType }),
             ) { entry ->
+                val recordingId = entry.arguments?.getString("id").orEmpty()
                 ActivityDetailScreen(
+                    recordingId = recordingId,
+                    onBack = { navController.popBackStack() },
+                    onCreateSegment = { navController.navigate("segment-editor/$recordingId") },
+                )
+            }
+            composable(
+                route = "segment/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentDetailScreen(
+                    segmentId = entry.arguments?.getString("id").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            // Authoring a segment from one ride. On success the editor is
+            // replaced by the new segment so Back returns to the ride.
+            composable(
+                route = "segment-editor/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentEditorScreen(
                     recordingId = entry.arguments?.getString("id").orEmpty(),
                     onBack = { navController.popBackStack() },
+                    onCreated = { segmentId ->
+                        navController.navigate("segment/$segmentId") {
+                            popUpTo("segment-editor/{id}") { inclusive = true }
+                        }
+                    },
                 )
             }
             composable(

@@ -376,3 +376,55 @@ activity results are always recomputed canonically from the raw on-device file.
 - Regenerate the committed Kotlin binding through `fusion/scripts/build-android.sh`
   after changing the UDL, UniFFI version or bindgen configuration. App-level lint is
   the release gate for verifying the guard against Android's minSdk.
+
+## 2026-07-28 — Local draft segments are gate-timed, corridor-verified Rust results
+
+- Segments are unfrozen as a fully local feature. No backend is involved: authoring,
+  matching, results and their invalidation all happen on the phone. Server-side shared
+  segments, KOM and verification remain future work.
+- A segment is authored from one ride as a **draft**: its centerline is that ride's
+  finalized sub-track, `trusted = false`. A draft times runs but is never treated as
+  authoritative geometry and never corrects GPS. Multi-pass centerlines, uncertainty
+  corridors and map-matched GPS correction come in a later version; every attempt
+  already stores `matched_geometry_version` so the rule "a ride may only contribute to
+  a later geometry version" stays enforceable.
+- Selection is expressed as two **indexes into the finalized track**, never as free map
+  coordinates. An index is unambiguous, always lies on the recorded line and cannot
+  pick a point from a different pass. The editor's default selection is Rust's longest
+  continuous `Downhill` run, reusing the existing conservative ActivityState pass.
+- Gate crossing alone is not evidence of an attempt: a start and a finish line can both
+  be crossed by a different trail. A candidate must additionally stay inside the segment
+  corridor, make monotone forward progress (bounded backtracking) and cover the segment
+  by binned centerline visitation. Gates are directed against the local centerline
+  tangent, so switchbacks keep working.
+- Gate width and corridor are derived in Rust from the source ride's own p90 horizontal
+  accuracy (gate half-width `2×`, corridor `3×`, clamped 10–30 m and 15–40 m). A fixed
+  width would either miss a crossing at 15 m error or swallow a parallel trail.
+- Timing runs on the canonical finalized 5 Hz track, never on ~1 Hz raw fixes, and every
+  result is reported with uncertainty: `accuracy / speed` per gate, combined as a root
+  sum of squares, bounded and never rounded down to a fake zero. A run without its
+  margin would imply precision the sensors do not have.
+- Segment elevation is authored in Rust from the same selected canonical geometry.
+  Accumulated climb and descent reuse the canonical 2 m hysteresis, while a bounded
+  profile (at most 192 distance/altitude samples) is persisted with the segment for
+  offline rendering. Old draft files remain readable and simply have no profile.
+- Editor camera state is independent from selection state: moving a gate updates map
+  layers but never reframes the camera. The slider begins as a full-ride overview, then
+  shortly after a completed drag expands the selected interval across almost its full
+  width. `Show full ride` is the explicit, discoverable way back; start/finish controls
+  still move by one canonical 5 Hz point for final adjustment without pretending that
+  every point is a speed-independent meter.
+- An attempt is never silently dropped. A rejected gate pair is surfaced with a reason
+  (`NoFinish`, `PausedInside`, `GapInside`, `OffCorridor`, `Backtracked`, `Incomplete`),
+  and a countable attempt can carry non-fatal flags (`DefiningRide`, `LowGpsQuality`,
+  `LikelyMotorized`, `HighUncertainty`). Consistent with the ride-state decision,
+  tentative motorized evidence marks a run uncertain instead of deleting it.
+- Persistence separates authored input from derived cache: `segments/<id>.segment.json`
+  is rider-authored and never auto-rebuilt, while `segment-results/<id>.results.json.gz`
+  is invalidated by the canonical algorithm version, `SEGMENT_MATCH_VERSION`, the
+  segment geometry version or a changed raw fingerprint. A segment survives deletion of
+  the ride that authored it, because the geometry is copied into the segment file.
+- Matching is incremental and prefiltered by padded bounds taken from **raw GPS lines**,
+  cached per raw fingerprint in `segment-results/track-bounds.json`. Authoring one
+  segment must not force a full fusion pass over every ride ever recorded; the finalized
+  track is only built for rides whose GPS hull can actually touch the segment.

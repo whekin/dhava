@@ -42,6 +42,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
         private const val BIKES_FILE = "bikes.json"
         private const val RECORDINGS_DIR = "recordings"
         private const val ARTIFACTS_DIR = "activity-artifacts"
+        private const val SEGMENTS_DIR = "segments"
+        private const val SEGMENT_RESULTS_DIR = "segment-results"
         private const val LOG_TAG = "RecordingRepository"
 
         @Volatile
@@ -62,6 +64,18 @@ class RecordingRepository private constructor(private val appContext: Context) {
         currentAlgorithmVersion = { FusionCore.algorithmVersion },
         produce = { path -> FusionCore.finalize(path).toArtifactPayload() },
     )
+    private val segmentStore = SegmentStore(
+        segmentsDir = File(appContext.filesDir, SEGMENTS_DIR),
+        resultsDir = File(appContext.filesDir, SEGMENT_RESULTS_DIR),
+    )
+    private val segmentMatcher = SegmentMatcher(
+        store = segmentStore,
+        canonicalArtifact = { id -> canonicalActivity(id) },
+        rawFile = { id -> recordingFile(id) },
+        algorithmVersion = { FusionCore.algorithmVersion },
+        matchVersion = { FusionCore.segmentMatchVersion },
+    )
+    private val segmentsMutex = Mutex()
 
     /** Completed once the JSON files are read; [awaitRecording] gates on it. */
     private val loaded = CompletableDeferred<Unit>()
@@ -81,6 +95,9 @@ class RecordingRepository private constructor(private val appContext: Context) {
 
     private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
     val bikes: StateFlow<List<Bike>> = _bikes.asStateFlow()
+
+    private val _segments = MutableStateFlow<List<StoredSegment>>(emptyList())
+    val segments: StateFlow<List<StoredSegment>> = _segments.asStateFlow()
 
     private val _lastUsedBikeId = MutableStateFlow<String?>(null)
     val lastUsedBikeId: StateFlow<String?> = _lastUsedBikeId.asStateFlow()
@@ -102,6 +119,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 // UI never observe pre-recovery state.
                 recoverInterruptedRecordings()
             }
+            _segments.value = segmentStore.loadSegments()
             loaded.complete(Unit)
             // Saved-but-not-uploaded entries normally already have their
             // unique job persisted in WorkManager; re-enqueueing with KEEP is
@@ -148,6 +166,93 @@ class RecordingRepository private constructor(private val appContext: Context) {
             .onFailure { error -> Log.w(LOG_TAG, "canonical finalization failed for $id", error) }
             .getOrNull()
     }
+
+    // --- segments -----------------------------------------------------------
+
+    /** Suspends until the on-disk index, bikes and segments have been read. */
+    suspend fun awaitReady() {
+        loaded.await()
+    }
+
+    suspend fun segment(id: String): StoredSegment? {
+        loaded.await()
+        return _segments.value.firstOrNull { it.id == id }
+    }
+
+    /**
+     * Authors a draft segment from a selection on one ride's finalized track.
+     *
+     * Rust derives the gates, corridor, length and drop from the source ride's
+     * own accuracy; Android only persists the result. The returned segment is
+     * a draft: its geometry is one ride, so it is not authoritative and never
+     * corrects GPS.
+     *
+     * @throws com.dhava.fusion.SegmentException.InvalidSelection when the
+     *   selection is inverted, too short, or crosses a pause/gap.
+     */
+    suspend fun createSegment(
+        recordingId: String,
+        name: String,
+        startIndex: Int,
+        endIndex: Int,
+    ): StoredSegment {
+        loaded.await()
+        val artifact = canonicalActivity(recordingId)
+            ?: error("Canonical artifact unavailable for $recordingId")
+        return segmentsMutex.withLock {
+            val definition = withContext(Dispatchers.Default) {
+                FusionCore.buildSegment(
+                    id = UUID.randomUUID().toString(),
+                    name = name.trim().ifBlank { "Segment" },
+                    sourceRecordingId = recordingId,
+                    track = artifact.finalizedTrack.toCanonicalTrack(),
+                    startIndex = startIndex,
+                    endIndex = endIndex,
+                )
+            }
+            val segment = definition.toStored(createdAtMs = System.currentTimeMillis())
+            segmentStore.saveSegment(segment)
+            _segments.update { list -> (list + segment).sortedBy { it.createdAtMs } }
+            segment
+        }
+    }
+
+    suspend fun renameSegment(id: String, name: String) {
+        loaded.await()
+        segmentsMutex.withLock {
+            val segment = _segments.value.firstOrNull { it.id == id } ?: return@withLock
+            val renamed = segment.copy(name = name.trim().ifBlank { segment.name })
+            segmentStore.saveSegment(renamed)
+            _segments.update { list -> list.map { if (it.id == id) renamed else it } }
+        }
+    }
+
+    /** Removes an authored segment and every result derived from it. */
+    suspend fun deleteSegment(id: String) {
+        loaded.await()
+        segmentsMutex.withLock {
+            segmentStore.deleteSegment(id)
+            _segments.update { list -> list.filterNot { it.id == id } }
+        }
+    }
+
+    /**
+     * Attempts of one segment across every saved ride, recomputing only what
+     * changed since the last call. Returns null when the segment is gone.
+     */
+    suspend fun segmentResults(id: String): SegmentResults? {
+        loaded.await()
+        val segment = _segments.value.firstOrNull { it.id == id } ?: return null
+        val candidates = _recordings.value.filter { it.status != RecordingStatus.RECORDING }
+        return runCatching {
+            withContext(Dispatchers.Default) { segmentMatcher.results(segment, candidates) }
+        }
+            .onFailure { error -> Log.w(LOG_TAG, "segment matching failed for $id", error) }
+            .getOrNull()
+    }
+
+    /** Deletes every derived segment result; authored segments are kept. */
+    suspend fun clearSegmentResults(): Int = segmentStore.clearResults()
 
     /** Observes a single index entry; emits null once the entry is gone (discarded). */
     fun recording(id: String): Flow<LocalRecording?> =

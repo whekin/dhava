@@ -1294,3 +1294,113 @@ assembly. The APK was installed with data preservation on the physical 360 dp On
 Collapsed Compare, expanded Compare, GPS-only, Fusion-only, outside-tap dismissal and
 Back dismissal were visually checked on `udzo 1`; labels remain readable and the map
 is unobstructed by default.
+
+## 2026-07-28 — Local draft segments: Rust gates, incremental matching, three screens
+
+Segments are unfrozen as a fully local feature; no backend is involved. `fusion-core`
+gained `segment.rs` with `SEGMENT_MATCH_VERSION = "gates-0.1"` and four exported
+functions: `propose_segment`, `build_segment`, `segment_search_bounds` and
+`match_segment`. A segment is authored from one ride as a draft (`trusted = false`):
+its centerline is that ride's finalized sub-track, so it times runs but is not
+authoritative geometry and never corrects GPS.
+
+The matcher deliberately does not trust gate crossings alone. Both gates are directed
+against the local centerline tangent, and a candidate additionally has to stay inside
+the corridor, keep monotone forward progress (bounded backtracking) and cover the
+segment by binned centerline visitation. Without those checks a start and a finish line
+are both crossed by any parallel trail or by a straight shortcut between them. Gate
+width and corridor come from the source ride's own p90 accuracy (`2×` half-width,
+`3×` corridor, clamped 10–30 m and 15–40 m) rather than a fixed number, which would
+either miss a crossing at 15 m error or swallow a neighboring trail.
+
+Timing runs on the canonical 5 Hz finalized track, never on ~1 Hz raw fixes, and every
+result carries a derived margin: `accuracy / speed` per gate, combined as a root sum of
+squares, bounded at 10 s and never rounded down to a fake zero. Nothing is silently
+dropped: rejected gate pairs surface as `NoFinish`, `PausedInside`, `GapInside`,
+`OffCorridor`, `Backtracked` or `Incomplete` with a human-readable detail, and countable
+runs can carry `DefiningRide`, `LowGpsQuality`, `LikelyMotorized` or `HighUncertainty`.
+Consistent with the ride-state decision, tentative motorized evidence marks a run
+uncertain instead of deleting it.
+
+Android persistence separates authored input from derived cache. `segments/*.segment.json`
+is rider-authored and never auto-rebuilt; `segment-results/*.results.json.gz` is keyed by
+canonical algorithm version, match version, geometry version and each ride's raw
+fingerprint, so an algorithm upgrade is a cache invalidation. A segment survives deletion
+of the ride that authored it because the geometry is copied into the segment file.
+Matching is incremental — after one new ride exactly that ride is matched.
+
+The first device run exposed a real cost problem: the prefilter originally needed the
+canonical artifact to know a ride's bounds, so authoring one segment built all 37
+artifacts and took roughly two minutes. Bounds now come from raw GPS lines only
+(cheap substring-filtered pass, conservative superset of finalized geometry) and are
+cached per fingerprint in `segment-results/track-bounds.json`; the finalized track is
+built only for rides whose GPS hull can actually touch the segment. The loading state
+also says `Matching your rides…` instead of showing a bare spinner.
+
+UI: `:feature:segments` is now a real module wired into navigation with a Segments tab.
+Activity Detail's overflow gained `Create segment`, enabled only once the finalized
+track exists. The editor selects start/finish as track indexes (not free map points),
+defaults to Rust's longest continuous `Downhill` run and shows Rust's own verdict on the
+selection — length, drop, this pass, gate/corridor widths, or the rejection message.
+`:core:map` gained a shared `rememberDhavaMapView` (TrackMap's private copy was removed)
+and a `SegmentMap` that draws pause-split ride context under the segment line with
+start/finish markers.
+
+Rust passes 91 unit tests, formatting and strict clippy; new Kotlin tests cover result
+formatting (`2:31.4 ± 0.8 s`), GPS bounds, bbox intersection and best/latest selection.
+App debug lint, the full debug assembly and all module unit tests pass. On the physical
+OnePlus (37 rides preserved) the whole flow was exercised: Create segment on
+`Down by the road`, proposal 2.41 km / −149 m, save, match, and a segment detail showing
+`3:23.6 ± 1.3 s` with `DEFINES SEGMENT` and the draft notice. After the raw-bounds
+rebuild the segment opened from cache without a matching pass, the stacked time/margin
+layout no longer truncates at 360 dp, and the All-runs row renders its own margin and
+flags; process logcat contained no exception. Open items: a second recorded run of the
+same trail to see an independent (non-defining) attempt, and field calibration of the
+gate, corridor, backtracking and coverage thresholds.
+
+## 2026-07-29 — Segment review: stable editing, elevation and safer matching
+
+Reviewed the complete local-segments vertical before committing it. The separation
+between authored draft geometry, derived result caches and Rust-owned matching is
+sound, but the review found several correctness and usability gaps.
+
+The editor no longer fits the whole ride every time the range changes. Geometry and
+camera updates are separate, so a rider can zoom and pan to a gate and keep that view
+while editing. The range slider begins as the coarse full-ride overview; 800 ms after
+a completed drag it expands the selected interval across almost its full width, with a
+small grab area outside both handles. `Show full ride` is the explicit way back.
+The editor is now map-led: a standard bottom sheet leaves the map full-screen, keeps
+the selection slider visible in its collapsed state, and reveals fine controls,
+metrics, explanation, name and save action when expanded.
+Start/Finish selection plus minus/plus controls still move the active gate by one
+canonical 5 Hz point. At the intended 15–20 km/h authoring speed that is commonly close
+to one meter, but it is not a speed-independent one-meter primitive. True fixed-distance
+editing would require fractional/interpolated positions and a new geometry version
+rather than silently pretending that every sample interval is one meter.
+
+Rust now authors accumulated climb, accumulated descent and a distance-based elevation
+profile from the selected canonical geometry. Climb/descent reuse the canonical 2 m
+hysteresis and the persisted profile is bounded to 192 points. Segment detail renders
+the profile offline with climb, descent and endpoint altitude, while the editor and
+list expose climb alongside descent. Existing segment JSON remains compatible through
+defaults; old drafts intentionally show no invented profile until they are recreated.
+
+Matching now retains the first start crossing while inside an attempt and does not let
+an early incomplete finish crossing consume a later valid finish, which matters on
+switchbacks. The result cache compares full ride identities instead of only their
+count, and stale raw-bounds entries are pruned after ride deletion. Because those rules
+change cached outcomes, `SEGMENT_MATCH_VERSION` advanced to `gates-0.2`.
+
+Rust passes 91 unit tests plus two fixture tests, formatting and strict clippy. Targeted
+Android recording/segments/activity tests, feature and app lint, and the full debug
+assembly pass. The APK was installed with data preservation on the physical OnePlus;
+the existing authored segment and all rides remained readable. On its 360 dp viewport,
+the collapsed editor sheet leaves most of the map visible while retaining both range
+handles; the expanded sheet scrolls the complete form, and range focus plus `Show full
+ride` were exercised without changing the map camera. A temporary 12.59 km selection
+visually verified the persisted elevation chart and both directions of elevation
+(+186 m / −861 m); that temporary segment and its cache were then deleted through the
+normal UI, leaving the original 2.41 km segment as the only authored segment. Remaining
+pre-trust work is field-calibrating gates/corridor/coverage on independent runs and
+adding an explicit raw-GPS sample-density component to timing uncertainty before
+leaderboards.
