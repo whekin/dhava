@@ -22,15 +22,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.outlined.ZoomInMap
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -124,7 +122,6 @@ fun SegmentEditorScreen(
             state = current,
             onBack = onBack,
             onSelectionChange = viewModel::setSelection,
-            onNudgeSelection = viewModel::nudgeSelection,
             onNameChange = viewModel::setName,
             onSave = {
                 viewModel.save(
@@ -164,15 +161,22 @@ private fun EditorBody(
     state: SegmentEditorState.Editing,
     onBack: () -> Unit,
     onSelectionChange: (Int, Int) -> Unit,
-    onNudgeSelection: (SelectionHandle, Int) -> Unit,
     onNameChange: (String) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var activeHandle by rememberSaveable { mutableStateOf(SelectionHandle.START) }
-    var sliderWindowStart by rememberSaveable(state.track.size) { mutableStateOf(0) }
+    val initialSliderWindow = remember(state.track.size) {
+        focusedSliderWindow(
+            startIndex = state.startIndex,
+            endIndex = state.endIndex,
+            lastIndex = state.track.lastIndex,
+        )
+    }
+    var sliderWindowStart by rememberSaveable(state.track.size) {
+        mutableStateOf(initialSliderWindow.first)
+    }
     var sliderWindowEnd by rememberSaveable(state.track.size) {
-        mutableStateOf(state.track.lastIndex)
+        mutableStateOf(initialSliderWindow.last)
     }
     var focusAfterDrag by remember { mutableStateOf(false) }
     val sections = remember(state.track) { state.track.toMapSections() }
@@ -231,17 +235,23 @@ private fun EditorBody(
                     fullSliderRange = fullSliderRange,
                     sliderWindowStart = sliderWindowStart,
                     sliderWindowEnd = sliderWindowEnd,
-                    onShowFullRide = {
+                    onToggleSliderRange = {
                         focusAfterDrag = false
-                        sliderWindowStart = 0
-                        sliderWindowEnd = state.track.lastIndex
+                        if (fullSliderRange) {
+                            val focused = focusedSliderWindow(
+                                startIndex = state.startIndex,
+                                endIndex = state.endIndex,
+                                lastIndex = state.track.lastIndex,
+                            )
+                            sliderWindowStart = focused.first
+                            sliderWindowEnd = focused.last
+                        } else {
+                            sliderWindowStart = 0
+                            sliderWindowEnd = state.track.lastIndex
+                        }
                     },
-                    onHandlePressed = { handle ->
+                    onSelectionChange = { start, end ->
                         focusAfterDrag = false
-                        activeHandle = handle
-                    },
-                    onSelectionChange = { start, end, handle ->
-                        activeHandle = handle
                         onSelectionChange(start, end)
                     },
                     onSelectionFinished = { focusAfterDrag = true },
@@ -259,10 +269,7 @@ private fun EditorBody(
                 ) {
                     SegmentEditorDetails(
                         state = state,
-                        activeHandle = activeHandle,
                         valid = valid,
-                        onActiveHandleChange = { activeHandle = it },
-                        onNudgeSelection = onNudgeSelection,
                         onNameChange = onNameChange,
                         onSave = onSave,
                     )
@@ -308,9 +315,8 @@ private fun SegmentSelectionSlider(
     fullSliderRange: Boolean,
     sliderWindowStart: Int,
     sliderWindowEnd: Int,
-    onShowFullRide: () -> Unit,
-    onHandlePressed: (SelectionHandle) -> Unit,
-    onSelectionChange: (Int, Int, SelectionHandle) -> Unit,
+    onToggleSliderRange: () -> Unit,
+    onSelectionChange: (Int, Int) -> Unit,
     onSelectionFinished: () -> Unit,
 ) {
     val startInteractionSource = remember { MutableInteractionSource() }
@@ -323,7 +329,6 @@ private fun SegmentSelectionSlider(
     PrecisionInteractionEffect(
         interactionSource = startInteractionSource,
         handle = SelectionHandle.START,
-        onPressed = onHandlePressed,
         onPrecisionStarted = { handle ->
             precisionHandle = handle
             precisionLastRawValue = null
@@ -340,7 +345,6 @@ private fun SegmentSelectionSlider(
     PrecisionInteractionEffect(
         interactionSource = finishInteractionSource,
         handle = SelectionHandle.FINISH,
-        onPressed = onHandlePressed,
         onPrecisionStarted = { handle ->
             precisionHandle = handle
             precisionLastRawValue = null
@@ -367,14 +371,20 @@ private fun SegmentSelectionSlider(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            DhavaSectionLabel(if (fullSliderRange) "Start and finish" else "Precise range")
-            if (!fullSliderRange) {
-                IconButton(onClick = onShowFullRide) {
-                    Icon(
-                        imageVector = Icons.Outlined.ZoomOutMap,
-                        contentDescription = "Show full ride",
-                    )
-                }
+            DhavaSectionLabel(if (fullSliderRange) "Full ride" else "Selected range")
+            IconButton(onClick = onToggleSliderRange) {
+                Icon(
+                    imageVector = if (fullSliderRange) {
+                        Icons.Outlined.ZoomInMap
+                    } else {
+                        Icons.Outlined.ZoomOutMap
+                    },
+                    contentDescription = if (fullSliderRange) {
+                        "Focus on selection"
+                    } else {
+                        "Show full ride"
+                    },
+                )
             }
         }
         RangeSlider(
@@ -420,7 +430,7 @@ private fun SegmentSelectionSlider(
                         ).roundToInt()
                         .coerceIn(state.startIndex + 1, sliderWindowEnd)
                 }
-                onSelectionChange(start, end, handle)
+                onSelectionChange(start, end)
             },
             onValueChangeFinished = onSelectionFinished,
             valueRange = sliderWindowStart.toFloat()..sliderWindowEnd.toFloat(),
@@ -441,7 +451,7 @@ private fun SegmentSelectionSlider(
         )
         Text(
             text = when {
-                precisionHandle != null -> "Precision · 5× slower"
+                precisionHandle != null -> "Precision · 10× slower"
                 fullSliderRange -> "Hold a handle for precision"
                 else -> "Focused · hold a handle for precision"
             },
@@ -487,11 +497,9 @@ private fun PrecisionSliderThumb(
 private fun PrecisionInteractionEffect(
     interactionSource: MutableInteractionSource,
     handle: SelectionHandle,
-    onPressed: (SelectionHandle) -> Unit,
     onPrecisionStarted: (SelectionHandle) -> Unit,
     onPrecisionEnded: (SelectionHandle) -> Unit,
 ) {
-    val currentOnPressed by rememberUpdatedState(onPressed)
     val currentOnPrecisionStarted by rememberUpdatedState(onPrecisionStarted)
     val currentOnPrecisionEnded by rememberUpdatedState(onPrecisionEnded)
 
@@ -503,7 +511,6 @@ private fun PrecisionInteractionEffect(
         interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is PressInteraction.Press -> {
-                    currentOnPressed(handle)
                     holdJob?.cancel()
                     cancelCleanupJob?.cancel()
                     precisionStarted = false
@@ -565,63 +572,11 @@ private fun PrecisionInteractionEffect(
 @Composable
 private fun SegmentEditorDetails(
     state: SegmentEditorState.Editing,
-    activeHandle: SelectionHandle,
     valid: SelectionPreview.Valid?,
-    onActiveHandleChange: (SelectionHandle) -> Unit,
-    onNudgeSelection: (SelectionHandle, Int) -> Unit,
     onNameChange: (String) -> Unit,
     onSave: () -> Unit,
 ) {
     Column {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.small),
-        ) {
-            FilterChip(
-                selected = activeHandle == SelectionHandle.START,
-                onClick = { onActiveHandleChange(SelectionHandle.START) },
-                label = { Text("Start") },
-            )
-            FilterChip(
-                selected = activeHandle == SelectionHandle.FINISH,
-                onClick = { onActiveHandleChange(SelectionHandle.FINISH) },
-                label = { Text("Finish") },
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = { onNudgeSelection(activeHandle, -1) },
-                enabled = when (activeHandle) {
-                    SelectionHandle.START -> state.startIndex > 0
-                    SelectionHandle.FINISH -> state.endIndex > state.startIndex + 1
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Remove,
-                    contentDescription = "Move ${activeHandle.label()} one point earlier",
-                )
-            }
-            Text(
-                text = "Fine adjust ${activeHandle.label()} · one 5 Hz point",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            IconButton(
-                onClick = { onNudgeSelection(activeHandle, 1) },
-                enabled = when (activeHandle) {
-                    SelectionHandle.START -> state.startIndex < state.endIndex - 1
-                    SelectionHandle.FINISH -> state.endIndex < state.track.lastIndex
-                },
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "Move ${activeHandle.label()} one point later",
-                )
-            }
-        }
         when (val preview = state.preview) {
             is SelectionPreview.Valid -> Column(
                 verticalArrangement = Arrangement.spacedBy(DhavaSpacing.medium),
@@ -722,13 +677,8 @@ private const val SLIDER_FOCUS_PADDING_FRACTION = 0.08
 private const val MIN_SLIDER_FOCUS_PADDING_POINTS = 10
 private const val PRECISION_HOLD_DELAY_MS = 700L
 private const val PRECISION_DRAG_HANDOFF_MS = 80L
-private const val PRECISION_SENSITIVITY = 0.2f
-private val SegmentEditorSheetPeekHeight = 196.dp
-
-private fun SelectionHandle.label(): String = when (this) {
-    SelectionHandle.START -> "start"
-    SelectionHandle.FINISH -> "finish"
-}
+private const val PRECISION_SENSITIVITY = 0.1f
+private val SegmentEditorSheetPeekHeight = 176.dp
 
 /**
  * Gives the selected interval almost the full slider width while retaining a

@@ -57,9 +57,11 @@ skeleton and deployment scaffolding.
 - Rust gate model: directed start/finish gates, corridor, coverage and progress
   checks, per-gate timing uncertainty, rejection reasons ✅
 - Longest-descent proposal reusing the ActivityState pass ✅
-- Index-based start/finish editor launched from Activity Detail ✅
-- Coarse selection, haptic hold-to-precision and point-level gate adjustment
-  that preserve the user's map zoom and pan ✅
+- Index-based v1 start/finish editor launched from Activity Detail ✅
+- Selection-focused initial scale, reversible full-ride scale and haptic
+  hold-to-precision at 10× slower movement, preserving map zoom and pan ✅
+- Continuous gate placement between canonical points, authored in Rust as
+  geometry v2; no fake resolution from merely resampling the same polyline
 - Map-led segment editor with an always-visible selection slider and expandable
   details sheet ✅
 - Rust-authored elevation profile with accumulated climb and descent ✅

@@ -22,8 +22,8 @@ class SegmentEditorScaleTest {
     }
 
     @Test
-    fun `precision movement applies one fifth of the raw handle delta`() {
-        assertEquals(501f, scaledPrecisionValue(500f, 105f, 100f))
-        assertEquals(499f, scaledPrecisionValue(500f, 95f, 100f))
+    fun `precision movement applies one tenth of the raw handle delta`() {
+        assertEquals(500.5f, scaledPrecisionValue(500f, 105f, 100f))
+        assertEquals(499.5f, scaledPrecisionValue(500f, 95f, 100f))
     }
 }

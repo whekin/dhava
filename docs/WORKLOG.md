@@ -1427,3 +1427,27 @@ assembly pass. The APK was installed with data preservation on the physical OneP
 The full-range state, long-held Finish handle, haptic-triggered visual state and
 zoom-out-map return were exercised; the map camera stayed fixed and no segment was
 saved during the interaction test.
+
+## 2026-07-29 — Reversible segment scale and 10× precision
+
+The segment editor now starts focused on Rust's proposed selection instead of showing
+the entire recording. This keeps both handles separated on long recordings containing
+multiple descents. The single scale icon is reversible: zoom-out-map exposes the full
+ride, while zoom-in-map restores a working window around the current selection without
+changing the map camera. The collapsed sheet labels both states explicitly.
+
+Hold precision now integrates 10% of finger movement and reports `10× slower`. The
+separate Start/Finish chips and minus/plus point-step row were removed because the
+handles now provide both coarse and precise adjustment. The reduced content also lets
+the collapsed sheet shrink from 196 dp to 176 dp, exposing more map.
+
+The next authoring increment is continuous gate placement on the existing canonical
+polyline, implemented in Rust as geometry v2. A gate position should be an edge plus a
+fraction between its endpoints; Rust should own interpolation, selected duration and
+the persisted endpoint geometry. Uniformly resampling the same line was rejected
+because it adds visual density but no location evidence.
+
+Segment unit tests, feature lint and the debug app assembly pass. The APK was installed
+with data preservation on the physical OnePlus. Initial selected range, full ride,
+return to selected range and the haptic-triggered `Precision · 10× slower` state were
+all exercised without saving a segment.

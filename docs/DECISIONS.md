@@ -409,14 +409,19 @@ activity results are always recomputed canonically from the raw on-device file.
   profile (at most 192 distance/altitude samples) is persisted with the segment for
   offline rendering. Old draft files remain readable and simply have no profile.
 - Editor camera state is independent from selection state: moving a gate updates map
-  layers but never reframes the camera. The slider begins as a full-ride overview, then
-  shortly after a completed drag expands the selected interval across almost its full
-  width. A standard zoom-out-map action is the explicit way back. Holding either handle
-  for 700 ms enters a haptic-confirmed precision mode where subsequent finger movement
-  is scaled to 20%; the active handle and status text change together so precision is
-  never encoded by haptic or color alone. Start/finish controls still move by one
-  canonical 5 Hz point for final adjustment without pretending that every point is a
-  speed-independent meter.
+  layers but never reframes the camera. The slider begins focused on Rust's proposed
+  segment so handles remain usable even in a recording containing several runs. One
+  stateful map-scale action switches between selected range and full ride in both
+  directions. Holding either handle for 700 ms enters a haptic-confirmed precision
+  mode where subsequent finger movement is scaled to 10%; the active handle and status
+  text change together so precision is never encoded by haptic or color alone. The
+  redundant Start/Finish and point-step controls are intentionally omitted.
+- Geometry v1 keeps index endpoints for compatibility. Geometry v2 should allow a gate
+  at a continuous position on a canonical polyline edge (edge index plus a fraction),
+  with interpolation, duration and endpoint geometry owned by Rust. Uniformly adding
+  points to the same line is not accepted as additional accuracy: it changes sampling
+  density without adding spatial evidence. The authored definition may contain
+  interpolated endpoints, while matching continues to interpolate real gate crossings.
 - An attempt is never silently dropped. A rejected gate pair is surfaced with a reason
   (`NoFinish`, `PausedInside`, `GapInside`, `OffCorridor`, `Backtracked`, `Incomplete`),
   and a countable attempt can carry non-fatal flags (`DefiningRide`, `LowGpsQuality`,

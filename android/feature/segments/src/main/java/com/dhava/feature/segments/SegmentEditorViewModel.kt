@@ -143,28 +143,6 @@ class SegmentEditorViewModel(
         }
     }
 
-    /** Moves one gate by exactly one canonical 5 Hz point. */
-    fun nudgeSelection(handle: SelectionHandle, direction: Int) {
-        if (direction == 0) return
-        val editing = _state.value as? SegmentEditorState.Editing ?: return
-        when (handle) {
-            SelectionHandle.START -> setSelection(
-                startIndex = (editing.startIndex + direction)
-                    .coerceIn(0, (editing.endIndex - 1).coerceAtLeast(0)),
-                endIndex = editing.endIndex,
-            )
-
-            SelectionHandle.FINISH -> setSelection(
-                startIndex = editing.startIndex,
-                endIndex = (editing.endIndex + direction)
-                    .coerceIn(
-                        (editing.startIndex + 1).coerceAtMost(editing.track.lastIndex),
-                        editing.track.lastIndex,
-                    ),
-            )
-        }
-    }
-
     fun setName(name: String) {
         val editing = _state.value as? SegmentEditorState.Editing ?: return
         _state.value = editing.copy(name = name)
