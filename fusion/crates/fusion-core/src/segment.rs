@@ -124,6 +124,14 @@ pub struct SegmentElevationPoint {
     pub altitude_m: f64,
 }
 
+/// Geometry plus the source-ride time span selected by the editor.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct SegmentBuildResult {
+    pub definition: SegmentDefinition,
+    pub started_at_ms: i64,
+    pub finished_at_ms: i64,
+}
+
 /// A suggested selection for the segment editor.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct SegmentProposal {
@@ -320,6 +328,63 @@ pub fn build_segment(
         )));
     }
     let selection = &track[start..=end];
+    build_segment_definition(id, name, source_recording_id, selection, 1)
+}
+
+/// Builds geometry v2 with gates at continuous positions on the finalized
+/// polyline. The integer part identifies a canonical point; the fractional
+/// part lies on the following edge.
+#[uniffi::export]
+pub fn build_segment_continuous(
+    id: String,
+    name: String,
+    source_recording_id: String,
+    track: Vec<CanonicalTrackPoint>,
+    start_position: f64,
+    end_position: f64,
+) -> Result<SegmentBuildResult, SegmentError> {
+    let invalid = |msg: String| SegmentError::InvalidSelection { msg };
+    if track.len() < 2 {
+        return Err(invalid("track has fewer than two points".to_string()));
+    }
+    if !start_position.is_finite() || !end_position.is_finite() {
+        return Err(invalid("position is not finite".to_string()));
+    }
+    let last_position = (track.len() - 1) as f64;
+    if start_position < 0.0 || end_position > last_position {
+        return Err(invalid(format!(
+            "positions {start_position:.3}..{end_position:.3} outside track 0..{last_position}"
+        )));
+    }
+    if end_position <= start_position {
+        return Err(invalid("finish must come after start".to_string()));
+    }
+
+    let selection = continuous_selection(&track, start_position, end_position)?;
+    let started_at_ms = selection
+        .first()
+        .map(|point| point.timestamp_ms)
+        .ok_or_else(|| invalid("empty selection".to_string()))?;
+    let finished_at_ms = selection
+        .last()
+        .map(|point| point.timestamp_ms)
+        .ok_or_else(|| invalid("empty selection".to_string()))?;
+    let definition = build_segment_definition(id, name, source_recording_id, &selection, 2)?;
+    Ok(SegmentBuildResult {
+        definition,
+        started_at_ms,
+        finished_at_ms,
+    })
+}
+
+fn build_segment_definition(
+    id: String,
+    name: String,
+    source_recording_id: String,
+    selection: &[CanonicalTrackPoint],
+    geometry_version: i32,
+) -> Result<SegmentDefinition, SegmentError> {
+    let invalid = |msg: String| SegmentError::InvalidSelection { msg };
     if selection
         .windows(2)
         .any(|pair| pair[0].section_id != pair[1].section_id)
@@ -348,7 +413,7 @@ pub fn build_segment(
         id,
         name,
         source_recording_id,
-        geometry_version: 1,
+        geometry_version,
         centerline: selection
             .iter()
             .map(|point| LatLon {
@@ -365,6 +430,101 @@ pub fn build_segment(
         elevation_profile: elevation_profile(selection),
         trusted: false,
     })
+}
+
+fn continuous_selection(
+    track: &[CanonicalTrackPoint],
+    start_position: f64,
+    end_position: f64,
+) -> Result<Vec<CanonicalTrackPoint>, SegmentError> {
+    let invalid = |msg: String| SegmentError::InvalidSelection { msg };
+    let mut selection =
+        Vec::with_capacity((end_position.ceil() - start_position.floor()) as usize + 2);
+    selection.push(interpolate_track_position(track, start_position)?);
+
+    let mut index = start_position.floor() as usize + 1;
+    while (index as f64) < end_position {
+        selection.push(track[index].clone());
+        index += 1;
+    }
+    selection.push(interpolate_track_position(track, end_position)?);
+
+    if selection
+        .windows(2)
+        .any(|pair| pair[1].timestamp_ms <= pair[0].timestamp_ms)
+    {
+        return Err(invalid(
+            "selection endpoints are closer than the source timing resolution".to_string(),
+        ));
+    }
+    Ok(selection)
+}
+
+fn interpolate_track_position(
+    track: &[CanonicalTrackPoint],
+    position: f64,
+) -> Result<CanonicalTrackPoint, SegmentError> {
+    let invalid = |msg: String| SegmentError::InvalidSelection { msg };
+    let lower = position.floor() as usize;
+    let fraction = position - lower as f64;
+    if fraction <= f64::EPSILON {
+        return track
+            .get(lower)
+            .cloned()
+            .ok_or_else(|| invalid(format!("position {position:.3} outside track")));
+    }
+    let upper = lower + 1;
+    let from = track
+        .get(lower)
+        .ok_or_else(|| invalid(format!("position {position:.3} outside track")))?;
+    let to = track
+        .get(upper)
+        .ok_or_else(|| invalid(format!("position {position:.3} outside track")))?;
+    if from.section_id != to.section_id {
+        return Err(invalid(
+            "position lies across a manual pause boundary".to_string(),
+        ));
+    }
+    let gap_ms = to.timestamp_ms - from.timestamp_ms;
+    if !(1..=MAX_ATTEMPT_GAP_MS).contains(&gap_ms) {
+        return Err(invalid("position lies across a recording gap".to_string()));
+    }
+
+    Ok(CanonicalTrackPoint {
+        timestamp_ms: from.timestamp_ms + ((gap_ms as f64) * fraction).round() as i64,
+        lat: lerp(from.lat, to.lat, fraction),
+        lon: lerp(from.lon, to.lon, fraction),
+        altitude_m: lerp_optional(from.altitude_m, to.altitude_m, fraction),
+        accuracy_m: lerp_optional(from.accuracy_m, to.accuracy_m, fraction),
+        speed_mps: lerp_optional(from.speed_mps, to.speed_mps, fraction),
+        stationary: nearest_optional(from.stationary, to.stationary, fraction),
+        section_id: from.section_id,
+        activity_state: if fraction < 0.5 {
+            from.activity_state
+        } else {
+            to.activity_state
+        },
+        activity_confidence: lerp(from.activity_confidence, to.activity_confidence, fraction),
+    })
+}
+
+fn lerp(from: f64, to: f64, fraction: f64) -> f64 {
+    from + (to - from) * fraction
+}
+
+fn lerp_optional(from: Option<f64>, to: Option<f64>, fraction: f64) -> Option<f64> {
+    match (from, to) {
+        (Some(from), Some(to)) => Some(lerp(from, to, fraction)),
+        _ => nearest_optional(from, to, fraction),
+    }
+}
+
+fn nearest_optional<T: Copy>(from: Option<T>, to: Option<T>, fraction: f64) -> Option<T> {
+    if fraction < 0.5 {
+        from.or(to)
+    } else {
+        to.or(from)
+    }
 }
 
 /// Search bounds for `definition`, already padded by its own corridor and gate
@@ -1314,6 +1474,45 @@ mod tests {
                 .last()
                 .is_some_and(|point| (point.distance_m - segment.length_m).abs() < 0.5)
         );
+    }
+
+    #[test]
+    fn continuous_authoring_interpolates_gate_geometry_and_time() {
+        let track = straight_track(1_000);
+        let result = build_segment_continuous(
+            "seg".to_string(),
+            "Continuous".to_string(),
+            "source".to_string(),
+            track,
+            0.25,
+            199.75,
+        )
+        .expect("continuous selection should be valid");
+
+        assert_eq!(result.definition.geometry_version, 2);
+        assert_eq!(result.started_at_ms, 1_050);
+        assert_eq!(result.finished_at_ms, 40_950);
+        assert!((result.definition.length_m - 199.5).abs() < 0.2);
+        let first = result.definition.centerline.first().unwrap();
+        let last = result.definition.centerline.last().unwrap();
+        assert!((first.lat - (LAT + 0.25 / M_PER_DEG_LAT)).abs() < 1e-10);
+        assert!((last.lat - (LAT + 199.75 / M_PER_DEG_LAT)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn continuous_authoring_rejects_a_fractional_pause_edge() {
+        let mut track = straight_track(0);
+        track[100].section_id = 1;
+        let error = build_segment_continuous(
+            "seg".to_string(),
+            "Pause".to_string(),
+            "source".to_string(),
+            track,
+            99.5,
+            199.0,
+        )
+        .expect_err("fractional position cannot cross a pause");
+        assert!(matches!(error, SegmentError::InvalidSelection { .. }));
     }
 
     #[test]

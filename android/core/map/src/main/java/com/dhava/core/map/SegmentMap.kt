@@ -1,10 +1,12 @@
 package com.dhava.core.map
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -28,6 +30,14 @@ import org.maplibre.geojson.Point
 /** One coordinate of a segment or of the ride it was authored from. */
 data class SegmentMapPoint(val lat: Double, val lon: Double)
 
+enum class SegmentMapCameraTarget { SEGMENT, FULL_RIDE }
+
+/** A one-shot editor camera action; [token] lets the same target be requested again. */
+data class SegmentMapCameraRequest(
+    val target: SegmentMapCameraTarget,
+    val token: Int,
+)
+
 private const val CONTEXT_SOURCE_ID = "dhava-segment-context"
 private const val CONTEXT_LAYER_ID = "dhava-segment-context-line"
 private const val SEGMENT_SOURCE_ID = "dhava-segment"
@@ -38,7 +48,6 @@ private const val ENDPOINT_LAYER_ID = "dhava-segment-endpoint-circles"
 private const val ENDPOINT_ROLE = "role"
 private const val ROLE_START = "start"
 private const val ROLE_FINISH = "finish"
-private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 16.0
 
 private val EMPTY_FEATURES = FeatureCollection.fromFeatures(emptyList())
@@ -60,19 +69,39 @@ fun SegmentMap(
     segment: List<SegmentMapPoint>,
     modifier: Modifier = Modifier,
     focusOnSegment: Boolean = true,
+    cameraRequest: SegmentMapCameraRequest? = null,
+    trackedPoint: SegmentMapPoint? = null,
+    trackingBottomInset: Dp = 0.dp,
+    onZoomChanged: (Double) -> Unit = {},
 ) {
     val mapView = rememberDhavaMapView()
     val palette = rememberDhavaMapPalette()
     val edgeMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
+    val cameraPaddingPx = with(LocalDensity.current) { 32.dp.roundToPx() }
+    val trackingTopInsetPx = with(LocalDensity.current) { 96.dp.roundToPx() }
+    val trackingBottomInsetPx = with(LocalDensity.current) {
+        (trackingBottomInset + 32.dp).roundToPx()
+    }
     val currentSections = rememberUpdatedState(sections)
     val currentSegment = rememberUpdatedState(segment)
     val currentFocus = rememberUpdatedState(focusOnSegment)
-    val focusPoints = if (focusOnSegment) {
-        segment
-    } else {
-        sections.flatten().ifEmpty { segment }
-    }
+    val currentOnZoomChanged = rememberUpdatedState(onZoomChanged)
     AndroidView(factory = { mapView }, modifier = modifier)
+
+    DisposableEffect(mapView) {
+        var boundMap: MapLibreMap? = null
+        val listener = MapLibreMap.OnCameraIdleListener {
+            boundMap?.let { currentOnZoomChanged.value(it.cameraPosition.zoom) }
+        }
+        mapView.getMapAsync { map ->
+            boundMap = map
+            map.addOnCameraIdleListener(listener)
+            currentOnZoomChanged.value(map.cameraPosition.zoom)
+        }
+        onDispose {
+            boundMap?.removeOnCameraIdleListener(listener)
+        }
+    }
 
     LaunchedEffect(mapView, palette) {
         mapView.getMapAsync { map ->
@@ -140,7 +169,7 @@ fun SegmentMap(
                 val initialFocus = currentSegment.value
                     .takeIf { currentFocus.value && it.isNotEmpty() }
                     ?: currentSections.value.flatten().ifEmpty { currentSegment.value }
-                fitCamera(map, initialFocus)
+                fitCamera(map, initialFocus, cameraPaddingPx, trackingBottomInsetPx)
             }
         }
     }
@@ -154,12 +183,39 @@ fun SegmentMap(
         }
     }
 
-    // Reframe only when the actual focus geometry changes. In the editor
-    // `focusOnSegment` is false, so moving either handle leaves this key (the
-    // complete ride context) unchanged.
-    LaunchedEffect(mapView, focusPoints) {
+    // Explicit range actions own reframing in the editor. Geometry updates do
+    // not appear in this key, so dragging never destroys a manual map zoom.
+    LaunchedEffect(mapView, cameraRequest) {
+        val request = cameraRequest ?: return@LaunchedEffect
+        val points = when (request.target) {
+            SegmentMapCameraTarget.SEGMENT -> segment
+            SegmentMapCameraTarget.FULL_RIDE -> sections.flatten().ifEmpty { segment }
+        }
         mapView.getMapAsync { map ->
-            if (map.style != null) fitCamera(map, focusPoints)
+            if (map.style != null) {
+                fitCamera(map, points, cameraPaddingPx, trackingBottomInsetPx)
+            }
+        }
+    }
+
+    // Preserve the rider's chosen zoom. While a gate is moving, pan only once
+    // its marker approaches the obscured/edge area; a marker already in the
+    // useful viewport causes no camera movement.
+    LaunchedEffect(mapView, trackedPoint) {
+        val point = trackedPoint ?: return@LaunchedEffect
+        mapView.getMapAsync { map ->
+            if (map.style == null || mapView.width <= 0 || mapView.height <= 0) return@getMapAsync
+            val screen = map.projection.toScreenLocation(LatLng(point.lat, point.lon))
+            val outsideSafeViewport =
+                screen.x < cameraPaddingPx ||
+                    screen.x > mapView.width - cameraPaddingPx ||
+                    screen.y < trackingTopInsetPx ||
+                    screen.y > mapView.height - trackingBottomInsetPx
+            if (outsideSafeViewport) {
+                map.moveCamera(
+                    CameraUpdateFactory.newLatLng(LatLng(point.lat, point.lon)),
+                )
+            }
         }
     }
 }
@@ -204,7 +260,12 @@ private fun endpointFeature(point: SegmentMapPoint, role: String): Feature =
         feature.addStringProperty(ENDPOINT_ROLE, role)
     }
 
-private fun fitCamera(map: MapLibreMap, points: List<SegmentMapPoint>) {
+private fun fitCamera(
+    map: MapLibreMap,
+    points: List<SegmentMapPoint>,
+    paddingPx: Int,
+    bottomInsetPx: Int,
+) {
     if (points.isEmpty()) return
     val distinct = points.mapTo(LinkedHashSet()) { it.lat to it.lon }
     if (distinct.size < 2) {
@@ -217,5 +278,14 @@ private fun fitCamera(map: MapLibreMap, points: List<SegmentMapPoint>) {
     val bounds = LatLngBounds.Builder()
         .apply { points.forEach { include(LatLng(it.lat, it.lon)) } }
         .build()
-    map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, BOUNDS_PADDING_PX), 600)
+    map.easeCamera(
+        CameraUpdateFactory.newLatLngBounds(
+            bounds,
+            paddingPx,
+            paddingPx,
+            paddingPx,
+            bottomInsetPx.coerceAtLeast(paddingPx),
+        ),
+        600,
+    )
 }

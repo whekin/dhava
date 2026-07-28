@@ -416,12 +416,20 @@ activity results are always recomputed canonically from the raw on-device file.
   mode where subsequent finger movement is scaled to 10%; the active handle and status
   text change together so precision is never encoded by haptic or color alone. The
   redundant Start/Finish and point-step controls are intentionally omitted.
-- Geometry v1 keeps index endpoints for compatibility. Geometry v2 should allow a gate
-  at a continuous position on a canonical polyline edge (edge index plus a fraction),
-  with interpolation, duration and endpoint geometry owned by Rust. Uniformly adding
-  points to the same line is not accepted as additional accuracy: it changes sampling
-  density without adding spatial evidence. The authored definition may contain
-  interpolated endpoints, while matching continues to interpolate real gate crossings.
+- Geometry v1 keeps index endpoints for compatibility. New authoring uses geometry v2:
+  a gate is a continuous position on a canonical polyline edge (edge index plus a
+  fraction), with interpolation, duration and endpoint geometry owned by Rust.
+  Uniformly adding points to the same line is not accepted as additional accuracy: it
+  changes sampling density without adding spatial evidence. The authored definition
+  contains interpolated endpoints, while matching continues to interpolate real gate
+  crossings.
+- Segment-editor camera actions are semantic. Full ride fits every pause-split section;
+  selected range fits the current segment into the map area above the collapsed sheet.
+  During a gate drag, a rider's manual zoom remains authoritative: the camera does
+  nothing while the endpoint remains in a safe viewport and pans without changing zoom
+  only after it approaches an edge or the sheet. Above map zoom 16, handle sensitivity
+  halves per zoom level (bounded at 5%); haptic precision multiplies that by another
+  10%. This affects interaction sensitivity only, never the persisted geometry.
 - An attempt is never silently dropped. A rejected gate pair is surfaced with a reason
   (`NoFinish`, `PausedInside`, `GapInside`, `OffCorridor`, `Backtracked`, `Incomplete`),
   and a countable attempt can carry non-fatal flags (`DefiningRide`, `LowGpsQuality`,

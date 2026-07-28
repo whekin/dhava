@@ -27,10 +27,10 @@ sealed interface SegmentEditorState {
 
     data class Editing(
         val rideTitle: String,
-        /** Finalized track points, indexed exactly as the selection is. */
+        /** Finalized track points backing the continuous selection. */
         val track: List<CanonicalPoint>,
-        val startIndex: Int,
-        val endIndex: Int,
+        val startPosition: Double,
+        val endPosition: Double,
         val name: String,
         /** Rust-derived preview of the current selection, or its rejection. */
         val preview: SelectionPreview,
@@ -57,11 +57,9 @@ enum class SelectionHandle { START, FINISH }
 /**
  * Authoring one segment from one ride.
  *
- * The selection is expressed as two indexes into the ride's finalized track,
- * never as free map coordinates: an index is unambiguous, always lies on the
- * recorded line and cannot silently pick a point from a different pass. Every
- * geometry judgement — length, drop, gate width, corridor and whether the
- * selection is legal at all — comes from Rust `build_segment`, so the preview
+ * A selection position may lie anywhere on an edge of the finalized track.
+ * It is not a free map coordinate, so it cannot silently jump to a different
+ * pass. Rust owns interpolation and every geometry judgement, so the preview
  * shown here is exactly what gets persisted.
  */
 class SegmentEditorViewModel(
@@ -97,8 +95,8 @@ class SegmentEditorViewModel(
             val proposal = withContext(Dispatchers.Default) {
                 runCatching { FusionCore.proposeSegment(fusionTrack) }.getOrNull()
             }
-            val start = proposal?.startIndex ?: 0
-            val end = proposal?.endIndex ?: (track.size - 1)
+            val start = proposal?.startIndex?.toDouble() ?: 0.0
+            val end = proposal?.endIndex?.toDouble() ?: track.lastIndex.toDouble()
             val title = repository.recordings.value
                 .firstOrNull { it.id == recordingId }
                 ?.title
@@ -107,10 +105,10 @@ class SegmentEditorViewModel(
             _state.value = SegmentEditorState.Editing(
                 rideTitle = title,
                 track = track,
-                startIndex = start,
-                endIndex = end,
+                startPosition = start,
+                endPosition = end,
                 name = defaultName(title),
-                preview = preview(track, start, end),
+                preview = preview(start, end),
             )
             // The ride entry may be renamed while the editor is open; the
             // selection itself does not depend on it, so nothing else re-runs.
@@ -124,20 +122,21 @@ class SegmentEditorViewModel(
         }
     }
 
-    fun setSelection(startIndex: Int, endIndex: Int) {
+    fun setSelection(startPosition: Double, endPosition: Double) {
         val editing = _state.value as? SegmentEditorState.Editing ?: return
-        val start = startIndex.coerceIn(0, editing.track.lastIndex)
-        val end = endIndex.coerceIn(0, editing.track.lastIndex)
-        if (start == editing.startIndex && end == editing.endIndex) return
+        val lastPosition = editing.track.lastIndex.toDouble()
+        val start = startPosition.coerceIn(0.0, lastPosition)
+        val end = endPosition.coerceIn(0.0, lastPosition)
+        if (start == editing.startPosition && end == editing.endPosition) return
         // The handles follow the drag immediately; the Rust preview of a
         // multi-thousand-point selection is recomputed off the main thread and
         // superseded by the next drag position.
-        _state.value = editing.copy(startIndex = start, endIndex = end)
+        _state.value = editing.copy(startPosition = start, endPosition = end)
         previewJob?.cancel()
         previewJob = viewModelScope.launch {
-            val computed = withContext(Dispatchers.Default) { preview(editing.track, start, end) }
+            val computed = withContext(Dispatchers.Default) { preview(start, end) }
             val current = _state.value as? SegmentEditorState.Editing ?: return@launch
-            if (current.startIndex == start && current.endIndex == end) {
+            if (current.startPosition == start && current.endPosition == end) {
                 _state.value = current.copy(preview = computed)
             }
         }
@@ -158,8 +157,8 @@ class SegmentEditorViewModel(
                 repository.createSegment(
                     recordingId = recordingId,
                     name = editing.name,
-                    startIndex = editing.startIndex,
-                    endIndex = editing.endIndex,
+                    startPosition = editing.startPosition,
+                    endPosition = editing.endPosition,
                 )
             }
             val current = _state.value as? SegmentEditorState.Editing
@@ -174,27 +173,27 @@ class SegmentEditorViewModel(
     }
 
     private fun preview(
-        track: List<CanonicalPoint>,
-        startIndex: Int,
-        endIndex: Int,
+        startPosition: Double,
+        endPosition: Double,
     ): SelectionPreview = runCatching {
-        FusionCore.buildSegment(
+        FusionCore.buildSegmentContinuous(
             id = PREVIEW_ID,
             name = "preview",
             sourceRecordingId = recordingId,
             track = fusionTrack,
-            startIndex = startIndex,
-            endIndex = endIndex,
+            startPosition = startPosition,
+            endPosition = endPosition,
         )
     }.fold(
-        onSuccess = { definition ->
+        onSuccess = { result ->
+            val definition = result.definition
             SelectionPreview.Valid(
                 lengthM = definition.lengthM,
                 ascentM = definition.ascentM,
                 descentM = definition.descentM,
                 gateWidthM = definition.gateHalfWidthM * 2.0,
                 corridorM = definition.corridorM,
-                durationMs = track[endIndex].timestampMs - track[startIndex].timestampMs,
+                durationMs = result.finishedAtMs - result.startedAtMs,
             )
         },
         onFailure = { error ->

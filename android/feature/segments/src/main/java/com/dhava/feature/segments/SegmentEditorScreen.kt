@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +60,8 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.map.SegmentMap
+import com.dhava.core.map.SegmentMapCameraRequest
+import com.dhava.core.map.SegmentMapCameraTarget
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.recording.CanonicalPoint
 import com.dhava.core.ui.DhavaMetric
@@ -72,15 +75,16 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
-import kotlin.math.roundToInt
+import kotlin.math.pow
 
 /**
  * Picks a segment's start and finish along one ride's finalized track.
  *
- * The two handles move along recorded track indexes rather than free map
- * points, and every number below the map is Rust's own judgement of the
- * current selection.
+ * The two handles move continuously along recorded track edges rather than
+ * free map coordinates, and every number below the map is Rust's own
+ * judgement of the current selection.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -160,36 +164,45 @@ private fun SegmentEditorHeader(onBack: () -> Unit) {
 private fun EditorBody(
     state: SegmentEditorState.Editing,
     onBack: () -> Unit,
-    onSelectionChange: (Int, Int) -> Unit,
+    onSelectionChange: (Double, Double) -> Unit,
     onNameChange: (String) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val initialSliderWindow = remember(state.track.size) {
         focusedSliderWindow(
-            startIndex = state.startIndex,
-            endIndex = state.endIndex,
+            startPosition = state.startPosition.toFloat(),
+            endPosition = state.endPosition.toFloat(),
             lastIndex = state.track.lastIndex,
         )
     }
     var sliderWindowStart by rememberSaveable(state.track.size) {
-        mutableStateOf(initialSliderWindow.first)
+        mutableStateOf(initialSliderWindow.start)
     }
     var sliderWindowEnd by rememberSaveable(state.track.size) {
-        mutableStateOf(initialSliderWindow.last)
+        mutableStateOf(initialSliderWindow.endInclusive)
     }
     var focusAfterDrag by remember { mutableStateOf(false) }
+    var activeHandle by remember { mutableStateOf<SelectionHandle?>(null) }
+    var mapZoom by remember { mutableDoubleStateOf(0.0) }
+    var cameraRequest by remember {
+        mutableStateOf(
+            SegmentMapCameraRequest(
+                target = SegmentMapCameraTarget.SEGMENT,
+                token = 0,
+            ),
+        )
+    }
     val sections = remember(state.track) { state.track.toMapSections() }
-    val selection = remember(state.track, state.startIndex, state.endIndex) {
-        state.track
-            .subList(
-                state.startIndex.coerceAtMost(state.endIndex),
-                state.endIndex.coerceAtLeast(state.startIndex) + 1,
-            )
-            .map { SegmentMapPoint(it.lat, it.lon) }
+    val selection = remember(state.track, state.startPosition, state.endPosition) {
+        state.track.toContinuousMapSelection(
+            startPosition = state.startPosition,
+            endPosition = state.endPosition,
+        )
     }
     val valid = state.preview as? SelectionPreview.Valid
-    val fullSliderRange = sliderWindowStart == 0 && sliderWindowEnd == state.track.lastIndex
+    val fullSliderRange =
+        sliderWindowStart == 0f && sliderWindowEnd == state.track.lastIndex.toFloat()
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true,
@@ -199,16 +212,16 @@ private fun EditorBody(
     // Wait until the rider has stopped dragging, then spend the available
     // slider width on the selected interval. Re-keying on the selection makes
     // the delay restart while a handle is still moving.
-    LaunchedEffect(focusAfterDrag, state.startIndex, state.endIndex) {
+    LaunchedEffect(focusAfterDrag, state.startPosition, state.endPosition) {
         if (!focusAfterDrag) return@LaunchedEffect
         delay(SLIDER_FOCUS_DELAY_MS)
         val focused = focusedSliderWindow(
-            startIndex = state.startIndex,
-            endIndex = state.endIndex,
+            startPosition = state.startPosition.toFloat(),
+            endPosition = state.endPosition.toFloat(),
             lastIndex = state.track.lastIndex,
         )
-        sliderWindowStart = focused.first
-        sliderWindowEnd = focused.last
+        sliderWindowStart = focused.start
+        sliderWindowEnd = focused.endInclusive
         focusAfterDrag = false
     }
 
@@ -235,19 +248,28 @@ private fun EditorBody(
                     fullSliderRange = fullSliderRange,
                     sliderWindowStart = sliderWindowStart,
                     sliderWindowEnd = sliderWindowEnd,
+                    mapZoom = mapZoom,
                     onToggleSliderRange = {
                         focusAfterDrag = false
                         if (fullSliderRange) {
                             val focused = focusedSliderWindow(
-                                startIndex = state.startIndex,
-                                endIndex = state.endIndex,
+                                startPosition = state.startPosition.toFloat(),
+                                endPosition = state.endPosition.toFloat(),
                                 lastIndex = state.track.lastIndex,
                             )
-                            sliderWindowStart = focused.first
-                            sliderWindowEnd = focused.last
+                            sliderWindowStart = focused.start
+                            sliderWindowEnd = focused.endInclusive
+                            cameraRequest = SegmentMapCameraRequest(
+                                target = SegmentMapCameraTarget.SEGMENT,
+                                token = cameraRequest.token + 1,
+                            )
                         } else {
-                            sliderWindowStart = 0
-                            sliderWindowEnd = state.track.lastIndex
+                            sliderWindowStart = 0f
+                            sliderWindowEnd = state.track.lastIndex.toFloat()
+                            cameraRequest = SegmentMapCameraRequest(
+                                target = SegmentMapCameraTarget.FULL_RIDE,
+                                token = cameraRequest.token + 1,
+                            )
                         }
                     },
                     onSelectionChange = { start, end ->
@@ -255,6 +277,7 @@ private fun EditorBody(
                         onSelectionChange(start, end)
                     },
                     onSelectionFinished = { focusAfterDrag = true },
+                    onActiveHandleChange = { activeHandle = it },
                 )
                 Column(
                     modifier = Modifier
@@ -281,7 +304,15 @@ private fun EditorBody(
             SegmentMap(
                 sections = sections,
                 segment = selection,
-                focusOnSegment = false,
+                focusOnSegment = true,
+                cameraRequest = cameraRequest,
+                trackedPoint = when (activeHandle) {
+                    SelectionHandle.START -> selection.firstOrNull()
+                    SelectionHandle.FINISH -> selection.lastOrNull()
+                    null -> null
+                },
+                trackingBottomInset = SegmentEditorSheetPeekHeight,
+                onZoomChanged = { mapZoom = it },
                 modifier = Modifier.fillMaxSize(),
             )
             Surface(
@@ -313,48 +344,72 @@ private fun EditorBody(
 private fun SegmentSelectionSlider(
     state: SegmentEditorState.Editing,
     fullSliderRange: Boolean,
-    sliderWindowStart: Int,
-    sliderWindowEnd: Int,
+    sliderWindowStart: Float,
+    sliderWindowEnd: Float,
+    mapZoom: Double,
     onToggleSliderRange: () -> Unit,
-    onSelectionChange: (Int, Int) -> Unit,
+    onSelectionChange: (Double, Double) -> Unit,
     onSelectionFinished: () -> Unit,
+    onActiveHandleChange: (SelectionHandle?) -> Unit,
 ) {
     val startInteractionSource = remember { MutableInteractionSource() }
     val finishInteractionSource = remember { MutableInteractionSource() }
     val haptic = LocalHapticFeedback.current
     var precisionHandle by remember { mutableStateOf<SelectionHandle?>(null) }
-    var precisionLastRawValue by remember { mutableStateOf<Float?>(null) }
-    var precisionValue by remember { mutableFloatStateOf(0f) }
+    var engagedHandle by remember { mutableStateOf<SelectionHandle?>(null) }
+    var scaledHandle by remember { mutableStateOf<SelectionHandle?>(null) }
+    var scaledLastRawValue by remember { mutableStateOf<Float?>(null) }
+    var scaledValue by remember { mutableFloatStateOf(0f) }
+    var scaledSensitivity by remember { mutableFloatStateOf(1f) }
+    val mapSensitivity = dragSensitivityForMapZoom(mapZoom)
 
     PrecisionInteractionEffect(
         interactionSource = startInteractionSource,
         handle = SelectionHandle.START,
+        onHandleEngaged = {
+            engagedHandle = it
+            onActiveHandleChange(it)
+        },
+        onHandleReleased = {
+            if (engagedHandle == it) engagedHandle = null
+            onActiveHandleChange(null)
+        },
         onPrecisionStarted = { handle ->
             precisionHandle = handle
-            precisionLastRawValue = null
-            precisionValue = state.startIndex.toFloat()
+            scaledHandle = null
+            scaledLastRawValue = null
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         },
         onPrecisionEnded = {
             if (precisionHandle == SelectionHandle.START) {
                 precisionHandle = null
-                precisionLastRawValue = null
+                scaledHandle = null
+                scaledLastRawValue = null
             }
         },
     )
     PrecisionInteractionEffect(
         interactionSource = finishInteractionSource,
         handle = SelectionHandle.FINISH,
+        onHandleEngaged = {
+            engagedHandle = it
+            onActiveHandleChange(it)
+        },
+        onHandleReleased = {
+            if (engagedHandle == it) engagedHandle = null
+            onActiveHandleChange(null)
+        },
         onPrecisionStarted = { handle ->
             precisionHandle = handle
-            precisionLastRawValue = null
-            precisionValue = state.endIndex.toFloat()
+            scaledHandle = null
+            scaledLastRawValue = null
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         },
         onPrecisionEnded = {
             if (precisionHandle == SelectionHandle.FINISH) {
                 precisionHandle = null
-                precisionLastRawValue = null
+                scaledHandle = null
+                scaledLastRawValue = null
             }
         },
     )
@@ -388,52 +443,73 @@ private fun SegmentSelectionSlider(
             }
         }
         RangeSlider(
-            value = state.startIndex.toFloat()..state.endIndex.toFloat(),
+            value = state.startPosition.toFloat()..state.endPosition.toFloat(),
             onValueChange = { range ->
                 val inferredHandle = if (
-                    abs(range.start - state.startIndex) >=
-                    abs(range.endInclusive - state.endIndex)
+                    abs(range.start - state.startPosition) >=
+                    abs(range.endInclusive - state.endPosition)
                 ) {
                     SelectionHandle.START
                 } else {
                     SelectionHandle.FINISH
                 }
-                val handle = precisionHandle ?: inferredHandle
+                val handle = precisionHandle ?: engagedHandle ?: inferredHandle
                 val precise = precisionHandle == handle
+                val sensitivity = mapSensitivity * if (precise) {
+                    PRECISION_SENSITIVITY
+                } else {
+                    1f
+                }
                 val proposedValue = when (handle) {
                     SelectionHandle.START -> range.start
                     SelectionHandle.FINISH -> range.endInclusive
                 }
-                if (precise && precisionLastRawValue == null) {
-                    precisionLastRawValue = proposedValue
-                    return@RangeSlider
-                }
-                if (precise) {
-                    precisionValue = scaledPrecisionValue(
-                        currentValue = precisionValue,
+                val selectedValue = if (sensitivity < 0.999f) {
+                    if (
+                        scaledHandle != handle ||
+                        scaledLastRawValue == null ||
+                        abs(scaledSensitivity - sensitivity) > 0.001f
+                    ) {
+                        scaledHandle = handle
+                        scaledLastRawValue = proposedValue
+                        scaledSensitivity = sensitivity
+                        scaledValue = when (handle) {
+                            SelectionHandle.START -> state.startPosition.toFloat()
+                            SelectionHandle.FINISH -> state.endPosition.toFloat()
+                        }
+                        return@RangeSlider
+                    }
+                    scaledValue = scaledMovementValue(
+                        currentValue = scaledValue,
                         proposedValue = proposedValue,
-                        previousProposedValue = checkNotNull(precisionLastRawValue),
+                        previousProposedValue = checkNotNull(scaledLastRawValue),
+                        sensitivity = sensitivity,
                     )
-                    precisionLastRawValue = proposedValue
+                    scaledLastRawValue = proposedValue
+                    scaledValue
+                } else {
+                    scaledHandle = null
+                    scaledLastRawValue = null
+                    proposedValue
                 }
                 val start = when (handle) {
-                    SelectionHandle.START -> (
-                        if (precise) precisionValue else range.start
-                        ).roundToInt()
-                        .coerceIn(sliderWindowStart, state.endIndex - 1)
-                    SelectionHandle.FINISH -> state.startIndex
+                    SelectionHandle.START -> selectedValue.coerceIn(
+                            sliderWindowStart,
+                            (state.endPosition - MIN_SELECTION_POSITION_GAP).toFloat(),
+                        ).toDouble()
+                    SelectionHandle.FINISH -> state.startPosition
                 }
                 val end = when (handle) {
-                    SelectionHandle.START -> state.endIndex
-                    SelectionHandle.FINISH -> (
-                        if (precise) precisionValue else range.endInclusive
-                        ).roundToInt()
-                        .coerceIn(state.startIndex + 1, sliderWindowEnd)
+                    SelectionHandle.START -> state.endPosition
+                    SelectionHandle.FINISH -> selectedValue.coerceIn(
+                            (state.startPosition + MIN_SELECTION_POSITION_GAP).toFloat(),
+                            sliderWindowEnd,
+                        ).toDouble()
                 }
                 onSelectionChange(start, end)
             },
             onValueChangeFinished = onSelectionFinished,
-            valueRange = sliderWindowStart.toFloat()..sliderWindowEnd.toFloat(),
+            valueRange = sliderWindowStart..sliderWindowEnd,
             startInteractionSource = startInteractionSource,
             endInteractionSource = finishInteractionSource,
             startThumb = {
@@ -451,7 +527,10 @@ private fun SegmentSelectionSlider(
         )
         Text(
             text = when {
+                precisionHandle != null && mapSensitivity < 0.999f ->
+                    "Precision · 10× + map zoom"
                 precisionHandle != null -> "Precision · 10× slower"
+                mapSensitivity < 0.999f -> "Map zoom · finer movement"
                 fullSliderRange -> "Hold a handle for precision"
                 else -> "Focused · hold a handle for precision"
             },
@@ -497,9 +576,13 @@ private fun PrecisionSliderThumb(
 private fun PrecisionInteractionEffect(
     interactionSource: MutableInteractionSource,
     handle: SelectionHandle,
+    onHandleEngaged: (SelectionHandle) -> Unit,
+    onHandleReleased: (SelectionHandle) -> Unit,
     onPrecisionStarted: (SelectionHandle) -> Unit,
     onPrecisionEnded: (SelectionHandle) -> Unit,
 ) {
+    val currentOnHandleEngaged by rememberUpdatedState(onHandleEngaged)
+    val currentOnHandleReleased by rememberUpdatedState(onHandleReleased)
     val currentOnPrecisionStarted by rememberUpdatedState(onPrecisionStarted)
     val currentOnPrecisionEnded by rememberUpdatedState(onPrecisionEnded)
 
@@ -508,6 +591,7 @@ private fun PrecisionInteractionEffect(
         var cancelCleanupJob: Job? = null
         var precisionStarted = false
         var dragging = false
+        var engaged = false
         interactionSource.interactions.collect { interaction ->
             when (interaction) {
                 is PressInteraction.Press -> {
@@ -515,6 +599,8 @@ private fun PrecisionInteractionEffect(
                     cancelCleanupJob?.cancel()
                     precisionStarted = false
                     dragging = false
+                    engaged = true
+                    currentOnHandleEngaged(handle)
                     holdJob = launch {
                         delay(PRECISION_HOLD_DELAY_MS)
                         precisionStarted = true
@@ -534,12 +620,16 @@ private fun PrecisionInteractionEffect(
                         currentOnPrecisionEnded(handle)
                         precisionStarted = false
                     }
+                    if (engaged) {
+                        currentOnHandleReleased(handle)
+                        engaged = false
+                    }
                     dragging = false
                 }
 
                 is PressInteraction.Cancel -> {
                     holdJob?.cancel()
-                    if (precisionStarted && !dragging) {
+                    if (!dragging) {
                         cancelCleanupJob?.cancel()
                         cancelCleanupJob = launch {
                             // RangeSlider cancels the press immediately before
@@ -550,6 +640,10 @@ private fun PrecisionInteractionEffect(
                             if (!dragging && precisionStarted) {
                                 currentOnPrecisionEnded(handle)
                                 precisionStarted = false
+                            }
+                            if (!dragging && engaged) {
+                                currentOnHandleReleased(handle)
+                                engaged = false
                             }
                         }
                     }
@@ -562,6 +656,10 @@ private fun PrecisionInteractionEffect(
                     if (precisionStarted) {
                         currentOnPrecisionEnded(handle)
                         precisionStarted = false
+                    }
+                    if (engaged) {
+                        currentOnHandleReleased(handle)
+                        engaged = false
                     }
                 }
             }
@@ -673,38 +771,90 @@ private fun List<CanonicalPoint>.toMapSections(): List<List<SegmentMapPoint>> {
 
 private const val MAX_SECTION_GAP_MS = 3_000L
 private const val SLIDER_FOCUS_DELAY_MS = 800L
-private const val SLIDER_FOCUS_PADDING_FRACTION = 0.08
+private const val SLIDER_FOCUS_PADDING_FRACTION = 0.08f
 private const val MIN_SLIDER_FOCUS_PADDING_POINTS = 10
 private const val PRECISION_HOLD_DELAY_MS = 700L
 private const val PRECISION_DRAG_HANDOFF_MS = 80L
 private const val PRECISION_SENSITIVITY = 0.1f
-private val SegmentEditorSheetPeekHeight = 176.dp
+private const val MAP_FINE_ADJUST_ZOOM = 16.0
+private const val MIN_MAP_DRAG_SENSITIVITY = 0.05f
+private const val MIN_SELECTION_POSITION_GAP = 0.001
+private val SegmentEditorSheetPeekHeight = 152.dp
 
 /**
  * Gives the selected interval almost the full slider width while retaining a
- * small grab area beyond each handle. The unit stays a canonical track index;
- * at 5 Hz this provides roughly point-level touch precision independently of
- * the length of the full recording.
+ * small grab area beyond each handle. Values are continuous positions along
+ * canonical edges, so focusing changes touch sensitivity without quantizing
+ * the authored gate.
  */
 internal fun focusedSliderWindow(
-    startIndex: Int,
-    endIndex: Int,
+    startPosition: Float,
+    endPosition: Float,
     lastIndex: Int,
-): IntRange {
-    if (lastIndex <= 0) return 0..0
-    val start = startIndex.coerceIn(0, lastIndex)
-    val end = endIndex.coerceIn(start, lastIndex)
-    val span = (end - start).coerceAtLeast(1)
+): ClosedFloatingPointRange<Float> {
+    if (lastIndex <= 0) return 0f..0f
+    val start = startPosition.coerceIn(0f, lastIndex.toFloat())
+    val end = endPosition.coerceIn(start, lastIndex.toFloat())
+    val span = (end - start).coerceAtLeast(1f)
     val padding = max(
-        MIN_SLIDER_FOCUS_PADDING_POINTS,
-        ceil(span * SLIDER_FOCUS_PADDING_FRACTION).toInt(),
+        MIN_SLIDER_FOCUS_PADDING_POINTS.toFloat(),
+        ceil((span * SLIDER_FOCUS_PADDING_FRACTION).toDouble()).toFloat(),
     )
-    return (start - padding).coerceAtLeast(0)..(end + padding).coerceAtMost(lastIndex)
+    return (start - padding).coerceAtLeast(0f)..
+        (end + padding).coerceAtMost(lastIndex.toFloat())
 }
 
-/** Scales finger movement without changing the handle's value when precision begins. */
-internal fun scaledPrecisionValue(
+/** Scales finger movement without changing the handle's value when scaling begins. */
+internal fun scaledMovementValue(
     currentValue: Float,
     proposedValue: Float,
     previousProposedValue: Float,
-): Float = currentValue + (proposedValue - previousProposedValue) * PRECISION_SENSITIVITY
+    sensitivity: Float,
+): Float = currentValue + (proposedValue - previousProposedValue) * sensitivity
+
+/** Manual map zoom progressively lowers gate movement, while remaining continuous. */
+internal fun dragSensitivityForMapZoom(zoom: Double): Float {
+    if (!zoom.isFinite() || zoom <= MAP_FINE_ADJUST_ZOOM) return 1f
+    return 2.0.pow(MAP_FINE_ADJUST_ZOOM - zoom)
+        .toFloat()
+        .coerceIn(MIN_MAP_DRAG_SENSITIVITY, 1f)
+}
+
+/**
+ * Immediate display geometry for a continuous selection. Rust independently
+ * owns and validates the persisted geometry; this only keeps the marker under
+ * the rider's finger while the asynchronous preview is being rebuilt.
+ */
+internal fun List<CanonicalPoint>.toContinuousMapSelection(
+    startPosition: Double,
+    endPosition: Double,
+): List<SegmentMapPoint> {
+    if (isEmpty()) return emptyList()
+    val lastPosition = lastIndex.toDouble()
+    val start = startPosition.coerceIn(0.0, lastPosition)
+    val end = endPosition.coerceIn(start, lastPosition)
+    val result = ArrayList<SegmentMapPoint>(
+        (ceil(end) - floor(start)).toInt().coerceAtLeast(0) + 2,
+    )
+    result += interpolateMapPoint(start)
+    var index = floor(start).toInt() + 1
+    while (index.toDouble() < end) {
+        result += this[index].toMapPoint()
+        index += 1
+    }
+    result += interpolateMapPoint(end)
+    return result
+}
+
+private fun List<CanonicalPoint>.interpolateMapPoint(position: Double): SegmentMapPoint {
+    val lower = floor(position).toInt().coerceIn(indices)
+    val fraction = position - lower
+    val from = this[lower]
+    val to = getOrNull(lower + 1) ?: from
+    return SegmentMapPoint(
+        lat = from.lat + (to.lat - from.lat) * fraction,
+        lon = from.lon + (to.lon - from.lon) * fraction,
+    )
+}
+
+private fun CanonicalPoint.toMapPoint() = SegmentMapPoint(lat = lat, lon = lon)

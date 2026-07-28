@@ -61,7 +61,9 @@ skeleton and deployment scaffolding.
 - Selection-focused initial scale, reversible full-ride scale and haptic
   hold-to-precision at 10× slower movement, preserving map zoom and pan ✅
 - Continuous gate placement between canonical points, authored in Rust as
-  geometry v2; no fake resolution from merely resampling the same polyline
+  geometry v2; no fake resolution from merely resampling the same polyline ✅
+- Map-aware continuous editing: explicit ride/segment camera fits, zoom-scaled
+  drag sensitivity and edge-only endpoint following ✅
 - Map-led segment editor with an always-visible selection slider and expandable
   details sheet ✅
 - Rust-authored elevation profile with accumulated climb and descent ✅

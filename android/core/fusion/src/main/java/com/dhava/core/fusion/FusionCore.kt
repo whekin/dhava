@@ -5,12 +5,14 @@ import com.dhava.fusion.CanonicalTrackPoint
 import com.dhava.fusion.GeoBounds
 import com.dhava.fusion.RideAnalysis
 import com.dhava.fusion.RecordingReplay
+import com.dhava.fusion.SegmentBuildResult
 import com.dhava.fusion.SegmentDefinition
 import com.dhava.fusion.SegmentMatchResult
 import com.dhava.fusion.SegmentProposal
 import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
 import com.dhava.fusion.buildSegment as ffiBuildSegment
+import com.dhava.fusion.buildSegmentContinuous as ffiBuildSegmentContinuous
 import com.dhava.fusion.finalizeRecording as ffiFinalizeRecording
 import com.dhava.fusion.matchSegment as ffiMatchSegment
 import com.dhava.fusion.proposeSegment as ffiProposeSegment
@@ -94,6 +96,26 @@ object FusionCore {
         endIndex: Int,
     ): SegmentDefinition =
         ffiBuildSegment(id, name, sourceRecordingId, track, startIndex, endIndex)
+
+    /**
+     * Builds geometry v2 with start and finish at continuous positions along
+     * the finalized polyline. Rust owns endpoint and timestamp interpolation.
+     */
+    fun buildSegmentContinuous(
+        id: String,
+        name: String,
+        sourceRecordingId: String,
+        track: List<CanonicalTrackPoint>,
+        startPosition: Double,
+        endPosition: Double,
+    ): SegmentBuildResult = ffiBuildSegmentContinuous(
+        id,
+        name,
+        sourceRecordingId,
+        track,
+        startPosition,
+        endPosition,
+    )
 
     /** Corridor-padded bounds of a segment, for cheap candidate prefiltering. */
     fun segmentSearchBounds(definition: SegmentDefinition): GeoBounds? =

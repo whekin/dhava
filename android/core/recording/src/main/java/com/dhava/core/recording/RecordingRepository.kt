@@ -193,22 +193,22 @@ class RecordingRepository private constructor(private val appContext: Context) {
     suspend fun createSegment(
         recordingId: String,
         name: String,
-        startIndex: Int,
-        endIndex: Int,
+        startPosition: Double,
+        endPosition: Double,
     ): StoredSegment {
         loaded.await()
         val artifact = canonicalActivity(recordingId)
             ?: error("Canonical artifact unavailable for $recordingId")
         return segmentsMutex.withLock {
             val definition = withContext(Dispatchers.Default) {
-                FusionCore.buildSegment(
+                FusionCore.buildSegmentContinuous(
                     id = UUID.randomUUID().toString(),
                     name = name.trim().ifBlank { "Segment" },
                     sourceRecordingId = recordingId,
                     track = artifact.finalizedTrack.toCanonicalTrack(),
-                    startIndex = startIndex,
-                    endIndex = endIndex,
-                )
+                    startPosition = startPosition,
+                    endPosition = endPosition,
+                ).definition
             }
             val segment = definition.toStored(createdAtMs = System.currentTimeMillis())
             segmentStore.saveSegment(segment)

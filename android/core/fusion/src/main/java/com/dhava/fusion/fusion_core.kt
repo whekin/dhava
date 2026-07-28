@@ -742,6 +742,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -762,6 +764,8 @@ internal interface IntegrityCheckingUniffiLib : Library {
 fun uniffi_fusion_core_checksum_func_analyze_recording(
 ): Short
 fun uniffi_fusion_core_checksum_func_build_segment(
+): Short
+fun uniffi_fusion_core_checksum_func_build_segment_continuous(
 ): Short
 fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
@@ -849,6 +853,8 @@ fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallS
 fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_build_segment(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startIndex`: Int,`endIndex`: Int,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_build_segment_continuous(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -995,6 +1001,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_build_segment() != 33460.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_build_segment_continuous() != 38010.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
@@ -2403,6 +2412,45 @@ public object FfiConverterTypeSegmentAttempt: FfiConverterRustBuffer<SegmentAtte
 
 
 /**
+ * Geometry plus the source-ride time span selected by the editor.
+ */
+data class SegmentBuildResult (
+    var `definition`: SegmentDefinition,
+    var `startedAtMs`: kotlin.Long,
+    var `finishedAtMs`: kotlin.Long
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentBuildResult: FfiConverterRustBuffer<SegmentBuildResult> {
+    override fun read(buf: ByteBuffer): SegmentBuildResult {
+        return SegmentBuildResult(
+            FfiConverterTypeSegmentDefinition.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentBuildResult) = (
+            FfiConverterTypeSegmentDefinition.allocationSize(value.`definition`) +
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`finishedAtMs`)
+    )
+
+    override fun write(value: SegmentBuildResult, buf: ByteBuffer) {
+            FfiConverterTypeSegmentDefinition.write(value.`definition`, buf)
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`finishedAtMs`, buf)
+    }
+}
+
+
+
+/**
  * A directed segment as authored on the device.
  *
  * `centerline` is an ordered start-to-finish polyline. In this draft version
@@ -3598,6 +3646,21 @@ public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<A
     uniffiRustCallWithError(SegmentException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_build_segment(
         FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`sourceRecordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterInt.lower(`startIndex`),FfiConverterInt.lower(`endIndex`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Builds geometry v2 with gates at continuous positions on the finalized
+         * polyline. The integer part identifies a canonical point; the fractional
+         * part lies on the following edge.
+         */
+    @Throws(SegmentException::class) fun `buildSegmentContinuous`(`id`: kotlin.String, `name`: kotlin.String, `sourceRecordingId`: kotlin.String, `track`: List<CanonicalTrackPoint>, `startPosition`: kotlin.Double, `endPosition`: kotlin.Double): SegmentBuildResult {
+            return FfiConverterTypeSegmentBuildResult.lift(
+    uniffiRustCallWithError(SegmentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_build_segment_continuous(
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`sourceRecordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterDouble.lower(`startPosition`),FfiConverterDouble.lower(`endPosition`),_status)
 }
     )
     }

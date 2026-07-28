@@ -1451,3 +1451,39 @@ Segment unit tests, feature lint and the debug app assembly pass. The APK was in
 with data preservation on the physical OnePlus. Initial selected range, full ride,
 return to selected range and the haptic-triggered `Precision · 10× slower` state were
 all exercised without saving a segment.
+
+## 2026-07-29 — Continuous geometry v2 and map-aware gate editing
+
+Segment endpoints are no longer quantized to canonical 5 Hz indexes. Rust now exports
+`build_segment_continuous`: each selector is an edge index plus a fractional position,
+and Rust interpolates its coordinate, timestamp, optional sensor fields and endpoint
+elevation before building the definition. New drafts are geometry v2; the existing
+integer builder and stored geometry v1 remain readable and matchable. Fractional
+positions across a pause or recording gap are rejected. Two Rust tests cover exact
+coordinate/time interpolation and pause-edge rejection.
+
+The Compose range slider now retains floating-point positions throughout the gesture.
+Its immediate marker preview interpolates only the display coordinate; Rust remains
+authoritative for persisted geometry, metrics and timing. At map zoom 16 or below,
+movement is unchanged. Above 16, sensitivity halves for every zoom level down to a 5%
+floor; the existing long-hold precision multiplies it by another 10%. This makes a
+manually zoomed road-level view progressively finer without inventing a discrete
+"one point" step.
+
+Camera ownership now follows the editing intent. The range icon fits either every ride
+section or the current segment into the unobscured area above the sheet. While a handle
+is engaged, its endpoint is tracked: a manual zoom is preserved, no camera action
+occurs while the marker remains in the safe viewport, and the map pans at the same zoom
+only when the marker reaches an edge or the sheet. Geometry rendering still never
+bridges manual pause sections in the ride context.
+
+The collapsed sheet shrank from 176 dp to 152 dp, so length, pass time, descent and
+climb no longer peek into the map state; they remain available after expanding.
+
+Rust passes 93 unit tests, two fixture tests, formatting and strict clippy. Android
+segment/recording tests, map and segment lint, and the full debug assembly pass. The
+generated UniFFI Kotlin and both Android native libraries were rebuilt. On the physical
+OnePlus, initial segment fit, full-ride fit, reverse segment fit, high-zoom sensitivity,
+endpoint following with preserved zoom and the clean collapsed sheet were exercised.
+No segment was saved during validation, so the existing ride and authored segment data
+were not changed.

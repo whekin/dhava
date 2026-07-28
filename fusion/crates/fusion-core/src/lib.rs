@@ -42,9 +42,10 @@ pub use recording::{ParsedRecording, RecordingMeta, parse_recording, parse_recor
 
 pub use segment::{
     AttemptFlag, AttemptQuality, AttemptRejection, GeoBounds, RejectedAttempt,
-    SEGMENT_MATCH_VERSION, SegmentAttempt, SegmentDefinition, SegmentElevationPoint, SegmentError,
-    SegmentMatchResult, SegmentProposal, build_segment, match_segment, propose_segment,
-    segment_match_version, segment_search_bounds,
+    SEGMENT_MATCH_VERSION, SegmentAttempt, SegmentBuildResult, SegmentDefinition,
+    SegmentElevationPoint, SegmentError, SegmentMatchResult, SegmentProposal, build_segment,
+    build_segment_continuous, match_segment, propose_segment, segment_match_version,
+    segment_search_bounds,
 };
 
 /// Errors surfaced across the FFI boundary (Kotlin exceptions).
