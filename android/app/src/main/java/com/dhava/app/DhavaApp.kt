@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +47,7 @@ private enum class DhavaDestination(
 
 /** App scaffold: bottom navigation bar plus the navigation host. */
 @Composable
-fun DhavaApp() {
+fun DhavaApp(openRecorderRequest: Long = 0L) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
@@ -55,6 +56,15 @@ fun DhavaApp() {
         currentDestination?.hierarchy?.any { it.route == destination.route } == true
     }
     val showBottomBar = isTopLevelDestination && !recordImmersive
+
+    LaunchedEffect(openRecorderRequest) {
+        if (openRecorderRequest > 0L) {
+            navController.navigate(DhavaDestination.Record.route) {
+                popUpTo(navController.graph.findStartDestination().id)
+                launchSingleTop = true
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {

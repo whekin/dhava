@@ -31,7 +31,6 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.dhava.fusion.LiveFusion
-import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,9 +63,13 @@ class RecordingService : Service() {
         private const val ACTION_PAUSE = "com.dhava.core.recording.action.PAUSE"
         private const val ACTION_RESUME = "com.dhava.core.recording.action.RESUME"
         private const val ACTION_CONTINUE = "com.dhava.core.recording.action.CONTINUE"
+        const val ACTION_OPEN_RECORDING = "com.dhava.core.recording.action.OPEN_RECORDING"
         private const val EXTRA_RECORDING_ID = "recording_id"
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1
+        private const val CONTENT_REQUEST_CODE = 10
+        private const val PAUSE_REQUEST_CODE = 11
+        private const val RESUME_REQUEST_CODE = 12
 
         private const val GPS_INTERVAL_MS = 1_000L
         private const val GPS_MIN_INTERVAL_MS = 500L
@@ -177,6 +180,7 @@ class RecordingService : Service() {
     private var warmGpsReady = false
     private var pausedAtElapsedMs = 0L
     private var totalPausedMs = 0L
+    @Volatile private var recoveredAtElapsedMs = Long.MIN_VALUE
 
     override fun onCreate() {
         super.onCreate()
@@ -223,6 +227,7 @@ class RecordingService : Service() {
             stopSelf()
             return
         }
+        recoveredAtElapsedMs = Long.MIN_VALUE
         preparing = true
         // Foreground ASAP: startForegroundService() gives a short grace
         // window, and an early promotion narrows the window in which an
@@ -321,6 +326,7 @@ class RecordingService : Service() {
             writer?.write(RecordLine.Event(target.endedAtMs, "pause"))
             writer?.write(RecordLine.Event(resumedAtMs, "resume"))
 
+            recoveredAtElapsedMs = SystemClock.elapsedRealtime()
             startCapture()
             lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
             enqueueHealth(
@@ -444,6 +450,7 @@ class RecordingService : Service() {
         paused = true
         pausedAtElapsedMs = SystemClock.elapsedRealtime()
         lastSpeedMps = 0f
+        updateNotification(currentSessionElapsedMs())
     }
 
     private fun resumeRecording() {
@@ -452,6 +459,7 @@ class RecordingService : Service() {
         totalPausedMs += SystemClock.elapsedRealtime() - pausedAtElapsedMs
         paused = false
         lastSpeedMps = null
+        updateNotification(currentSessionElapsedMs())
     }
 
     override fun onDestroy() {
@@ -738,7 +746,7 @@ class RecordingService : Service() {
                 val second = elapsedMs / 1_000
                 if (second != lastNotifiedSecond) {
                     lastNotifiedSecond = second
-                    notificationManager.notify(NOTIFICATION_ID, buildNotification(elapsedMs))
+                    updateNotification(elapsedMs)
                 }
                 if (now - lastHealthHeartbeatElapsedMs >= HEALTH_HEARTBEAT_INTERVAL_MS) {
                     lastHealthHeartbeatElapsedMs = now
@@ -763,36 +771,63 @@ class RecordingService : Service() {
     }
 
     private fun buildNotification(elapsedMs: Long): Notification {
-        val contentIntent = packageManager.getLaunchIntentForPackage(packageName)?.let {
+        val recentlyRecovered = isRecoveryNotificationActive(
+            recoveredAtElapsedMs = recoveredAtElapsedMs,
+            nowElapsedMs = SystemClock.elapsedRealtime(),
+        )
+        val presentation = recordingNotificationPresentation(
+            elapsedMs = elapsedMs,
+            preparing = preparing,
+            recovering = recovering,
+            paused = paused,
+            recentlyRecovered = recentlyRecovered,
+        )
+        val contentIntent = packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+            launchIntent
+                .setAction(ACTION_OPEN_RECORDING)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             PendingIntent.getActivity(
                 this,
-                0,
-                it,
+                CONTENT_REQUEST_CODE,
+                launchIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_recording)
-            .setContentTitle(
-                if (paused) "Ride paused — ${formatElapsed(elapsedMs)}"
-                else "Recording ride — ${formatElapsed(elapsedMs)}",
-            )
-            .setContentText(if (paused) "Open Dhava to resume or finish" else "GPS and motion capture active")
+            .setContentTitle(presentation.title)
+            .setContentText(presentation.text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
-            .build()
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        when (presentation.action) {
+            RecordingNotificationAction.Pause -> builder.addAction(
+                R.drawable.ic_notification_pause,
+                "Pause",
+                serviceActionPendingIntent(ACTION_PAUSE, PAUSE_REQUEST_CODE),
+            )
+            RecordingNotificationAction.Resume -> builder.addAction(
+                R.drawable.ic_notification_resume,
+                "Resume",
+                serviceActionPendingIntent(ACTION_RESUME, RESUME_REQUEST_CODE),
+            )
+            null -> Unit
+        }
+        return builder.build()
     }
 
-    private fun formatElapsed(elapsedMs: Long): String {
-        val totalSeconds = elapsedMs / 1_000
-        return String.format(
-            Locale.US,
-            "%02d:%02d:%02d",
-            totalSeconds / 3_600,
-            (totalSeconds % 3_600) / 60,
-            totalSeconds % 60,
+    private fun serviceActionPendingIntent(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(
+            this,
+            requestCode,
+            Intent(this, RecordingService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+
+    private fun updateNotification(elapsedMs: Long) {
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(elapsedMs))
     }
 }

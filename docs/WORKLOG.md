@@ -1164,3 +1164,26 @@ standard rather than modal sheets, compact identity/action peeks, pinned headers
 bounded nested scrolling, preserved map gestures and explicit device verification.
 Its metadata remains current and the frontmatter passed an equivalent local YAML check;
 the bundled Python validator itself could not run because the host Python lacks PyYAML.
+
+## 2026-07-28 — Actionable recording notification and recovery feedback
+
+The foreground recording notification now reflects the real recorder state and elapsed
+ride time. Active recordings expose Pause, paused recordings expose Resume, and unsafe
+Finish remains inside the app. Tapping the notification always opens the current Record
+screen, including when the existing singleTop activity was showing another route.
+Preparing, restoring and the first 30 seconds after a successful process recovery have
+explicit messages, so users can distinguish sensor warm-up from a recovered ride whose
+raw data remained safe.
+
+Notification presentation is a pure tested state model. This work also fixed a latent
+paused-state refresh bug: the old ticker only refreshed when elapsed time changed, but
+elapsed time intentionally freezes while paused, so the notification could remain
+visually active. Pause and Resume now publish their state immediately.
+
+Recording unit tests, app debug lint and the full debug assembly pass. The APK was
+installed and exercised on the physical OnePlus through active, pause, resume, process
+SIGKILL, sticky service recovery, notification-to-Record navigation and normal
+finish/discard. The post-kill notification reported `Ride restored`, elapsed time
+continued, and the generated test recording was discarded through the regular UI.
+The service and active notification were gone afterward; existing user rides were not
+modified.
