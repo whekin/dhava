@@ -1126,3 +1126,17 @@ unreachable until rebuilt with that deployed HTTPS base URL.
 An attached-device integration test can happen before deployment by using Strava's
 whitelisted `127.0.0.1` callback plus `adb reverse tcp:8080 tcp:8080`; the README
 documents the exact local origin and Gradle override.
+
+## 2026-07-28 — Strava export moved into the secondary export menu
+
+The inactive Strava integration no longer occupies a full-width primary-action row on
+every Activity Detail card. Its complete state machine now lives inside the existing
+Share menu alongside processed/raw GPX and diagnostic artifacts: connect, export,
+queued/processing, retry after failure and open the uploaded activity. This keeps the
+map-led activity summary compact while retaining the implementation for later backend
+deployment and Strava app registration.
+
+Activity unit tests and the full debug assembly pass. The APK was installed on the
+physical 1080 × 2412 OnePlus. Both the compact Activity Detail card and expanded Share
+menu were visually checked; the current unavailable backend message is readable and no
+export action or user ride mutation was triggered.
