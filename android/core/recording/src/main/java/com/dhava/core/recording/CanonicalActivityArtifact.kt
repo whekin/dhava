@@ -1,6 +1,7 @@
 package com.dhava.core.recording
 
 import com.dhava.fusion.AirtimeWindow
+import com.dhava.fusion.ActivityState
 import com.dhava.fusion.CanonicalActivity
 import com.dhava.fusion.DiagnosticTrackPoint
 import com.dhava.fusion.ElevationSource
@@ -37,6 +38,16 @@ data class CanonicalActivityArtifact(
 @Serializable
 enum class CanonicalElevationSource { BAROMETRIC, GPS_INTERPOLATED, NONE }
 
+/** Persisted mirror of Rust's conservative post-ride activity classifier. */
+@Serializable
+enum class CanonicalActivityState {
+    UNKNOWN,
+    STILL,
+    DOWNHILL,
+    TRANSIT,
+    LIKELY_MOTORIZED,
+}
+
 /** Mirror of Rust's `QualitySummary`; heuristic v0, for UI display only. */
 @Serializable
 data class CanonicalQuality(
@@ -61,6 +72,8 @@ data class CanonicalPoint(
     val speedMps: Double? = null,
     val stationary: Boolean? = null,
     val sectionId: Int,
+    val activityState: CanonicalActivityState = CanonicalActivityState.UNKNOWN,
+    val activityConfidence: Double = 0.0,
 )
 
 @Serializable
@@ -119,6 +132,8 @@ internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
                 speedMps = point.speedMps,
                 stationary = point.stationary,
                 sectionId = point.sectionId,
+                activityState = point.activityState.toCanonicalActivityState(),
+                activityConfidence = point.activityConfidence,
             )
         },
         finalizedTrack = finalizedTrack.map { point ->
@@ -131,10 +146,28 @@ internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
                 speedMps = point.speedMps,
                 stationary = point.stationary,
                 sectionId = point.sectionId,
+                activityState = point.activityState.toCanonicalActivityState(),
+                activityConfidence = point.activityConfidence,
             )
         },
         quality = quality.toCanonicalQuality(),
     )
+
+private fun ActivityState.toCanonicalActivityState(): CanonicalActivityState = when (this) {
+    ActivityState.UNKNOWN -> CanonicalActivityState.UNKNOWN
+    ActivityState.STILL -> CanonicalActivityState.STILL
+    ActivityState.DOWNHILL -> CanonicalActivityState.DOWNHILL
+    ActivityState.TRANSIT -> CanonicalActivityState.TRANSIT
+    ActivityState.LIKELY_MOTORIZED -> CanonicalActivityState.LIKELY_MOTORIZED
+}
+
+private fun CanonicalActivityState.toActivityState(): ActivityState = when (this) {
+    CanonicalActivityState.UNKNOWN -> ActivityState.UNKNOWN
+    CanonicalActivityState.STILL -> ActivityState.STILL
+    CanonicalActivityState.DOWNHILL -> ActivityState.DOWNHILL
+    CanonicalActivityState.TRANSIT -> ActivityState.TRANSIT
+    CanonicalActivityState.LIKELY_MOTORIZED -> ActivityState.LIKELY_MOTORIZED
+}
 
 private fun QualitySummary.toCanonicalQuality(): CanonicalQuality = CanonicalQuality(
     elevationSource = when (elevationSource) {
@@ -211,17 +244,19 @@ fun CanonicalActivityArtifact.toRideAnalysis(): RideAnalysis = RideAnalysis(
 )
 
 fun CanonicalActivityArtifact.toRecordingReplay(): RecordingReplay {
-    fun CanonicalPoint.diagnostic(): DiagnosticTrackPoint = DiagnosticTrackPoint(
+    fun CanonicalPoint.diagnostic(classified: Boolean): DiagnosticTrackPoint = DiagnosticTrackPoint(
         timestampMs = timestampMs,
         lat = lat,
         lon = lon,
         accuracyM = accuracyM,
         stationary = stationary,
         sectionId = sectionId,
+        activityState = activityState.toActivityState().takeIf { classified },
+        activityConfidence = activityConfidence.takeIf { classified },
     )
-    val finalized = finalizedTrack.map { it.diagnostic() }
+    val finalized = finalizedTrack.map { it.diagnostic(classified = true) }
     return RecordingReplay(
-        rawTrack = rawTrack.map { it.diagnostic() },
+        rawTrack = rawTrack.map { it.diagnostic(classified = false) },
         fusedTrack = emptyList(),
         finalizedTrack = finalized,
     )

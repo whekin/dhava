@@ -34,6 +34,8 @@ data class LiveTrackPoint(
     val lat: Double,
     val lon: Double,
     val speedMps: Double,
+    val stationary: Boolean = false,
+    val sectionId: Int = 0,
 )
 
 /** Summary of a just-finished recording. */

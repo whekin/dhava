@@ -219,6 +219,8 @@ fn interpolate_anchors(
                 ),
                 stationary: Some(false),
                 section_id: anchor.section_id,
+                activity_state: None,
+                activity_confidence: None,
             });
             timestamp_ms += OUTPUT_INTERVAL_MS;
         }
@@ -387,6 +389,8 @@ fn to_diagnostic(anchor: Anchor) -> DiagnosticTrackPoint {
         accuracy_m: Some(anchor.accuracy_m),
         stationary: Some(anchor.stationary),
         section_id: anchor.section_id,
+        activity_state: None,
+        activity_confidence: None,
     }
 }
 

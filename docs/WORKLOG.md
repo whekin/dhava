@@ -1187,3 +1187,60 @@ finish/discard. The post-kill notification reported `Ride restored`, elapsed tim
 continued, and the generated test recording was discarded through the regular UI.
 The service and active notification were gone afterward; existing user rides were not
 modified.
+
+## 2026-07-28 — Conservative ride states, semantic maps and adaptive still persistence
+
+Added a Rust-only post-ride `ActivityState` pass over the canonical 5 Hz track.
+Each finalized point now carries `Unknown`, `Still`, `Downhill`, `Transit` or
+tentative `LikelyMotorized` plus confidence; the canonical algorithm advanced to
+`gps-bounded-0.5` and Android's rebuildable artifact schema to v3. Classification
+uses section- and gap-bounded ten-second evidence. Direct Rust stationarity always
+wins, sustained descent produces Downhill, and motorized evidence requires more
+than speed alone (a sustained fast climb or unusually smooth fast IMU motion).
+Short motorized islands under twelve seconds degrade to Transit. States are visual
+diagnostics only: they do not yet alter metrics, exports, auto-pause or segment
+eligibility, and no backend change is required.
+
+Initial labelled-recording checks used temporary copies of three existing OnePlus
+rides without modifying the phone originals. `udzo 1` separated roughly 178 s
+Downhill and 277 s Still; `in bus` found roughly 260 s LikelyMotorized alongside
+Transit/Still; `Kojoring` retained roughly 835 s Downhill and produced no
+LikelyMotorized after the twelve-second guard removed a seven-second false island.
+These are calibration evidence, not golden labels.
+
+Activity Detail keeps GPS/Fusion/Compare but renders the finalized track
+semantically: thick orange Downhill, thinner secondary Transit, cyan dashed
+`Transport?`, muted dotted Unknown and one duration-scaled ring per Still run.
+Fusion sample dots inherit the state color at close zoom, while raw accuracy dots
+remain visible above fusion in Compare and stop rings remain legible above their
+stationary cloud. A compact legend explains both color and pattern. Camera bounds
+use finalized geometry in Compare and accepted `<=20 m` fixes in GPS mode. All
+geometry splits at manual pause sections and gaps over three seconds; state changes
+share exactly one boundary vertex so colored lines have no holes. The live recorder
+honestly shows only Moving/Still, adds aggregated stop rings and starts a new
+unconnected section after Resume.
+
+To reduce long-stop writer pressure without weakening live evidence, sensor
+acquisition remains 200 Hz, Rust live fusion remains 50 Hz and GPS remains
+high-accuracy at approximately 1 Hz, while only persisted stationary IMU is reduced
+to a replay-safe 20 Hz. A process-local two-second full-rate pre-roll flushes before
+motion, Pause and Finish. Epoch-aligned buckets plus a low-density guard prevent
+sensor jitter from aliasing a near-20 Hz source below Rust's 12-sample/700 ms
+stationary requirement. The bounded trade-off is explicit: a hard kill while Still
+can lose that final two-second in-memory stationary window in addition to the
+writer's normal tail.
+
+The delayed pre-roll exposed and fixed two recovery/consistency bugs. Recovery now
+uses true minimum/maximum timestamps rather than physical gzip row order, so a late
+older IMU row cannot move the resumable end time backward. Manual Resume now resets
+IMU timing, orientation/motion windows and GPS motion hold before the first resumed
+sample in both Android live capture and timestamp-ordered Rust replay; an event tied
+with IMU/GPS wins the tie, and the next GPS still authoritatively reseats horizontal
+state.
+
+Rust passes 74 unit tests, two fixtures, formatting and strict clippy. Android's 57
+recording tests pass, Activity Detail unit tests and lint pass, and the live-map
+module compiles. The combined all-module Gradle command and final OnePlus install
+could not be repeated after the host's Codex execution/approval quota was exhausted;
+this is an environment limitation rather than a failing check. A physical
+long-stationary/long-ride validation of the adaptive persistence policy remains open.

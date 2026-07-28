@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::activity::{ActivityState, classify_activity};
 use crate::analysis::{ALGORITHM_VERSION, RideAnalysis, analyze};
 use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::replay::{DiagnosticTrackPoint, replay_parsed};
@@ -34,6 +35,10 @@ pub struct CanonicalTrackPoint {
     pub stationary: Option<bool>,
     /// Continuous recording section; changes at each manual pause.
     pub section_id: i32,
+    /// Conservative post-ride interpretation of this point.
+    pub activity_state: ActivityState,
+    /// Confidence in `activity_state`, in `[0, 1]`.
+    pub activity_confidence: f64,
 }
 
 /// Complete derived activity. Safe to delete and rebuild from the raw file.
@@ -118,13 +123,16 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
                 .filter(|value| value.is_finite()),
             stationary: None,
             section_id: replay_point.section_id,
+            // Raw GPS is immutable evidence, not a classified artifact.
+            activity_state: ActivityState::Unknown,
+            activity_confidence: 0.0,
         })
         .collect();
 
     let vertical = finalized_altitudes(&raw_track, &recording.baro, &replay.finalized_track);
     let quality = quality_summary(&raw_track, recording.baro.len(), &vertical);
     let speeds = finalized_speeds(&raw_track, &replay.finalized_track);
-    let finalized_track: Vec<_> = replay
+    let mut finalized_track: Vec<_> = replay
         .finalized_track
         .iter()
         .zip(vertical.altitudes.into_iter().zip(speeds))
@@ -137,8 +145,15 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
             speed_mps,
             stationary: point.stationary,
             section_id: point.section_id,
+            activity_state: point.activity_state.unwrap_or(ActivityState::Unknown),
+            activity_confidence: point.activity_confidence.unwrap_or(0.0),
         })
         .collect();
+    let classifications = classify_activity(&finalized_track, &recording.imu);
+    for (point, classification) in finalized_track.iter_mut().zip(classifications) {
+        point.activity_state = classification.state;
+        point.activity_confidence = classification.confidence;
+    }
 
     (analysis.ascent_m, analysis.descent_m) = match vertical.source {
         ElevationSource::Barometric => ascent_descent(&finalized_track),
@@ -591,6 +606,9 @@ mod tests {
         assert!((midpoint.altitude_m.unwrap() - 94.0).abs() < 0.01);
         assert_eq!(canonical.algorithm_version, ALGORITHM_VERSION);
         assert_eq!(canonical.raw_track.len(), 2);
+        assert!(canonical.raw_track.iter().all(|point| {
+            point.activity_state == ActivityState::Unknown && point.activity_confidence == 0.0
+        }));
 
         let quality = &canonical.quality;
         assert_eq!(quality.elevation_source, ElevationSource::GpsInterpolated);

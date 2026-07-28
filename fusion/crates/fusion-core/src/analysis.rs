@@ -1,6 +1,6 @@
 //! On-device ride analysis: the first real analysis API exposed to Android.
 //!
-//! # Algorithm status: `gps-bounded-0.4`
+//! # Algorithm status: `gps-bounded-0.5`
 //!
 //! Everything in this module is a deliberately NAIVE, GPS-first v0 baseline,
 //! to be replaced by proper GPS+IMU+baro Kalman fusion. Every result is
@@ -37,7 +37,7 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.4";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.5";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;

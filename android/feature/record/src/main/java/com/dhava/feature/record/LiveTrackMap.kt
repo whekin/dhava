@@ -49,7 +49,9 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.geojson.LineString
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import org.maplibre.geojson.Polygon
 
@@ -58,6 +60,7 @@ private const val PREVIEW_INTERVAL_MS = 1_000L
 private const val PREVIEW_MIN_INTERVAL_MS = 500L
 private const val RECENT_CACHED_FIX_MS = 10 * 60 * 1_000L
 private const val FOLLOW_ZOOM = 16.8
+private const val MAX_CONTINUOUS_TRACK_GAP_MS = 3_000L
 
 private const val ACCURACY_SOURCE = "live-accuracy-source"
 private const val ACCURACY_FILL_LAYER = "live-accuracy-fill-layer"
@@ -65,6 +68,9 @@ private const val ACCURACY_LINE_LAYER = "live-accuracy-line-layer"
 private const val TRACK_SOURCE = "live-track-source"
 private const val TRACK_CASING_LAYER = "live-track-casing-layer"
 private const val TRACK_LAYER = "live-track-layer"
+private const val STOP_SOURCE = "live-stop-source"
+private const val STOP_HALO_LAYER = "live-stop-halo-layer"
+private const val STOP_LAYER = "live-stop-layer"
 private const val POSITION_SOURCE = "live-position-source"
 private const val POSITION_HALO_LAYER = "live-position-halo-layer"
 private const val POSITION_LAYER = "live-position-layer"
@@ -199,6 +205,23 @@ internal fun LiveTrackMap(
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ),
                 )
+                style.addSource(GeoJsonSource(STOP_SOURCE))
+                style.addLayer(
+                    CircleLayer(STOP_HALO_LAYER, STOP_SOURCE).withProperties(
+                        PropertyFactory.circleColor(palette.roadCasing),
+                        PropertyFactory.circleRadius(9.5f),
+                        PropertyFactory.circleOpacity(0.94f),
+                    ),
+                )
+                style.addLayer(
+                    CircleLayer(STOP_LAYER, STOP_SOURCE).withProperties(
+                        PropertyFactory.circleColor(palette.label),
+                        PropertyFactory.circleRadius(5f),
+                        PropertyFactory.circleOpacity(0.9f),
+                        PropertyFactory.circleStrokeColor(palette.roadCasing),
+                        PropertyFactory.circleStrokeWidth(2f),
+                    ),
+                )
                 style.addSource(GeoJsonSource(POSITION_SOURCE))
                 style.addLayer(
                     CircleLayer(POSITION_HALO_LAYER, POSITION_SOURCE).withProperties(
@@ -272,11 +295,14 @@ private fun Location.ageMs(): Long =
 
 private fun updateMapContent(style: Style, points: List<LiveTrackPoint>, position: MapPosition?) {
     style.getSourceAs<GeoJsonSource>(TRACK_SOURCE)?.let { source ->
-        if (points.size >= 2) {
-            source.setGeoJson(LineString.fromLngLats(points.map { Point.fromLngLat(it.lon, it.lat) }))
-        } else {
-            source.setGeoJson(EMPTY_FEATURE_COLLECTION)
-        }
+        points.toLiveMultiLineStringOrNull()
+            ?.let(source::setGeoJson)
+            ?: source.setGeoJson(EMPTY_FEATURE_COLLECTION)
+    }
+    style.getSourceAs<GeoJsonSource>(STOP_SOURCE)?.let { source ->
+        points.toLiveStopFeatureCollectionOrNull()
+            ?.let(source::setGeoJson)
+            ?: source.setGeoJson(EMPTY_FEATURE_COLLECTION)
     }
     style.getSourceAs<GeoJsonSource>(POSITION_SOURCE)?.let { source ->
         if (position == null) source.setGeoJson(EMPTY_FEATURE_COLLECTION)
@@ -288,6 +314,65 @@ private fun updateMapContent(style: Style, points: List<LiveTrackPoint>, positio
         else source.setGeoJson(accuracyPolygon(position, accuracy.coerceAtMost(250f).toDouble()))
     }
 }
+
+private fun List<LiveTrackPoint>.toLiveMultiLineStringOrNull(): MultiLineString? {
+    val lines = continuousLiveSections()
+        .filter { it.size >= 2 }
+        .map { section -> section.map { Point.fromLngLat(it.lon, it.lat) } }
+    return lines.takeIf { it.isNotEmpty() }?.let(MultiLineString::fromLngLats)
+}
+
+internal fun List<LiveTrackPoint>.continuousLiveSections(): List<List<LiveTrackPoint>> {
+    if (isEmpty()) return emptyList()
+    val sections = mutableListOf<MutableList<LiveTrackPoint>>()
+    for (point in this) {
+        val previous = sections.lastOrNull()?.lastOrNull()
+        val gapMs = previous?.let { point.timestampMs - it.timestampMs }
+        if (
+            previous == null ||
+            point.sectionId != previous.sectionId ||
+            gapMs == null ||
+            gapMs <= 0L ||
+            gapMs > MAX_CONTINUOUS_TRACK_GAP_MS
+        ) {
+            sections.add(mutableListOf())
+        }
+        sections.last() += point
+    }
+    return sections
+}
+
+internal fun List<LiveTrackPoint>.liveStopPoints(): List<LiveTrackPoint> {
+    val stops = mutableListOf<LiveTrackPoint>()
+    var run = mutableListOf<LiveTrackPoint>()
+    fun finishRun() {
+        if (run.isNotEmpty()) stops += run[run.size / 2]
+        run = mutableListOf()
+    }
+    for (point in this) {
+        val previous = run.lastOrNull()
+        val continuesStop = previous != null &&
+            previous.sectionId == point.sectionId &&
+            point.timestampMs - previous.timestampMs in 1..MAX_CONTINUOUS_TRACK_GAP_MS
+        if (point.stationary && (run.isEmpty() || continuesStop)) {
+            run += point
+        } else {
+            finishRun()
+            if (point.stationary) run += point
+        }
+    }
+    finishRun()
+    return stops
+}
+
+private fun List<LiveTrackPoint>.toLiveStopFeatureCollectionOrNull(): FeatureCollection? =
+    liveStopPoints().takeIf { it.isNotEmpty() }?.let { stops ->
+        FeatureCollection.fromFeatures(
+            stops.map { point ->
+                Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat))
+            },
+        )
+    }
 
 private fun accuracyPolygon(position: MapPosition, radiusM: Double): Polygon {
     val latitudeDegreesPerMeter = 1.0 / 111_320.0

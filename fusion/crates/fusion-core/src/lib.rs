@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
+mod activity;
 pub mod analysis;
 mod bounded;
 pub mod canonical;
@@ -27,6 +28,7 @@ pub mod replay;
 pub use live::{LiveFusion, LiveSnapshot};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
 
+pub use activity::ActivityState;
 pub use canonical::{
     CanonicalActivity, CanonicalTrackPoint, ElevationSource, QualitySummary, finalize_recording,
 };

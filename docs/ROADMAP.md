@@ -45,8 +45,12 @@ skeleton and deployment scaffolding.
 ## Phase 4 — Recorder polish
 
 - Configurable recording fields, optional auto-pause, accidental-touch lock
-- Audio/haptic preferences and actionable recording notification
-- Tested stationary sampling reduction without losing motion onset evidence
+- Actionable recording notification ✅
+- Audio/haptic preferences
+- Rust-only post-ride ActivityState map visualization — implemented locally;
+  labelled field calibration pending
+- Adaptive stationary IMU disk persistence with two-second full-rate pre-roll —
+  implemented locally; long physical-device validation pending
 
 ## Frozen future work
 

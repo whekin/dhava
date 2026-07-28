@@ -71,6 +71,30 @@ class RecordingRecoveryTest {
     }
 
     @Test
+    fun `out of order writer rows use timestamp extrema for recovery boundary`() {
+        val lines = listOf(
+            metaLine,
+            """{"type":"gps","timestamp_ms":1770000003000,"lat":46.5,"lon":7.5}""",
+            """{"type":"baro","timestamp_ms":1770000003050,"pressure_hpa":934.2}""",
+            // Stationary pre-roll is intentionally written after newer
+            // critical rows even though its sensor timestamp is older.
+            """{"type":"imu","timestamp_ms":1770000001000,"accel":[0.0,0.0,9.81],""" +
+                """"gyro":[0.0,0.0,0.0]}""",
+        )
+
+        val (stats, rewritten) = repair(gzip(lines))
+
+        assertEquals(lines, gunzipLines(rewritten))
+        assertEquals(1770000001000L, stats.firstTimestampMs)
+        assertEquals(1770000003050L, stats.lastTimestampMs)
+        assertEquals(
+            "A resumed ride must pause after every already-persisted sample",
+            1770000003050L,
+            stats.endedAtMs,
+        )
+    }
+
+    @Test
     fun `truncated gzip recovers all complete lines and rewrites a valid gzip`() {
         val lines = listOf(metaLine) + sampleLines(1000)
         val full = gzip(lines)

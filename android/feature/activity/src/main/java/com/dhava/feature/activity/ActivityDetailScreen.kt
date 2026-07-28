@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -68,6 +69,7 @@ import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaSpacing
 import com.dhava.core.ui.DhavaStatusPill
 import com.dhava.core.ui.DhavaTheme
+import com.dhava.fusion.ActivityState
 import com.dhava.fusion.RideAnalysis
 import java.time.Instant
 import java.time.ZoneId
@@ -201,7 +203,13 @@ private fun ActivityDetailContent(
     var confirmDelete by remember { mutableStateOf(false) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
     val rawPoints = replay?.rawTrack?.map {
-        MapTrackPoint(it.lat, it.lon, it.sectionId, it.accuracyM)
+        MapTrackPoint(
+            lat = it.lat,
+            lon = it.lon,
+            sectionId = it.sectionId,
+            accuracyM = it.accuracyM,
+            timestampMs = it.timestampMs,
+        )
     }
         ?: (track as? TrackState.Loaded)?.points?.mapIndexed { index, point ->
             // Without Rust replay the pause boundaries are unknown. Keep each
@@ -210,10 +218,22 @@ private fun ActivityDetailContent(
         }.orEmpty()
     val fusedPoints = replay?.finalizedTrack
         ?.ifEmpty { replay.fusedTrack }
-        ?.map { MapTrackPoint(it.lat, it.lon, it.sectionId) }
+        ?.map { point ->
+            MapTrackPoint(
+                lat = point.lat,
+                lon = point.lon,
+                sectionId = point.sectionId,
+                timestampMs = point.timestampMs,
+                activityState = point.activityState
+                    ?: if (point.stationary == true) ActivityState.STILL else null,
+                activityConfidence = point.activityConfidence,
+            )
+        }
         .orEmpty()
     val accuracyColors = rememberGpsAccuracyColors()
     val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
+    val hasActivityStates = fusedPoints.any { it.activityState != null }
+    val effectiveTrackMode = if (fusedPoints.isEmpty()) TrackMode.Gps else trackMode
     val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
@@ -277,7 +297,7 @@ private fun ActivityDetailContent(
                 is TrackState.Loaded -> TrackMap(
                     rawPoints = rawPoints,
                     fusedPoints = fusedPoints,
-                    mode = if (fusedPoints.isEmpty()) TrackMode.Gps else trackMode,
+                    mode = effectiveTrackMode,
                     rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     fusedColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxSize(),
@@ -301,17 +321,35 @@ private fun ActivityDetailContent(
                 )
             }
 
-            if (trackMode != TrackMode.Fusion && hasAccuracy) {
-                GpsAccuracyLegend(
-                    colors = accuracyColors,
+            if (
+                (effectiveTrackMode != TrackMode.Gps && hasActivityStates) ||
+                (effectiveTrackMode != TrackMode.Fusion && hasAccuracy)
+            ) {
+                Column(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(
                             top = if (fusedPoints.isNotEmpty()) 84.dp else DhavaSpacing.medium,
                             end = DhavaSpacing.medium,
                         )
-                        .size(width = 176.dp, height = 72.dp),
-                )
+                        .width(190.dp),
+                    verticalArrangement = Arrangement.spacedBy(DhavaSpacing.small),
+                ) {
+                    if (effectiveTrackMode != TrackMode.Gps && hasActivityStates) {
+                        ActivityStateLegend(
+                            colors = rememberActivityStateColors(),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    if (effectiveTrackMode != TrackMode.Fusion && hasAccuracy) {
+                        GpsAccuracyLegend(
+                            colors = accuracyColors,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 72.dp, max = 72.dp),
+                        )
+                    }
+                }
             }
         }
     }

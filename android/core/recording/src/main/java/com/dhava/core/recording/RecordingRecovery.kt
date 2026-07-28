@@ -30,15 +30,15 @@ internal object RecordingRecovery {
         val lineCount: Int,
         /** `started_at_ms` of the recovered meta line, if any. */
         val metaStartedAtMs: Long? = null,
-        /** `timestamp_ms` of the first recovered sample line. */
+        /** Minimum recovered `timestamp_ms`, independent of physical row order. */
         val firstTimestampMs: Long? = null,
-        /** `timestamp_ms` of the last recovered sample line. */
+        /** Maximum recovered `timestamp_ms`, independent of physical row order. */
         val lastTimestampMs: Long? = null,
     ) {
         /** Best-effort recording start; the meta line wins over the first sample. */
         val startedAtMs: Long? get() = metaStartedAtMs ?: firstTimestampMs
 
-        /** Best-effort recording end: the last sample we still have. */
+        /** Best-effort recording end: the newest sample we still have. */
         val endedAtMs: Long? get() = lastTimestampMs ?: startedAtMs
     }
 
@@ -88,8 +88,13 @@ internal object RecordingRecovery {
                     val line = String(lineBytes, Charsets.UTF_8)
                     val ts = extractLong(line, "timestamp_ms")
                     if (ts != null) {
-                        if (firstTimestampMs == null) firstTimestampMs = ts
-                        lastTimestampMs = ts
+                        // Raw file order is deliberately only best-effort.
+                        // In particular, stationary IMU pre-roll is persisted
+                        // after newer GPS/barometer rows. Recovery boundaries
+                        // must therefore use timestamp extrema, not the first
+                        // and last physical lines in the gzip stream.
+                        firstTimestampMs = firstTimestampMs?.coerceAtMost(ts) ?: ts
+                        lastTimestampMs = lastTimestampMs?.coerceAtLeast(ts) ?: ts
                     } else if (metaStartedAtMs == null) {
                         metaStartedAtMs = extractLong(line, "started_at_ms")
                     }

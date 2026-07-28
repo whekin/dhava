@@ -379,6 +379,14 @@ impl LiveFusion {
             accuracy_m: accuracy,
         })
     }
+
+    /// Starts a new continuous recording section after a manual pause.
+    ///
+    /// The next GPS fix re-seats position and velocity instead of comparing
+    /// against a fix from before the pause.
+    pub fn start_new_section(&self) {
+        self.reset_section_state();
+    }
 }
 
 fn gps_fix_moved_beyond_uncertainty(anchor: HorizontalFix, current: HorizontalFix) -> bool {
@@ -427,11 +435,18 @@ impl Default for LiveFusion {
 impl LiveFusion {
     /// Manual pause/resume starts a new earth-relative section. The next GPS
     /// fix must reseat position instead of being compared with the old section.
-    pub(crate) fn start_new_section(&self) {
+    fn reset_section_state(&self) {
         let mut state = self.state.lock().expect("live fusion mutex poisoned");
+        // Sensors are stopped during a manual pause. No timing, attitude or
+        // motion evidence from before it may be combined with resumed IMU,
+        // even when the pause was shorter than the normal 500 ms gap guard.
+        state.orientation = Mahony::new();
+        state.last_imu_ms = None;
+        state.motion.clear();
         state.stationary = false;
         state.calm_since_ms = None;
         state.motion_since_ms = None;
+        state.gps_motion_hold_until_ms = i64::MIN;
         state.last_gps_fix = None;
         state.still_gps_anchor = None;
         state.gps_stop_anchor = None;
@@ -825,6 +840,61 @@ mod tests {
             "not re-seated: {offset:?}"
         );
         assert_eq!(resumed.speed_mps, 0.0);
+    }
+
+    #[test]
+    fn manual_section_reset_clears_state_even_after_a_short_pause() {
+        let fusion = LiveFusion::new();
+        for timestamp_ms in (10..=1_090).step_by(20) {
+            fusion.push_imu(timestamp_ms, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+        }
+        let stopped = fusion
+            .push_gps(1_090, 41.7, 44.8, None, Some(4.0), Some(2.0), Some(90.0))
+            .unwrap();
+        assert!(stopped.stationary);
+        {
+            let mut state = fusion.state.lock().unwrap();
+            assert_eq!(state.last_imu_ms, Some(1_090));
+            assert!(!state.motion.is_empty());
+            assert!(state.orientation.is_initialized());
+            state.gps_motion_hold_until_ms = 5_000;
+        }
+
+        fusion.start_new_section();
+
+        {
+            let state = fusion.state.lock().unwrap();
+            assert_eq!(state.last_imu_ms, None);
+            assert!(state.motion.is_empty());
+            assert!(!state.stationary);
+            assert_eq!(state.gps_motion_hold_until_ms, i64::MIN);
+            assert!(!state.orientation.is_initialized());
+            assert!(state.ekf.is_some());
+            assert!(state.horizontal_reseat_pending);
+        }
+        // Only 10 ms after the last pre-pause IMU: this must be the new
+        // section's first sample, not another sample in the old STILL window.
+        assert!(!fusion.push_imu(1_100, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]));
+
+        let resumed_lon =
+            44.8 + (10.0 / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees();
+        let resumed = fusion
+            .push_gps(
+                1_100,
+                41.7,
+                resumed_lon,
+                None,
+                Some(4.0),
+                Some(2.0),
+                Some(90.0),
+            )
+            .unwrap();
+        let offset = project(resumed.lat, resumed.lon, 41.7, resumed_lon);
+        assert!(!resumed.stationary);
+        assert!(
+            offset[0].hypot(offset[1]) < 0.01,
+            "section GPS did not reseat: {offset:?}"
+        );
     }
 
     #[test]

@@ -161,9 +161,12 @@ class RecordingService : Service() {
     @Volatile private var lastAccuracyM: Float? = null
     @Volatile private var stationary = false
     @Volatile private var liveTrack: List<LiveTrackPoint> = emptyList()
+    @Volatile private var liveSectionId = 0
     private var liveFusion: LiveFusion? = null
     private var lastLiveImuMs = Long.MIN_VALUE
     private var lastRawImuNs = Long.MIN_VALUE
+    private val imuPersistenceLock = Any()
+    private val imuPersistenceBuffer = StationaryImuPersistenceBuffer()
     @Volatile private var lastGpsReceivedElapsedMs = Long.MIN_VALUE
     private var lastHealthHeartbeatElapsedMs = Long.MIN_VALUE
 
@@ -346,6 +349,7 @@ class RecordingService : Service() {
         lastAccuracyM = null
         stationary = false
         liveTrack = emptyList()
+        liveSectionId = 0
         liveFusion = LiveFusion()
         lastLiveImuMs = Long.MIN_VALUE
         lastRawImuNs = Long.MIN_VALUE
@@ -357,6 +361,9 @@ class RecordingService : Service() {
         warmGpsReady = false
         paused = false
         totalPausedMs = 0L
+        synchronized(imuPersistenceLock) {
+            imuPersistenceBuffer.reset()
+        }
 
         acquireWakeLock()
         sensorThread = HandlerThread("recording-sensors").also { it.start() }
@@ -401,12 +408,13 @@ class RecordingService : Service() {
             return
         }
         val stopElapsedMs = currentSessionElapsedMs()
+        val finishedWriter = writer
         recording = false
+        flushBufferedImu(finishedWriter)
 
         tearDownCapture()
 
         val endedAtMs = System.currentTimeMillis()
-        val finishedWriter = writer
         writer = null
         val id = activityId
 
@@ -446,9 +454,13 @@ class RecordingService : Service() {
 
     private fun pauseRecording() {
         if (!recording || paused) return
-        writer?.write(RecordLine.Event(System.currentTimeMillis(), "pause"))
         paused = true
         pausedAtElapsedMs = SystemClock.elapsedRealtime()
+        val currentWriter = writer
+        synchronized(imuPersistenceLock) {
+            writeImuLines(currentWriter, imuPersistenceBuffer.flush())
+            currentWriter?.write(RecordLine.Event(System.currentTimeMillis(), "pause"))
+        }
         lastSpeedMps = 0f
         updateNotification(currentSessionElapsedMs())
     }
@@ -456,6 +468,14 @@ class RecordingService : Service() {
     private fun resumeRecording() {
         if (!recording || !paused) return
         writer?.write(RecordLine.Event(System.currentTimeMillis(), "resume"))
+        liveSectionId++
+        liveFusion?.startNewSection()
+        // The first post-pause sample starts a fresh causal section. These
+        // gates mirror Rust replay's resume handling and must not suppress it
+        // merely because the pause was shorter than one sampling interval.
+        lastLiveImuMs = Long.MIN_VALUE
+        lastRawImuNs = Long.MIN_VALUE
+        stationary = false
         totalPausedMs += SystemClock.elapsedRealtime() - pausedAtElapsedMs
         paused = false
         lastSpeedMps = null
@@ -536,7 +556,7 @@ class RecordingService : Service() {
                 // within one sample period — good enough for fusion, which
                 // re-interpolates anyway, and far simpler than a merge queue.
                 Sensor.TYPE_ACCELEROMETER -> {
-                    if (writer == null || paused) return
+                    if (writer == null || paused || !recording) return
                     if (
                         lastRawImuNs != Long.MIN_VALUE &&
                         event.timestamp - lastRawImuNs < RAW_IMU_INTERVAL_US * 1_000L
@@ -545,6 +565,9 @@ class RecordingService : Service() {
                     }
                     lastRawImuNs = event.timestamp
                     val timestampMs = epochAnchorMs + event.timestamp / 1_000_000
+                    // Counts acquisition, not persistence: health telemetry
+                    // must still prove that the sensor callback stays near
+                    // 200 Hz while stationary rows are compressed on disk.
                     imuCount++
                     // JNI at the raw sensor rate would waste battery. 50 Hz retains
                     // more than enough bandwidth for attitude/EKF and ZUPT.
@@ -564,8 +587,9 @@ class RecordingService : Service() {
                             wasStationary -> lastSpeedMps = null
                         }
                     }
-                    writer.write(
-                        RecordLine.Imu(
+                    persistImu(
+                        writer = writer,
+                        sample = RecordLine.Imu(
                             timestampMs = timestampMs,
                             accel = listOf(event.values[0], event.values[1], event.values[2]),
                             // Devices without a gyroscope report a zero rate
@@ -573,6 +597,7 @@ class RecordingService : Service() {
                             gyro = latestGyro?.toList() ?: listOf(0f, 0f, 0f),
                             mag = latestMag?.toList(),
                         ),
+                        stationary = stationary,
                     )
                 }
                 Sensor.TYPE_GYROSCOPE -> latestGyro = event.values.clone()
@@ -591,6 +616,36 @@ class RecordingService : Service() {
         }
 
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
+    }
+
+    private fun persistImu(
+        writer: RecordingWriter,
+        sample: RecordLine.Imu,
+        stationary: Boolean,
+    ) {
+        synchronized(imuPersistenceLock) {
+            // Pause/stop may race a callback that already constructed its
+            // sample. Recheck under the same lock used by their final flush so
+            // nothing can be enqueued after the pause boundary.
+            if (!recording || paused || writer !== this.writer) return
+            writeImuLines(writer, imuPersistenceBuffer.accept(sample, stationary))
+        }
+    }
+
+    private fun flushBufferedImu(writer: RecordingWriter?) {
+        synchronized(imuPersistenceLock) {
+            writeImuLines(writer, imuPersistenceBuffer.flush())
+        }
+    }
+
+    private fun writeImuLines(
+        writer: RecordingWriter?,
+        samples: List<RecordLine.Imu>,
+    ) {
+        if (writer == null) return
+        samples.forEach { sample ->
+            writer.write(sample)
+        }
     }
 
     // --- location ---------------------------------------------------------------
@@ -634,6 +689,8 @@ class RecordingService : Service() {
                         lat = snapshot.lat,
                         lon = snapshot.lon,
                         speedMps = snapshot.speedMps,
+                        stationary = snapshot.stationary,
+                        sectionId = liveSectionId,
                     )).takeLast(MAX_LIVE_TRACK_POINTS)
                 }
                 writer.write(

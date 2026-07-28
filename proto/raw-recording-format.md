@@ -26,9 +26,21 @@ Rules:
 - `meta` line first; order of other lines is best-effort chronological, readers
   must not assume strict global ordering (sensor callbacks interleave).
 - Units: SI. accel m/s² (raw, gravity included), gyro rad/s, mag µT, pressure hPa.
-- Target rates: GPS — max device rate (~1 Hz), IMU — capped at 200 Hz (5 ms
-  samples), baro — approximately 10 Hz. The IMU rate preserves jump/impact
-  timing while bounding CPU, allocation, storage and writer-backlog pressure.
+- Acquisition and live-processing rates are distinct from the rows persisted to
+  this file. GPS remains at the device's high-accuracy rate (~1 Hz), including
+  while stationary. Accelerometer/gyroscope acquisition is capped at 200 Hz
+  (5 ms), while Rust live fusion consumes a 50 Hz reduction. Barometer remains
+  approximately 10 Hz.
+- While Rust live fusion reports confirmed `STILL`, IMU disk persistence is
+  reduced to 20 Hz. Acquisition and the 50 Hz live detector continue unchanged,
+  so a calm phone moving in transport can still be released from `STILL` by the
+  continuing 1 Hz earth-relative GPS fixes.
+- The recorder retains the most recent two seconds of stationary IMU in a
+  process-local full-rate 200 Hz pre-roll. It writes that complete pre-roll before the first
+  moving sample and flushes it before manual pause or Finish. Older stationary
+  samples are represented by the persisted 20 Hz cadence. This adaptive
+  persistence is not a pause: GPS/barometer continue, timestamps retain their
+  original monotonic-anchored values, and no pause section is created.
 - `event` lines mark manual `pause` / `resume`. No sensor samples are written while
   paused. An unmatched `pause` extends to the end of the recording. Analysis must
   not add distance, moving time or airtime across paused intervals.

@@ -237,7 +237,7 @@ activity results are always recomputed canonically from the raw on-device file.
 - Canonical vertical v0 preserves relative barometer movement and anchors it to
   median-filtered, accuracy-gated GPS altitude. GPS-only recordings use section-aware
   altitude interpolation. Ascent/descent hysteresis resets at pause boundaries. The
-  canonical algorithm version is currently `gps-bounded-0.4`.
+  canonical algorithm version is currently `gps-bounded-0.5`.
 
 ## 2026-07-19 — Short GPS jumps require accuracy and Doppler consistency
 
@@ -323,3 +323,43 @@ activity results are always recomputed canonically from the raw on-device file.
   within Strava's one-hour threshold, updates the completed activity to
   `MountainBikeRide`/`EMountainBikeRide`, and returns the final activity id for
   `View on Strava`.
+
+## 2026-07-28 — Activity states are conservative Rust-derived artifacts
+
+- Post-ride activity classification belongs exclusively to `fusion-core` and runs
+  after canonical 5 Hz position, speed and elevation have been finalized. Every
+  finalized point carries one `ActivityState` — `Unknown`, `Still`, `Downhill`,
+  `Transit` or `LikelyMotorized` — plus confidence. Android may map those values to
+  visual styling, but must not reproduce or amend the classification rules.
+- `LikelyMotorized` is intentionally tentative. Speed alone never proves transport;
+  the first classifier requires independent sustained uphill or unusually smooth IMU
+  evidence and does not cross manual-pause sections or GPS gaps. Classification is a
+  visual diagnostic until it has been calibrated against labelled field recordings:
+  it does not yet remove distance/time, exclude segment attempts, auto-pause, or
+  discard any raw sample.
+- A manual pause is not an `ActivityState`. It remains an explicit raw
+  `pause`/`resume` boundary represented by `section_id`, and renderers must still
+  split geometry at that boundary regardless of neighboring activity labels.
+
+## 2026-07-28 — Stationary persistence reduces disk work, not evidence collection
+
+- Accelerometer/gyroscope acquisition remains capped at 200 Hz and Rust live fusion
+  continues receiving 50 Hz. Only rows persisted to raw are reduced, to 20 Hz, while
+  Rust reports confirmed earth-relative `STILL`; this preserves enough stationary
+  evidence for deterministic replay while reducing long-stop serialization, queue
+  pressure and storage.
+- Keep a rolling two-second full-rate stationary IMU pre-roll. Flush it in timestamp
+  order when movement resumes and before manual pause or Finish, so canonical
+  recomputation retains motion onset and terminal evidence. Adaptive persistence never
+  creates a pause section, and GPS/barometer collection continues normally.
+- GPS remains high-accuracy at approximately 1 Hz during `STILL`. It is the external
+  earth-relative evidence that releases a calm phone riding in a bus or shuttle, so
+  lowering GPS cadence at this stage would make transport/stationarity failures harder
+  to detect. Physical long-ride validation remains required before treating the
+  persistence policy as field-proven.
+- The full-rate pre-roll is process-local. A hard process kill while `STILL` can
+  therefore lose up to two additional seconds of stationary IMU (GPS, barometer and
+  the older 20 Hz evidence remain durable); a kill in the roughly 250 ms motion-release
+  window can also lose that onset. This bounded trade-off is accepted for the first
+  field iteration. A tiny crash-safe circular sidecar is the upgrade path if field
+  evidence shows that boundary loss matters.

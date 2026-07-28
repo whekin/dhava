@@ -122,8 +122,8 @@ internal class CanonicalActivityStore(
     private fun temporaryFile(id: String): File = File(artifactsDir, "$id.canonical.tmp")
 
     internal companion object {
-        // v2: adds the Rust-derived quality summary; v1 artifacts recompute.
-        const val SCHEMA_VERSION = 2
+        // v3: adds Rust-derived per-point activity state + confidence.
+        const val SCHEMA_VERSION = 3
         val ArtifactJson = Json {
             encodeDefaults = true
             explicitNulls = false

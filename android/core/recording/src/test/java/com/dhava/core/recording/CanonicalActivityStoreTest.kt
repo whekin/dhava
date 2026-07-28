@@ -32,6 +32,11 @@ class CanonicalActivityStoreTest {
         val cached = store.loadOrCreate("ride", raw)
         assertEquals(1, produceCalls)
         assertEquals(first, cached)
+        assertEquals(
+            CanonicalActivityState.DOWNHILL,
+            cached.finalizedTrack.single().activityState,
+        )
+        assertEquals(0.88, cached.finalizedTrack.single().activityConfidence, 0.0)
 
         val oldModified = raw.lastModified()
         raw.appendText("-changed")
@@ -63,8 +68,8 @@ class CanonicalActivityStoreTest {
         assertEquals(CanonicalActivityStore.SCHEMA_VERSION, fresh.schemaVersion)
         assertNotNull("new artifacts must carry the quality summary", fresh.quality)
 
-        // Simulate a pre-quality artifact: same raw fingerprint and algorithm,
-        // but the previous schema version and no quality block.
+        // Simulate the previous artifact schema: same raw fingerprint and
+        // algorithm, but without the current classifier contract.
         val legacyJson = Json { encodeDefaults = true; explicitNulls = false }
         val legacy = fresh.copy(schemaVersion = CanonicalActivityStore.SCHEMA_VERSION - 1, quality = null)
         GZIPOutputStream(store.artifactFile("ride").outputStream()).bufferedWriter().use { writer ->
@@ -169,7 +174,16 @@ class CanonicalActivityStoreTest {
                 algorithmVersion = version,
             ),
             rawTrack = listOf(CanonicalPoint(1_000, 41.7, 44.8, sectionId = 0)),
-            finalizedTrack = listOf(CanonicalPoint(1_000, 41.7, 44.8, sectionId = 0)),
+            finalizedTrack = listOf(
+                CanonicalPoint(
+                    timestampMs = 1_000,
+                    lat = 41.7,
+                    lon = 44.8,
+                    sectionId = 0,
+                    activityState = CanonicalActivityState.DOWNHILL,
+                    activityConfidence = 0.88,
+                ),
+            ),
             quality = CanonicalQuality(
                 elevationSource = CanonicalElevationSource.GPS_INTERPOLATED,
                 baroSampleCount = 0,

@@ -728,6 +728,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -754,6 +756,8 @@ fun uniffi_fusion_core_checksum_func_replay_recording(
 fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_push_imu(
+): Short
+fun uniffi_fusion_core_checksum_method_livefusion_start_new_section(
 ): Short
 fun uniffi_fusion_core_checksum_constructor_livefusion_new(
 ): Short
@@ -816,6 +820,8 @@ fun uniffi_fusion_core_fn_method_livefusion_push_gps(`ptr`: Pointer,`timestampMs
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_method_livefusion_push_imu(`ptr`: Pointer,`timestampMs`: Long,`accel`: RustBuffer.ByValue,`gyro`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
+fun uniffi_fusion_core_fn_method_livefusion_start_new_section(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 fun uniffi_fusion_core_fn_func_algorithm_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -966,6 +972,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_push_imu() != 38537.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_method_livefusion_start_new_section() != 19271.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_constructor_livefusion_new() != 22083.toShort()) {
@@ -1391,6 +1400,14 @@ public interface LiveFusionInterface {
 
     fun `pushImu`(`timestampMs`: kotlin.Long, `accel`: List<kotlin.Double>, `gyro`: List<kotlin.Double>): kotlin.Boolean
 
+    /**
+     * Starts a new continuous recording section after a manual pause.
+     *
+     * The next GPS fix re-seats position and velocity instead of comparing
+     * against a fix from before the pause.
+     */
+    fun `startNewSection`()
+
     companion object
 }
 
@@ -1505,6 +1522,23 @@ open class LiveFusion: Disposable, AutoCloseable, LiveFusionInterface
     }
     )
     }
+
+
+
+    /**
+     * Starts a new continuous recording section after a manual pause.
+     *
+     * The next GPS fix re-seats position and velocity instead of comparing
+     * against a fix from before the pause.
+     */override fun `startNewSection`()
+        =
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_method_livefusion_start_new_section(
+        it, _status)
+}
+    }
+
 
 
 
@@ -1654,7 +1688,15 @@ data class CanonicalTrackPoint (
     /**
      * Continuous recording section; changes at each manual pause.
      */
-    var `sectionId`: kotlin.Int
+    var `sectionId`: kotlin.Int,
+    /**
+     * Conservative post-ride interpretation of this point.
+     */
+    var `activityState`: ActivityState,
+    /**
+     * Confidence in `activity_state`, in `[0, 1]`.
+     */
+    var `activityConfidence`: kotlin.Double
 ) {
 
     companion object
@@ -1674,6 +1716,8 @@ public object FfiConverterTypeCanonicalTrackPoint: FfiConverterRustBuffer<Canoni
             FfiConverterOptionalDouble.read(buf),
             FfiConverterOptionalBoolean.read(buf),
             FfiConverterInt.read(buf),
+            FfiConverterTypeActivityState.read(buf),
+            FfiConverterDouble.read(buf),
         )
     }
 
@@ -1685,7 +1729,9 @@ public object FfiConverterTypeCanonicalTrackPoint: FfiConverterRustBuffer<Canoni
             FfiConverterOptionalDouble.allocationSize(value.`accuracyM`) +
             FfiConverterOptionalDouble.allocationSize(value.`speedMps`) +
             FfiConverterOptionalBoolean.allocationSize(value.`stationary`) +
-            FfiConverterInt.allocationSize(value.`sectionId`)
+            FfiConverterInt.allocationSize(value.`sectionId`) +
+            FfiConverterTypeActivityState.allocationSize(value.`activityState`) +
+            FfiConverterDouble.allocationSize(value.`activityConfidence`)
     )
 
     override fun write(value: CanonicalTrackPoint, buf: ByteBuffer) {
@@ -1697,6 +1743,8 @@ public object FfiConverterTypeCanonicalTrackPoint: FfiConverterRustBuffer<Canoni
             FfiConverterOptionalDouble.write(value.`speedMps`, buf)
             FfiConverterOptionalBoolean.write(value.`stationary`, buf)
             FfiConverterInt.write(value.`sectionId`, buf)
+            FfiConverterTypeActivityState.write(value.`activityState`, buf)
+            FfiConverterDouble.write(value.`activityConfidence`, buf)
     }
 }
 
@@ -1712,7 +1760,13 @@ data class DiagnosticTrackPoint (
      * Continuous recording section. Increments at each manual pause so
      * renderers never draw a line across a paused interval.
      */
-    var `sectionId`: kotlin.Int
+    var `sectionId`: kotlin.Int,
+    /**
+     * Reserved for a future classified diagnostic pass. Replay itself leaves
+     * this unset so raw/live/finalized geometry remains a neutral diagnostic.
+     */
+    var `activityState`: ActivityState?,
+    var `activityConfidence`: kotlin.Double?
 ) {
 
     companion object
@@ -1730,6 +1784,8 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterOptionalDouble.read(buf),
             FfiConverterOptionalBoolean.read(buf),
             FfiConverterInt.read(buf),
+            FfiConverterOptionalTypeActivityState.read(buf),
+            FfiConverterOptionalDouble.read(buf),
         )
     }
 
@@ -1739,7 +1795,9 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterDouble.allocationSize(value.`lon`) +
             FfiConverterOptionalDouble.allocationSize(value.`accuracyM`) +
             FfiConverterOptionalBoolean.allocationSize(value.`stationary`) +
-            FfiConverterInt.allocationSize(value.`sectionId`)
+            FfiConverterInt.allocationSize(value.`sectionId`) +
+            FfiConverterOptionalTypeActivityState.allocationSize(value.`activityState`) +
+            FfiConverterOptionalDouble.allocationSize(value.`activityConfidence`)
     )
 
     override fun write(value: DiagnosticTrackPoint, buf: ByteBuffer) {
@@ -1749,6 +1807,8 @@ public object FfiConverterTypeDiagnosticTrackPoint: FfiConverterRustBuffer<Diagn
             FfiConverterOptionalDouble.write(value.`accuracyM`, buf)
             FfiConverterOptionalBoolean.write(value.`stationary`, buf)
             FfiConverterInt.write(value.`sectionId`, buf)
+            FfiConverterOptionalTypeActivityState.write(value.`activityState`, buf)
+            FfiConverterOptionalDouble.write(value.`activityConfidence`, buf)
     }
 }
 
@@ -1841,7 +1901,10 @@ data class QualitySummary (
      */
     var `longestGapS`: kotlin.Double,
     /**
-     * Coarse ± estimate of the finalized elevation profile, meters.
+     * Coarse ± estimate of the reported vertical metric, meters.
+     *
+     * This describes accumulated ascent/descent for barometric recordings and
+     * section-wise net change for GPS-only recordings.
      */
     var `elevationUncertaintyM`: kotlin.Double?
 ) {
@@ -1957,11 +2020,14 @@ data class RideAnalysis (
      */
     var `distanceM`: kotlin.Double,
     /**
-     * Total ascent, meters (hysteresis-filtered GPS altitude).
+     * Upward elevation, meters.
+     *
+     * Canonical finalization reports accumulated movement with barometer data
+     * and robust section-wise net change for GPS-only recordings.
      */
     var `ascentM`: kotlin.Double,
     /**
-     * Total descent, meters (hysteresis-filtered GPS altitude).
+     * Downward elevation, with the same source-dependent semantics as ascent.
      */
     var `descentM`: kotlin.Double,
     /**
@@ -2120,6 +2186,46 @@ public object FfiConverterTypeTrackPoint: FfiConverterRustBuffer<TrackPoint> {
             FfiConverterOptionalDouble.write(value.`speedMps`, buf)
     }
 }
+
+
+
+/**
+ * Mutually exclusive interpretation of one canonical track point.
+ *
+ * `LikelyMotorized` is intentionally tentative: it means that the post-ride
+ * evidence looks vehicle-like, not that the classifier has proved a vehicle
+ * was used.
+ */
+
+enum class ActivityState {
+
+    UNKNOWN,
+    STILL,
+    DOWNHILL,
+    TRANSIT,
+    LIKELY_MOTORIZED;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeActivityState: FfiConverterRustBuffer<ActivityState> {
+    override fun read(buf: ByteBuffer) = try {
+        ActivityState.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: ActivityState) = 4UL
+
+    override fun write(value: ActivityState, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
 
 
 
@@ -2369,6 +2475,38 @@ public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveS
         } else {
             buf.put(1)
             FfiConverterTypeLiveSnapshot.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeActivityState: FfiConverterRustBuffer<ActivityState?> {
+    override fun read(buf: ByteBuffer): ActivityState? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeActivityState.read(buf)
+    }
+
+    override fun allocationSize(value: ActivityState?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeActivityState.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ActivityState?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeActivityState.write(value, buf)
         }
     }
 }
