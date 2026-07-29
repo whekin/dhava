@@ -1487,3 +1487,15 @@ OnePlus, initial segment fit, full-ride fit, reverse segment fit, high-zoom sens
 endpoint following with preserved zoom and the clean collapsed sheet were exercised.
 No segment was saved during validation, so the existing ride and authored segment data
 were not changed.
+
+## 2026-07-29 — Engineering skills repository setup
+
+The repository now declares the shared engineering-skill configuration in the primary
+`AGENTS.md`; `CLAUDE.md` remains a pointer to it. GitHub Issues is the request and PRD
+tracker, while pull requests are not a triage request surface. The standard
+`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`
+vocabulary is recorded under `docs/agents/`.
+
+Domain-document consumers use a single-context layout. The existing chronological
+`docs/DECISIONS.md` remains authoritative, and focused ADRs may be added lazily under
+`docs/adr/`; no empty `CONTEXT.md` or ADR directory was created during setup.

@@ -10,6 +10,20 @@ Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
 - After significant work: append an entry to `docs/WORKLOG.md` (date, what, decisions, open questions).
 - Architecture decisions worth remembering go to `docs/DECISIONS.md`.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `whekin/dhava`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five standard triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Dhava uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+
 ## Layout
 
 | Path       | Stack | Build / verify |
