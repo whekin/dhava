@@ -1,2 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<!--
+    The recorder screen warms a GPS fix while the rider is looking at the idle
+    recorder, so the requirement is declared where it is used rather than
+    relying on the app module happening to declare it. This adds no new
+    capability: recording already requires the same permission.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+</manifest>

@@ -9,6 +9,7 @@ import android.os.Debug
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
+import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -180,6 +181,9 @@ internal object RecordingExitDiagnostics {
         return runCatching { latestAfterApi30(context, startedAtMs) }.getOrNull()
     }
 
+    // The version guard lives in the caller, which lint cannot see across a
+    // function boundary; the annotation states the same contract for it.
+    @RequiresApi(Build.VERSION_CODES.R)
     private fun latestAfterApi30(context: Context, startedAtMs: Long): RecordingHealthEntry? {
         val activityManager = context.getSystemService(ActivityManager::class.java) ?: return null
         val exit = activityManager

@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Recording subscribes to location updates itself, so the requirement is
+        declared where it is used rather than relying on a consumer happening to
+        declare it. The app already requests this permission, so this adds no
+        new capability.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application>
         <!--
             Foreground service that records GPS + IMU + barometer while a ride
