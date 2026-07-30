@@ -23,7 +23,11 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    // One-shot fixes for map actions such as "my location"; recording owns its
+    // own continuous location stream.
+    implementation(libs.play.services.location)
     api(libs.maplibre.android)
 }
 

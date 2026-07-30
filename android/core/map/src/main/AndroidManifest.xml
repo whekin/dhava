@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Map actions such as "my location" read one fix through
+    FusedLocationProviderClient, so the requirement is declared where it is
+    used. The app already requests this permission for recording; this adds no
+    new capability, it only stops the module from depending on a consumer
+    happening to declare it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+</manifest>
