@@ -69,6 +69,11 @@ skeleton and deployment scaffolding.
 - Rust-authored elevation profile with accumulated climb and descent ✅
 - Segments screen: segment map, best/latest with `± margin`, run count,
   uncertain runs and not-counted runs with their reason ✅
+- Map-led segment library: one muted map of every local segment, tap to select,
+  opening a segment a separate action, list in a persistent sheet, camera and
+  selection retained, explicit `Fit area` and `My location` ✅
+- Countable-only personal records: an uncertain run is never presented as a PR,
+  and a faster uncountable run is shown with why it does not count ✅
 - Draft-only geometry: no GPS correction, no centerline averaging yet ✅
 - Trusted multi-pass centerline: averaged geometry from three or more quality
   rides, uncertainty corridor, GPS correction inside reported accuracy, and

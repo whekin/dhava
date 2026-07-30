@@ -1499,3 +1499,186 @@ vocabulary is recorded under `docs/agents/`.
 Domain-document consumers use a single-context layout. The existing chronological
 `docs/DECISIONS.md` remains authoritative, and focused ADRs may be added lazily under
 `docs/adr/`; no empty `CONTEXT.md` or ADR directory was created during setup.
+
+## 2026-07-30 — Map-led segment library and countable-only records
+
+A product grilling session settled two things ahead of implementation, and
+`CONTEXT.md` now carries the resolved vocabulary (`Published segment`,
+`Segment overlap`, `Countable attempt`, `Uncertain attempt`).
+
+First, segment identity: Dhava never merges or deduplicates segment definitions.
+A local draft and a published segment covering the same trail are separate
+identities and both are timed, because deciding that two lines are "the same
+trail" is the trusted-centerline problem we deferred, and migrating attempts
+between geometry versions would fabricate times that belong to different gates.
+Overlap therefore constrains *publication*, decided by moderation later, and
+never the timing engine. Recorded as `docs/adr/0001`.
+
+Second, what counts. `bestAttempt()` used to fall back to the fastest uncertain
+run when no clean run existed; it is gone. `personalRecord()` returns the
+fastest countable attempt or nothing, and a segment with no countable run shows
+`—` with the reason instead of a number the rider can never honestly beat.
+`fastestUncountableAhead()` surfaces a faster non-counting run explicitly — a
+list whose quickest row is not the PR reads as a bug unless the screen says why.
+Countability stays one condition (`quality == GOOD`), since Rust already folds
+weak GPS, wide margins and vehicle-like evidence into that verdict.
+
+The Segments tab is now map-led: `:core:map` gained `SegmentLibraryMap`, which
+draws every segment in one muted weight over a dark casing, highlights the tapped
+one and hit-tests with a 22 dp box rather than the exact pixel. Muting uses the
+brand hue, not the label colour — the first device build drew segments in
+`onSurface` and they were indistinguishable from the road they follow. The camera
+belongs to the rider: it is framed only on a first visit or on an explicit
+action, is reported on idle into a process-scoped store so a tab switch does not
+reframe it, and survives a round trip through Segment Detail together with the
+selection. Tapping empty map clears the selection. `:core:map` also gained a
+one-shot `currentLocationFix` for `My location` and declares
+`ACCESS_FINE_LOCATION` itself instead of relying on a consumer to.
+
+The list lives in a persistent sheet whose peek is the pinned header only:
+a peek ending mid-card read as a clipped layout rather than an invitation to
+scroll. The expanded sheet stops at 72% so the map and its top controls stay
+visible. Selection is marked by a quiet outline; the first attempt filled the
+card with `primaryContainer` and shouted over the map.
+
+Android module unit tests, `:app:lintDebug`, `:feature:segments:lintDebug`,
+`:core:map:lintDebug` and the debug assembly pass. Rust was not touched. On the
+physical OnePlus with all rides preserved, the whole flow was exercised: library
+fit on first visit, muted line, tap to select with start/finish markers and the
+`SELECTED` peek showing `2.41 km · −149 m · PR 3:23.6`, expand, `Open` into a
+detail whose panel now reads `PERSONAL RECORD 3:23.6 / ± 1.3 s`, back with camera
+and selection intact, tap-to-clear, `My location` centring on the real fix, and
+`Fit area` returning to the segment. Process logcat contained no exception.
+
+Pre-existing and untouched today: `:core:recording:lintDebug` fails on
+`RecordingService.kt:659` with `MissingPermission`, because that module also
+calls the location API without declaring the permission in its own manifest.
+That target is not part of the verified set today. (Closed in the next entry.)
+
+Open items: a second recorded run of the same trail to see an independent
+non-defining attempt, field calibration of gate/corridor/coverage thresholds,
+and the next agreed step — on-ride segment detection, which needs a streaming
+Rust matcher over an active segment set rather than a pass over saved tracks.
+
+## 2026-07-30 — Segment trimming on the elevation profile
+
+The grilling continued and settled the colour question: a segment's colour will
+carry exactly one meaning, its difficulty grade on the scale riders already read
+off trail signage, and selection stays encoded by weight and opacity rather than
+by hue so "muted until tapped" survives. `CONTEXT.md` gained `Difficulty grade`
+and `Candidate descent`, and `Segment overlap` was widened: it now also warns a
+rider about to author a duplicate, which does not weaken `docs/adr/0001` — the
+warning never merges anything and never touches timing. The colouring itself is
+not implemented yet; the editor came first so two changes would not land in one
+screen.
+
+Two reported editor faults turned out to be one bad decision. Trimming used a
+two-thumbed `RangeSlider`, and the "10× slower" precision mode felt frozen
+because Material3 re-anchors the slider's internal offset to whatever value the
+caller feeds back: the reported delta was therefore *already* scaled, and scaling
+it again made movement 100× slower than the finger — 400× once map zoom joined
+in. The thumbs also collapsed onto each other, since the minimum gap was a
+thousandth of a track position, and coincident thumbs cannot be pulled apart.
+Neither is fixable inside a slider, so the slider is gone.
+
+Trimming now happens directly on the ride's own elevation profile, which for a
+downhill-first app is the axis that answers the actual question — does this
+selection go down. The gates are dragged on the chart, precision comes from
+narrowing the chart's domain (pinch, or the focus/full toggle) instead of scaling
+finger movement, the minimum gap is 25 m of *ridden* trail, and the two handles
+sit at opposite ends of their vertical line so they stay individually grabbable
+when they share an x. The profile is coloured by gradient sign, so a climb inside
+the selection is visible, and it breaks at pauses and recording gaps instead of
+drawing across them.
+
+New Rust module `segment_editor.rs`, because all of this is geometry:
+`ride_profile` (sampled elevation, windowed gradient, ridden distance that does
+not accumulate across a pause, and the continuous track position of every
+sample, so Kotlin maps chart pixels back to gates without doing geometry),
+`propose_descents` (every candidate descent, longest first) and
+`selection_overlap`. Candidate rule, as agreed: hard stops on a stop, a pause, a
+recording gap or motorised evidence, but short non-descending links inside one
+trail are bridged (≤ 8 s and ≤ 40 m) — strict splitting fragmented real trails
+into pieces that each fell under the 200 m floor and made the candidate vanish
+entirely, which is the worst failure available. Filters: ≥ 200 m, a real drop,
+and climb ≤ 15% of the drop. Candidates that duplicate an existing segment are
+drawn marked rather than hidden, because hiding them would tell the rider
+nothing was found where a trail plainly is.
+
+`continuous_selection` also had a real edge: a gate interpolated a hair short of
+the next canonical sample rounds onto that sample's own timestamp, and the
+strict-monotonicity check then rejected a geometrically fine selection. The
+rider's endpoint is authoritative, so the duplicated inner sample is dropped
+instead. The rejection message itself was leaking as `msg=…`; the editor now
+reads the typed `SegmentException.InvalidSelection.msg` rather than the
+binding's rendering of it.
+
+One bug worth remembering: gate dragging silently did nothing because the
+handler called `change.consume()` before reading `positionChange()`, which
+reports zero once consumed. Diagnosed by logging the deltas on the device — the
+gesture layer was fine all along, which a candidate tap had already proven.
+
+Verified: 104 Rust tests, `cargo fmt`, `cargo clippy -D warnings`; the whole
+Android `./gradlew test lintDebug` is green, which needed three pre-existing lint
+failures fixed along the way — `:core:recording` and `:feature:record` now
+declare the `ACCESS_FINE_LOCATION` they use, and `RecordingHealth`'s API-30
+helper carries `@RequiresApi` for the guard that lives in its caller. On the
+device with all 37 rides preserved: the editor opens with the longest candidate
+selected, ten candidates in the ribbon with the existing segment's one outlined,
+the duplicate warning naming it, both gates dragging, the full-ride toggle
+showing the whole descent with flat stretches greyed, and the library and detail
+screens unchanged. Process logcat contained no exception.
+
+Open items unchanged, plus: difficulty grade and its colouring, and pinch-zoom of
+the chart domain has only been exercised by unit tests — adb cannot inject two
+pointers.
+
+## 2026-07-30 — Dhava text fields, IME behaviour and sheet fling boundary
+
+Four rider-reported faults, all in the same family: platform defaults doing the
+wrong thing for this product.
+
+The editor's loading spinner drew against the left edge. Its `Box` took height
+from `weight(1f)` but never `fillMaxWidth()`, so centring had no horizontal room.
+Segment Detail had the mirror of it — `fillMaxSize()` inside a column is measured
+against the whole screen, not the space left under the header, so the box
+overflowed and its centre sat below the visible middle. Both now take
+`fillMaxWidth().weight(1f)`.
+
+Inputs are no longer Material text fields. `DhavaTextField` in `:core:ui` is
+built on `BasicTextField`, because the platform default brings a whole vocabulary
+this product does not use: a label that animates into a notch in an outline, an
+indicator line, and a container that reads as a web form control. A Dhava field
+is one quiet filled surface with its label stated plainly above it, matching the
+panels and metrics it sits between; focus is a 1.5 dp primary border. It replaced
+every `OutlinedTextField` in the app — segment editor and rename, the save sheet,
+and the activity edit and add-bike dialogs — so there is one input in the product
+rather than seven.
+
+The keyboard covered the name field because the window is edge-to-edge and
+therefore is *not* resized for the IME; insets are dispatched instead. The
+editor's scaffold and every affected dialog now apply `imePadding()` at their own
+boundary, and the field brings itself into view on focus, so the fix holds
+wherever the component is reused.
+
+Bottom sheets collapsed when the rider scrolled back. Material hands a
+scrollable's leftover *fling* velocity to the sheet, so one flick that reaches the
+top of the content carries straight on into the sheet: the rider asked to scroll
+back and the sheet closed. `rememberSheetFlingBoundary()` sits between the
+scrollable and the sheet and swallows only that leftover velocity, so a
+deliberate slow drag at the top still collapses the sheet and the handle still
+moves it. Applied to the segment editor, the segment library and activity detail.
+
+Also fixed: the empty-record copy read "None of the 1 timed runs counts yet".
+
+Verified: `./gradlew test lintDebug` green, and on the device — the editor loader
+centred, the new field styled and fully visible above the open keyboard with its
+focus border, the rename dialog lifted above the keyboard, scroll-back inside the
+expanded editor sheet no longer collapsing it, and the activity edit dialog
+consistent with the same component. Process logcat contained no app exception.
+
+Unplanned but valuable: the rider's own second segment, `Reservoir road`, is the
+first real case of a segment with no countable run. It renders exactly as
+designed — `—` for the record, "the one timed run does not count yet", and the
+run itself listed with `NOT COUNTED`, `DEFINES SEGMENT` and `WIDE MARGIN`. That
+path had only unit coverage until now.
