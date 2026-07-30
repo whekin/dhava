@@ -283,9 +283,41 @@ internal fun List<RecordLine.Gps>.gpsBoundsOrNull(): StoredBounds? {
     return StoredBounds(minLat, minLon, maxLat, maxLon)
 }
 
-/** Best attempt of a segment: fastest, ignoring uncertain ones when possible. */
-fun List<StoredAttempt>.bestAttempt(): StoredAttempt? =
-    filter { it.quality == StoredAttemptQuality.GOOD }.minByOrNull { it.elapsedMs }
-        ?: minByOrNull { it.elapsedMs }
+/**
+ * True when this attempt is measured well enough to stand as a result, so it
+ * may set a personal record and later enter a leaderboard.
+ *
+ * Rust already folds every disqualifying observation — weak GPS, a margin that
+ * is large next to the result, vehicle-like evidence, or being the ride that
+ * drew the segment — into [StoredAttemptQuality], so countability is one
+ * condition here rather than a second, drifting rule.
+ */
+val StoredAttempt.countable: Boolean
+    get() = quality == StoredAttemptQuality.GOOD
+
+fun List<StoredAttempt>.countable(): List<StoredAttempt> = filter { it.countable }
+
+/**
+ * The rider's personal record: the fastest countable attempt, or null.
+ *
+ * There is deliberately no fallback to an uncertain attempt. `3:20 ± 4.2 s` is
+ * a range, not a result: presenting it as a PR would give the rider a number
+ * they can never honestly beat — exactly the pain this product exists to
+ * remove. A segment with no countable attempt has no PR, and the screens say
+ * so instead of quietly showing the next-best thing.
+ */
+fun List<StoredAttempt>.personalRecord(): StoredAttempt? =
+    countable().minByOrNull { it.elapsedMs }
+
+/**
+ * The fastest attempt that does not count, when it is faster than [record].
+ *
+ * Surfacing it is not optional: a list containing a run quicker than the PR
+ * reads as a bug unless the screen says why that run does not count.
+ */
+fun List<StoredAttempt>.fastestUncountableAhead(record: StoredAttempt?): StoredAttempt? =
+    filterNot { it.countable }
+        .minByOrNull { it.elapsedMs }
+        ?.takeIf { record == null || it.elapsedMs < record.elapsedMs }
 
 fun List<StoredAttempt>.latestAttempt(): StoredAttempt? = maxByOrNull { it.startedAtMs }

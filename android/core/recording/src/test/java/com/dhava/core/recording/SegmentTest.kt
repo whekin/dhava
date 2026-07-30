@@ -68,21 +68,46 @@ class SegmentTest {
     }
 
     @Test
-    fun `best result prefers a clean run over a faster uncertain one`() {
+    fun `the personal record ignores a faster uncertain run`() {
         val attempts = listOf(
             attempt(elapsedMs = 140_000, startedAtMs = 2_000, quality = StoredAttemptQuality.UNCERTAIN),
             attempt(elapsedMs = 151_000, startedAtMs = 1_000),
         )
-        assertEquals(151_000L, attempts.bestAttempt()?.elapsedMs)
+        assertEquals(151_000L, attempts.personalRecord()?.elapsedMs)
     }
 
     @Test
-    fun `best result falls back to an uncertain run when nothing is clean`() {
+    fun `uncertain runs never become a personal record`() {
         val attempts = listOf(
             attempt(elapsedMs = 160_000, startedAtMs = 1_000, quality = StoredAttemptQuality.UNCERTAIN),
             attempt(elapsedMs = 140_000, startedAtMs = 2_000, quality = StoredAttemptQuality.UNCERTAIN),
         )
-        assertEquals(140_000L, attempts.bestAttempt()?.elapsedMs)
+        assertNull(attempts.personalRecord())
+    }
+
+    @Test
+    fun `the fastest uncountable run is surfaced only when it leads the record`() {
+        val faster = attempt(
+            elapsedMs = 140_000,
+            startedAtMs = 2_000,
+            quality = StoredAttemptQuality.UNCERTAIN,
+        )
+        val slower = attempt(
+            elapsedMs = 158_000,
+            startedAtMs = 3_000,
+            quality = StoredAttemptQuality.UNCERTAIN,
+        )
+        val record = attempt(elapsedMs = 151_000, startedAtMs = 1_000)
+
+        assertEquals(
+            140_000L,
+            listOf(faster, record).fastestUncountableAhead(record)?.elapsedMs,
+        )
+        assertNull(listOf(slower, record).fastestUncountableAhead(record))
+        assertEquals(
+            140_000L,
+            listOf(faster, slower).fastestUncountableAhead(null)?.elapsedMs,
+        )
     }
 
     @Test
@@ -96,8 +121,8 @@ class SegmentTest {
     }
 
     @Test
-    fun `no attempts yields no best or latest`() {
-        assertNull(emptyList<StoredAttempt>().bestAttempt())
+    fun `no attempts yields no record or latest`() {
+        assertNull(emptyList<StoredAttempt>().personalRecord())
         assertNull(emptyList<StoredAttempt>().latestAttempt())
     }
 

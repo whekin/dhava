@@ -1,9 +1,6 @@
 package com.dhava.feature.segments
 
 import android.widget.Toast
-import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,11 +10,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,31 +28,21 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.SheetValue
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.map.SegmentMap
@@ -64,29 +50,25 @@ import com.dhava.core.map.SegmentMapCameraRequest
 import com.dhava.core.map.SegmentMapCameraTarget
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.recording.CanonicalPoint
+import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaSectionLabel
 import com.dhava.core.ui.DhavaSizes
 import com.dhava.core.ui.DhavaSpacing
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import kotlin.math.abs
+import com.dhava.core.ui.DhavaTextField
+import com.dhava.core.ui.rememberSheetFlingBoundary
 import kotlin.math.ceil
 import kotlin.math.floor
-import kotlin.math.max
-import kotlin.math.pow
 
 /**
  * Picks a segment's start and finish along one ride's finalized track.
  *
- * The two handles move continuously along recorded track edges rather than
- * free map coordinates, and every number below the map is Rust's own
- * judgement of the current selection.
+ * The instrument is the ride's own elevation profile: for a downhill-first app
+ * the question "does this actually go down" has to be answerable while
+ * trimming, not after saving. Both gates are dragged directly on that profile,
+ * and every number below it is Rust's own judgement of the current selection.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SegmentEditorScreen(
     recordingId: String,
@@ -105,7 +87,9 @@ fun SegmentEditorScreen(
         SegmentEditorState.Loading -> Column(modifier = modifier.fillMaxSize()) {
             SegmentEditorHeader(onBack)
             Box(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator()
@@ -169,22 +153,11 @@ private fun EditorBody(
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val initialSliderWindow = remember(state.track.size) {
-        focusedSliderWindow(
-            startPosition = state.startPosition.toFloat(),
-            endPosition = state.endPosition.toFloat(),
-            lastIndex = state.track.lastIndex,
-        )
+    val lastPosition = state.profile.lastPosition
+    var domain by remember(state.track.size) {
+        mutableStateOf(focusedDomain(state.startPosition, state.endPosition, lastPosition))
     }
-    var sliderWindowStart by rememberSaveable(state.track.size) {
-        mutableStateOf(initialSliderWindow.start)
-    }
-    var sliderWindowEnd by rememberSaveable(state.track.size) {
-        mutableStateOf(initialSliderWindow.endInclusive)
-    }
-    var focusAfterDrag by remember { mutableStateOf(false) }
     var activeHandle by remember { mutableStateOf<SelectionHandle?>(null) }
-    var mapZoom by remember { mutableDoubleStateOf(0.0) }
     var cameraRequest by remember {
         mutableStateOf(
             SegmentMapCameraRequest(
@@ -201,33 +174,17 @@ private fun EditorBody(
         )
     }
     val valid = state.preview as? SelectionPreview.Valid
-    val fullSliderRange =
-        sliderWindowStart == 0f && sliderWindowEnd == state.track.lastIndex.toFloat()
+    val wholeRide = domain.start <= 0.0 && domain.end >= lastPosition
+    val flingBoundary = rememberSheetFlingBoundary()
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true,
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
 
-    // Wait until the rider has stopped dragging, then spend the available
-    // slider width on the selected interval. Re-keying on the selection makes
-    // the delay restart while a handle is still moving.
-    LaunchedEffect(focusAfterDrag, state.startPosition, state.endPosition) {
-        if (!focusAfterDrag) return@LaunchedEffect
-        delay(SLIDER_FOCUS_DELAY_MS)
-        val focused = focusedSliderWindow(
-            startPosition = state.startPosition.toFloat(),
-            endPosition = state.endPosition.toFloat(),
-            lastIndex = state.track.lastIndex,
-        )
-        sliderWindowStart = focused.start
-        sliderWindowEnd = focused.endInclusive
-        focusAfterDrag = false
-    }
-
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().imePadding(),
         sheetPeekHeight = SegmentEditorSheetPeekHeight,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         sheetContainerColor = MaterialTheme.colorScheme.surface,
@@ -241,51 +198,84 @@ private fun EditorBody(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(),
+                    .fillMaxHeight(0.88f),
             ) {
-                SegmentSelectionSlider(
-                    state = state,
-                    fullSliderRange = fullSliderRange,
-                    sliderWindowStart = sliderWindowStart,
-                    sliderWindowEnd = sliderWindowEnd,
-                    mapZoom = mapZoom,
-                    onToggleSliderRange = {
-                        focusAfterDrag = false
-                        if (fullSliderRange) {
-                            val focused = focusedSliderWindow(
-                                startPosition = state.startPosition.toFloat(),
-                                endPosition = state.endPosition.toFloat(),
-                                lastIndex = state.track.lastIndex,
-                            )
-                            sliderWindowStart = focused.start
-                            sliderWindowEnd = focused.endInclusive
-                            cameraRequest = SegmentMapCameraRequest(
-                                target = SegmentMapCameraTarget.SEGMENT,
-                                token = cameraRequest.token + 1,
-                            )
-                        } else {
-                            sliderWindowStart = 0f
-                            sliderWindowEnd = state.track.lastIndex.toFloat()
-                            cameraRequest = SegmentMapCameraRequest(
-                                target = SegmentMapCameraTarget.FULL_RIDE,
-                                token = cameraRequest.token + 1,
+                Column(modifier = Modifier.padding(horizontal = DhavaSpacing.screen)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        DhavaSectionLabel(if (wholeRide) "Full ride" else "Selected range")
+                        IconButton(
+                            onClick = {
+                                domain = if (wholeRide) {
+                                    focusedDomain(
+                                        state.startPosition,
+                                        state.endPosition,
+                                        lastPosition,
+                                    )
+                                } else {
+                                    ProfileDomain(0.0, lastPosition)
+                                }
+                                cameraRequest = SegmentMapCameraRequest(
+                                    target = if (wholeRide) {
+                                        SegmentMapCameraTarget.SEGMENT
+                                    } else {
+                                        SegmentMapCameraTarget.FULL_RIDE
+                                    },
+                                    token = cameraRequest.token + 1,
+                                )
+                            },
+                        ) {
+                            Icon(
+                                imageVector = if (wholeRide) {
+                                    Icons.Outlined.ZoomInMap
+                                } else {
+                                    Icons.Outlined.ZoomOutMap
+                                },
+                                contentDescription = if (wholeRide) {
+                                    "Focus on selection"
+                                } else {
+                                    "Show full ride"
+                                },
                             )
                         }
-                    },
-                    onSelectionChange = { start, end ->
-                        focusAfterDrag = false
-                        onSelectionChange(start, end)
-                    },
-                    onSelectionFinished = { focusAfterDrag = true },
-                    onActiveHandleChange = { activeHandle = it },
-                )
+                    }
+                    SegmentProfileTrimmer(
+                        profile = state.profile,
+                        candidates = state.candidates,
+                        startPosition = state.startPosition,
+                        endPosition = state.endPosition,
+                        domain = domain,
+                        onSelectionChange = onSelectionChange,
+                        onDomainChange = { domain = it },
+                        onCandidatePicked = { candidate ->
+                            onSelectionChange(candidate.startPosition, candidate.endPosition)
+                            domain = focusedDomain(
+                                candidate.startPosition,
+                                candidate.endPosition,
+                                lastPosition,
+                            )
+                        },
+                        onActiveHandleChange = { activeHandle = it },
+                        height = SegmentProfileHeight,
+                    )
+                    TrimmerStatus(state = state, valid = valid, wholeRide = wholeRide)
+                    Spacer(Modifier.height(DhavaSpacing.small))
+                }
+                DhavaDivider(Modifier.padding(top = DhavaSpacing.small))
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .nestedScroll(flingBoundary)
                         .verticalScroll(rememberScrollState())
                         .padding(
                             start = DhavaSpacing.screen,
                             end = DhavaSpacing.screen,
+                            top = DhavaSpacing.large,
                             bottom = DhavaSpacing.screen,
                         )
                         .navigationBarsPadding(),
@@ -312,7 +302,6 @@ private fun EditorBody(
                     null -> null
                 },
                 trackingBottomInset = SegmentEditorSheetPeekHeight,
-                onZoomChanged = { mapZoom = it },
                 modifier = Modifier.fillMaxSize(),
             )
             Surface(
@@ -339,332 +328,49 @@ private fun EditorBody(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * One line under the chart. A rejected selection and a duplicate warning are
+ * different things and are never collapsed into one treatment: the first blocks
+ * saving, the second is advice the rider may ignore.
+ */
 @Composable
-private fun SegmentSelectionSlider(
+private fun TrimmerStatus(
     state: SegmentEditorState.Editing,
-    fullSliderRange: Boolean,
-    sliderWindowStart: Float,
-    sliderWindowEnd: Float,
-    mapZoom: Double,
-    onToggleSliderRange: () -> Unit,
-    onSelectionChange: (Double, Double) -> Unit,
-    onSelectionFinished: () -> Unit,
-    onActiveHandleChange: (SelectionHandle?) -> Unit,
+    valid: SelectionPreview.Valid?,
+    wholeRide: Boolean,
 ) {
-    val startInteractionSource = remember { MutableInteractionSource() }
-    val finishInteractionSource = remember { MutableInteractionSource() }
-    val haptic = LocalHapticFeedback.current
-    var precisionHandle by remember { mutableStateOf<SelectionHandle?>(null) }
-    var engagedHandle by remember { mutableStateOf<SelectionHandle?>(null) }
-    var scaledHandle by remember { mutableStateOf<SelectionHandle?>(null) }
-    var scaledLastRawValue by remember { mutableStateOf<Float?>(null) }
-    var scaledValue by remember { mutableFloatStateOf(0f) }
-    var scaledSensitivity by remember { mutableFloatStateOf(1f) }
-    val mapSensitivity = dragSensitivityForMapZoom(mapZoom)
+    val invalid = state.preview as? SelectionPreview.Invalid
+    val text: String
+    val color = when {
+        invalid != null -> {
+            text = invalid.message
+            MaterialTheme.colorScheme.error
+        }
 
-    PrecisionInteractionEffect(
-        interactionSource = startInteractionSource,
-        handle = SelectionHandle.START,
-        onHandleEngaged = {
-            engagedHandle = it
-            onActiveHandleChange(it)
-        },
-        onHandleReleased = {
-            if (engagedHandle == it) engagedHandle = null
-            onActiveHandleChange(null)
-        },
-        onPrecisionStarted = { handle ->
-            precisionHandle = handle
-            scaledHandle = null
-            scaledLastRawValue = null
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        },
-        onPrecisionEnded = {
-            if (precisionHandle == SelectionHandle.START) {
-                precisionHandle = null
-                scaledHandle = null
-                scaledLastRawValue = null
-            }
-        },
+        state.duplicateOf != null -> {
+            text = "Already covered by “${state.duplicateOf}” — saving still creates a new segment"
+            MaterialTheme.colorScheme.tertiary
+        }
+
+        valid != null -> {
+            text = listOfNotNull(
+                SegmentFormat.length(valid.lengthM),
+                SegmentFormat.gradient(valid.gradientPercent),
+                SegmentFormat.elapsed(valid.durationMs),
+            ).joinToString(" · ")
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        else -> {
+            text = if (wholeRide) "Pinch the chart to zoom in" else "Drag a marker to trim"
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
     )
-    PrecisionInteractionEffect(
-        interactionSource = finishInteractionSource,
-        handle = SelectionHandle.FINISH,
-        onHandleEngaged = {
-            engagedHandle = it
-            onActiveHandleChange(it)
-        },
-        onHandleReleased = {
-            if (engagedHandle == it) engagedHandle = null
-            onActiveHandleChange(null)
-        },
-        onPrecisionStarted = { handle ->
-            precisionHandle = handle
-            scaledHandle = null
-            scaledLastRawValue = null
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        },
-        onPrecisionEnded = {
-            if (precisionHandle == SelectionHandle.FINISH) {
-                precisionHandle = null
-                scaledHandle = null
-                scaledLastRawValue = null
-            }
-        },
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = DhavaSpacing.screen),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            DhavaSectionLabel(if (fullSliderRange) "Full ride" else "Selected range")
-            IconButton(onClick = onToggleSliderRange) {
-                Icon(
-                    imageVector = if (fullSliderRange) {
-                        Icons.Outlined.ZoomInMap
-                    } else {
-                        Icons.Outlined.ZoomOutMap
-                    },
-                    contentDescription = if (fullSliderRange) {
-                        "Focus on selection"
-                    } else {
-                        "Show full ride"
-                    },
-                )
-            }
-        }
-        RangeSlider(
-            value = state.startPosition.toFloat()..state.endPosition.toFloat(),
-            onValueChange = { range ->
-                val inferredHandle = if (
-                    abs(range.start - state.startPosition) >=
-                    abs(range.endInclusive - state.endPosition)
-                ) {
-                    SelectionHandle.START
-                } else {
-                    SelectionHandle.FINISH
-                }
-                val handle = precisionHandle ?: engagedHandle ?: inferredHandle
-                val precise = precisionHandle == handle
-                val sensitivity = mapSensitivity * if (precise) {
-                    PRECISION_SENSITIVITY
-                } else {
-                    1f
-                }
-                val proposedValue = when (handle) {
-                    SelectionHandle.START -> range.start
-                    SelectionHandle.FINISH -> range.endInclusive
-                }
-                val selectedValue = if (sensitivity < 0.999f) {
-                    if (
-                        scaledHandle != handle ||
-                        scaledLastRawValue == null ||
-                        abs(scaledSensitivity - sensitivity) > 0.001f
-                    ) {
-                        scaledHandle = handle
-                        scaledLastRawValue = proposedValue
-                        scaledSensitivity = sensitivity
-                        scaledValue = when (handle) {
-                            SelectionHandle.START -> state.startPosition.toFloat()
-                            SelectionHandle.FINISH -> state.endPosition.toFloat()
-                        }
-                        return@RangeSlider
-                    }
-                    scaledValue = scaledMovementValue(
-                        currentValue = scaledValue,
-                        proposedValue = proposedValue,
-                        previousProposedValue = checkNotNull(scaledLastRawValue),
-                        sensitivity = sensitivity,
-                    )
-                    scaledLastRawValue = proposedValue
-                    scaledValue
-                } else {
-                    scaledHandle = null
-                    scaledLastRawValue = null
-                    proposedValue
-                }
-                val start = when (handle) {
-                    SelectionHandle.START -> selectedValue.coerceIn(
-                            sliderWindowStart,
-                            (state.endPosition - MIN_SELECTION_POSITION_GAP).toFloat(),
-                        ).toDouble()
-                    SelectionHandle.FINISH -> state.startPosition
-                }
-                val end = when (handle) {
-                    SelectionHandle.START -> state.endPosition
-                    SelectionHandle.FINISH -> selectedValue.coerceIn(
-                            (state.startPosition + MIN_SELECTION_POSITION_GAP).toFloat(),
-                            sliderWindowEnd,
-                        ).toDouble()
-                }
-                onSelectionChange(start, end)
-            },
-            onValueChangeFinished = onSelectionFinished,
-            valueRange = sliderWindowStart..sliderWindowEnd,
-            startInteractionSource = startInteractionSource,
-            endInteractionSource = finishInteractionSource,
-            startThumb = {
-                PrecisionSliderThumb(
-                    interactionSource = startInteractionSource,
-                    active = precisionHandle == SelectionHandle.START,
-                )
-            },
-            endThumb = {
-                PrecisionSliderThumb(
-                    interactionSource = finishInteractionSource,
-                    active = precisionHandle == SelectionHandle.FINISH,
-                )
-            },
-        )
-        Text(
-            text = when {
-                precisionHandle != null && mapSensitivity < 0.999f ->
-                    "Precision · 10× + map zoom"
-                precisionHandle != null -> "Precision · 10× slower"
-                mapSensitivity < 0.999f -> "Map zoom · finer movement"
-                fullSliderRange -> "Hold a handle for precision"
-                else -> "Focused · hold a handle for precision"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = if (precisionHandle != null) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-        Spacer(Modifier.height(DhavaSpacing.small))
-    }
-}
-
-@Composable
-private fun PrecisionSliderThumb(
-    interactionSource: MutableInteractionSource,
-    active: Boolean,
-) {
-    Box(
-        modifier = Modifier.size(40.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (active) {
-            Surface(
-                modifier = Modifier.size(34.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                content = {},
-            )
-        }
-        SliderDefaults.Thumb(
-            interactionSource = interactionSource,
-            thumbSize = DpSize(
-                width = if (active) 10.dp else 6.dp,
-                height = 40.dp,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun PrecisionInteractionEffect(
-    interactionSource: MutableInteractionSource,
-    handle: SelectionHandle,
-    onHandleEngaged: (SelectionHandle) -> Unit,
-    onHandleReleased: (SelectionHandle) -> Unit,
-    onPrecisionStarted: (SelectionHandle) -> Unit,
-    onPrecisionEnded: (SelectionHandle) -> Unit,
-) {
-    val currentOnHandleEngaged by rememberUpdatedState(onHandleEngaged)
-    val currentOnHandleReleased by rememberUpdatedState(onHandleReleased)
-    val currentOnPrecisionStarted by rememberUpdatedState(onPrecisionStarted)
-    val currentOnPrecisionEnded by rememberUpdatedState(onPrecisionEnded)
-
-    LaunchedEffect(interactionSource, handle) {
-        var holdJob: Job? = null
-        var cancelCleanupJob: Job? = null
-        var precisionStarted = false
-        var dragging = false
-        var engaged = false
-        interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is PressInteraction.Press -> {
-                    holdJob?.cancel()
-                    cancelCleanupJob?.cancel()
-                    precisionStarted = false
-                    dragging = false
-                    engaged = true
-                    currentOnHandleEngaged(handle)
-                    holdJob = launch {
-                        delay(PRECISION_HOLD_DELAY_MS)
-                        precisionStarted = true
-                        currentOnPrecisionStarted(handle)
-                    }
-                }
-
-                is DragInteraction.Start -> {
-                    dragging = true
-                    cancelCleanupJob?.cancel()
-                    if (!precisionStarted) holdJob?.cancel()
-                }
-
-                is PressInteraction.Release -> {
-                    holdJob?.cancel()
-                    if (precisionStarted) {
-                        currentOnPrecisionEnded(handle)
-                        precisionStarted = false
-                    }
-                    if (engaged) {
-                        currentOnHandleReleased(handle)
-                        engaged = false
-                    }
-                    dragging = false
-                }
-
-                is PressInteraction.Cancel -> {
-                    holdJob?.cancel()
-                    if (!dragging) {
-                        cancelCleanupJob?.cancel()
-                        cancelCleanupJob = launch {
-                            // RangeSlider cancels the press immediately before
-                            // emitting Drag.Start. A short grace period keeps
-                            // precision armed across that handoff, but clears
-                            // it for a vertical gesture or cancellation.
-                            delay(PRECISION_DRAG_HANDOFF_MS)
-                            if (!dragging && precisionStarted) {
-                                currentOnPrecisionEnded(handle)
-                                precisionStarted = false
-                            }
-                            if (!dragging && engaged) {
-                                currentOnHandleReleased(handle)
-                                engaged = false
-                            }
-                        }
-                    }
-                }
-
-                is DragInteraction.Stop, is DragInteraction.Cancel -> {
-                    dragging = false
-                    cancelCleanupJob?.cancel()
-                    holdJob?.cancel()
-                    if (precisionStarted) {
-                        currentOnPrecisionEnded(handle)
-                        precisionStarted = false
-                    }
-                    if (engaged) {
-                        currentOnHandleReleased(handle)
-                        engaged = false
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -703,6 +409,18 @@ private fun SegmentEditorDetails(
                         modifier = Modifier.weight(1f),
                     )
                 }
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    DhavaMetric(
+                        value = SegmentFormat.gradient(preview.gradientPercent) ?: "—",
+                        label = "Average gradient",
+                        modifier = Modifier.weight(1f),
+                    )
+                    DhavaMetric(
+                        value = state.candidates.size.toString(),
+                        label = "Descents found",
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
 
             is SelectionPreview.Invalid -> Text(
@@ -710,6 +428,22 @@ private fun SegmentEditorDetails(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
+        }
+        if (state.duplicateOf != null) {
+            Spacer(Modifier.height(DhavaSpacing.medium))
+            DhavaPanel(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            ) {
+                Text(
+                    text = "This selection covers “${state.duplicateOf}”, which you already " +
+                        "have. Dhava never merges segments, so saving this creates a second " +
+                        "one with its own results.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(DhavaSpacing.large),
+                )
+            }
         }
         valid?.let { preview ->
             Spacer(Modifier.height(DhavaSpacing.medium))
@@ -726,11 +460,11 @@ private fun SegmentEditorDetails(
             }
         }
         Spacer(Modifier.height(DhavaSpacing.large))
-        OutlinedTextField(
+        DhavaTextField(
             value = state.name,
             onValueChange = onNameChange,
-            label = { Text("Segment name") },
-            singleLine = true,
+            label = "Segment name",
+            placeholder = "Name this trail",
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(DhavaSpacing.large))
@@ -770,55 +504,8 @@ private fun List<CanonicalPoint>.toMapSections(): List<List<SegmentMapPoint>> {
 }
 
 private const val MAX_SECTION_GAP_MS = 3_000L
-private const val SLIDER_FOCUS_DELAY_MS = 800L
-private const val SLIDER_FOCUS_PADDING_FRACTION = 0.08f
-private const val MIN_SLIDER_FOCUS_PADDING_POINTS = 10
-private const val PRECISION_HOLD_DELAY_MS = 700L
-private const val PRECISION_DRAG_HANDOFF_MS = 80L
-private const val PRECISION_SENSITIVITY = 0.1f
-private const val MAP_FINE_ADJUST_ZOOM = 16.0
-private const val MIN_MAP_DRAG_SENSITIVITY = 0.05f
-private const val MIN_SELECTION_POSITION_GAP = 0.001
-private val SegmentEditorSheetPeekHeight = 152.dp
-
-/**
- * Gives the selected interval almost the full slider width while retaining a
- * small grab area beyond each handle. Values are continuous positions along
- * canonical edges, so focusing changes touch sensitivity without quantizing
- * the authored gate.
- */
-internal fun focusedSliderWindow(
-    startPosition: Float,
-    endPosition: Float,
-    lastIndex: Int,
-): ClosedFloatingPointRange<Float> {
-    if (lastIndex <= 0) return 0f..0f
-    val start = startPosition.coerceIn(0f, lastIndex.toFloat())
-    val end = endPosition.coerceIn(start, lastIndex.toFloat())
-    val span = (end - start).coerceAtLeast(1f)
-    val padding = max(
-        MIN_SLIDER_FOCUS_PADDING_POINTS.toFloat(),
-        ceil((span * SLIDER_FOCUS_PADDING_FRACTION).toDouble()).toFloat(),
-    )
-    return (start - padding).coerceAtLeast(0f)..
-        (end + padding).coerceAtMost(lastIndex.toFloat())
-}
-
-/** Scales finger movement without changing the handle's value when scaling begins. */
-internal fun scaledMovementValue(
-    currentValue: Float,
-    proposedValue: Float,
-    previousProposedValue: Float,
-    sensitivity: Float,
-): Float = currentValue + (proposedValue - previousProposedValue) * sensitivity
-
-/** Manual map zoom progressively lowers gate movement, while remaining continuous. */
-internal fun dragSensitivityForMapZoom(zoom: Double): Float {
-    if (!zoom.isFinite() || zoom <= MAP_FINE_ADJUST_ZOOM) return 1f
-    return 2.0.pow(MAP_FINE_ADJUST_ZOOM - zoom)
-        .toFloat()
-        .coerceIn(MIN_MAP_DRAG_SENSITIVITY, 1f)
-}
+private val SegmentProfileHeight = 132.dp
+private val SegmentEditorSheetPeekHeight = 288.dp
 
 /**
  * Immediate display geometry for a continuous selection. Rust independently

@@ -61,6 +61,16 @@ object SegmentFormat {
     fun altitude(altitudeM: Double): String =
         String.format(Locale.US, "%.0f m", altitudeM)
 
+    /**
+     * Signed gradient, e.g. `−6.2%`. The sign is kept because it is the whole
+     * point: a rider trimming a downhill segment needs to see at a glance that
+     * the selection descends.
+     */
+    fun gradient(gradientPercent: Double?): String? = gradientPercent?.let {
+        val sign = if (it < 0) "−" else "+"
+        String.format(Locale.US, "%s%.1f%%", sign, abs(it))
+    }
+
     /** Average speed of a run, `28.4 km/h`; null when it cannot be derived. */
     fun averageSpeed(lengthM: Double, elapsedMs: Long): String? {
         if (elapsedMs <= 0L || lengthM <= 0.0) return null

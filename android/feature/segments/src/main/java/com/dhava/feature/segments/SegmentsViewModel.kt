@@ -3,14 +3,16 @@ package com.dhava.feature.segments
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dhava.core.map.SegmentLibraryCamera
 import com.dhava.core.recording.RecordingRepository
 import com.dhava.core.recording.SegmentResults
 import com.dhava.core.recording.StoredAttempt
 import com.dhava.core.recording.StoredAttemptQuality
 import com.dhava.core.recording.StoredSegment
 import com.dhava.core.recording.attempts
-import com.dhava.core.recording.bestAttempt
+import com.dhava.core.recording.fastestUncountableAhead
 import com.dhava.core.recording.latestAttempt
+import com.dhava.core.recording.personalRecord
 import com.dhava.core.recording.rejections
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,18 +29,43 @@ data class SegmentSummary(
     val segment: StoredSegment,
     val attemptCount: Int,
     val uncertainCount: Int,
-    val rejectedCount: Int,
-    val best: StoredAttempt?,
+    /** Gate pairs that produced no time at all, with a reason each. */
+    val notTimedCount: Int,
+    /** Fastest countable run, or null while none exists. */
+    val record: StoredAttempt?,
     val latest: StoredAttempt?,
+    /** Fastest run that does not count, when it leads [record]. */
+    val fastestNotCounted: StoredAttempt?,
 )
 
 sealed interface SegmentsState {
     data object Loading : SegmentsState
-    data class Ready(val summaries: List<SegmentSummary>) : SegmentsState
+
+    data class Ready(
+        val summaries: List<SegmentSummary>,
+        val selectedId: String?,
+    ) : SegmentsState {
+        val selected: SegmentSummary?
+            get() = summaries.firstOrNull { it.segment.id == selectedId }
+    }
 }
 
 /**
- * Segment list with lazily recomputed results.
+ * The rider's map view of the library, kept for the life of the process.
+ *
+ * The library screen's ViewModel is cleared when its bottom-navigation entry is
+ * popped, so retaining the camera there would silently reframe the map on every
+ * tab switch. Panning to a trail is deliberate work; the app does not undo it.
+ * This is intentionally not persisted to disk: a cold start legitimately starts
+ * from "frame what I have". It becomes a per-riding-area value once areas
+ * exist.
+ */
+internal object SegmentLibraryCameraStore {
+    var camera: SegmentLibraryCamera? = null
+}
+
+/**
+ * Segment library with lazily recomputed results.
  *
  * Matching runs on every emission of the segment or recording list, but the
  * matcher only recomputes rides whose raw fingerprint, the algorithm version,
@@ -49,8 +76,10 @@ class SegmentsViewModel(application: Application) : AndroidViewModel(application
 
     private val repository = RecordingRepository.getInstance(application)
 
+    private val _selectedId = MutableStateFlow<String?>(null)
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val state: StateFlow<SegmentsState> = combine(
+    private val summaries: StateFlow<List<SegmentSummary>?> = combine(
         repository.segments,
         repository.recordings,
     ) { segments, _ -> segments }
@@ -58,20 +87,50 @@ class SegmentsViewModel(application: Application) : AndroidViewModel(application
             // Read the list again after the index is loaded: the flow's initial
             // pre-load emission is empty and would flash the empty state.
             repository.awaitReady()
-            SegmentsState.Ready(repository.segments.value.map { segment -> summary(segment) })
+            repository.segments.value.map { segment -> summary(segment) }
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, SegmentsState.Loading)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val state: StateFlow<SegmentsState> = combine(
+        summaries,
+        _selectedId,
+    ) { list, selectedId ->
+        if (list == null) {
+            SegmentsState.Loading
+        } else {
+            SegmentsState.Ready(
+                summaries = list,
+                // A segment deleted elsewhere must not stay selected, or the
+                // sheet would keep offering to open something that is gone.
+                selectedId = selectedId?.takeIf { id -> list.any { it.segment.id == id } },
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SegmentsState.Loading)
+
+    /** Selecting is not opening: it only highlights one segment on the map. */
+    fun select(segmentId: String?) {
+        _selectedId.value = segmentId
+    }
+
+    val retainedCamera: SegmentLibraryCamera?
+        get() = SegmentLibraryCameraStore.camera
+
+    fun onCameraSettled(camera: SegmentLibraryCamera) {
+        SegmentLibraryCameraStore.camera = camera
+    }
 
     private suspend fun summary(segment: StoredSegment): SegmentSummary {
         val results: SegmentResults? = repository.segmentResults(segment.id)
         val attempts = results?.attempts().orEmpty()
+        val record = attempts.personalRecord()
         return SegmentSummary(
             segment = segment,
             attemptCount = attempts.size,
             uncertainCount = attempts.count { it.quality == StoredAttemptQuality.UNCERTAIN },
-            rejectedCount = results?.rejections()?.size ?: 0,
-            best = attempts.bestAttempt(),
+            notTimedCount = results?.rejections()?.size ?: 0,
+            record = record,
             latest = attempts.latestAttempt(),
+            fastestNotCounted = attempts.fastestUncountableAhead(record),
         )
     }
 }
@@ -86,9 +145,12 @@ sealed interface SegmentDetailState {
     data class Ready(
         val segment: StoredSegment,
         val attempts: List<AttemptRow>,
-        val rejected: List<RejectionRow>,
-        val best: StoredAttempt?,
+        val notTimed: List<RejectionRow>,
+        /** Fastest countable run, or null while none exists. */
+        val record: StoredAttempt?,
         val latest: StoredAttempt?,
+        /** Fastest run that does not count, when it leads [record]. */
+        val fastestNotCounted: StoredAttempt?,
     ) : SegmentDetailState
 }
 
@@ -131,6 +193,7 @@ class SegmentDetailViewModel(
                 recording.id to (recording.title?.takeIf { it.isNotBlank() } ?: "Untitled ride")
             }
             val attempts = results?.attempts().orEmpty()
+            val record = attempts.personalRecord()
             _state.value = SegmentDetailState.Ready(
                 segment = segment,
                 attempts = attempts
@@ -138,7 +201,7 @@ class SegmentDetailViewModel(
                     .map { attempt ->
                         AttemptRow(attempt, titles[attempt.recordingId] ?: "Deleted ride")
                     },
-                rejected = results?.rejections().orEmpty()
+                notTimed = results?.rejections().orEmpty()
                     .sortedByDescending { it.startedAtMs }
                     .map { rejection ->
                         RejectionRow(
@@ -148,8 +211,9 @@ class SegmentDetailViewModel(
                             detail = rejection.detail,
                         )
                     },
-                best = attempts.bestAttempt(),
+                record = record,
                 latest = attempts.latestAttempt(),
+                fastestNotCounted = attempts.fastestUncountableAhead(record),
             )
         }
     }

@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -24,7 +26,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,13 +47,14 @@ import android.app.Application
 import com.dhava.core.map.SegmentMap
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.recording.StoredAttempt
-import com.dhava.core.recording.StoredAttemptQuality
 import com.dhava.core.recording.StoredSegment
+import com.dhava.core.recording.countable
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaSectionLabel
 import com.dhava.core.ui.DhavaSpacing
+import com.dhava.core.ui.DhavaTextField
 import com.dhava.core.ui.DhavaStatusPill
 import java.time.Instant
 import java.time.ZoneId
@@ -107,7 +109,12 @@ fun SegmentDetailScreen(
 
         when (val current = state) {
             SegmentDetailState.Loading, SegmentDetailState.Gone -> Box(
-                modifier = Modifier.fillMaxSize(),
+                // weight() rather than fillMaxSize(): a full-height child inside
+                // this column is measured against the whole screen, so it
+                // overflows past the bottom and pushes its centre off-centre.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -223,20 +230,27 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
                 )
             }
         }
-        state.best?.let { best ->
-            item {
+        item {
+            val record = state.record
+            if (record == null) {
+                NoRecordPanel(state)
+            } else {
                 ResultPanel(
-                    label = "Best",
-                    attempt = best,
+                    label = "Personal record",
+                    attempt = record,
                     segment = segment,
                     rideTitle = state.attempts
-                        .firstOrNull { it.attempt === best }
+                        .firstOrNull { it.attempt === record }
                         ?.rideTitle
                         .orEmpty(),
+                    footnote = state.fastestNotCounted?.let { faster ->
+                        "${SegmentFormat.elapsed(faster.elapsedMs)} was faster but does not " +
+                            "count, so it cannot be your record."
+                    },
                 )
             }
         }
-        state.latest?.takeIf { it !== state.best }?.let { latest ->
+        state.latest?.takeIf { it !== state.record }?.let { latest ->
             item {
                 ResultPanel(
                     label = "Latest",
@@ -265,10 +279,10 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
                 AttemptListRow(row)
             }
         }
-        if (state.rejected.isNotEmpty()) {
+        if (state.notTimed.isNotEmpty()) {
             item {
                 DhavaSectionLabel(
-                    text = "Not counted",
+                    text = "Not timed",
                     modifier = Modifier.padding(
                         start = DhavaSpacing.screen,
                         end = DhavaSpacing.screen,
@@ -277,11 +291,11 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
                     ),
                 )
             }
-            items(state.rejected, key = { it.startedAtMs }) { row ->
+            items(state.notTimed, key = { it.startedAtMs }) { row ->
                 RejectionListRow(row)
             }
         }
-        if (state.attempts.isEmpty() && state.rejected.isEmpty()) {
+        if (state.attempts.isEmpty() && state.notTimed.isEmpty()) {
             item {
                 Text(
                     text = "No ride has crossed both gates of this segment yet.",
@@ -318,12 +332,49 @@ private fun DraftNotice(segment: StoredSegment) {
     }
 }
 
+/**
+ * A segment with runs but no record.
+ *
+ * Falling back to the fastest uncertain run would read as a record the rider
+ * can never honestly beat, so the panel says what is missing instead.
+ */
+@Composable
+private fun NoRecordPanel(state: SegmentDetailState.Ready) {
+    DhavaPanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DhavaSpacing.screen, vertical = DhavaSpacing.small),
+    ) {
+        Column(modifier = Modifier.padding(DhavaSpacing.large)) {
+            DhavaSectionLabel("Personal record")
+            Spacer(Modifier.height(DhavaSpacing.small))
+            Text(
+                text = "—",
+                style = MaterialTheme.typography.displaySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Text(
+                text = when (state.attempts.size) {
+                    0 -> "No run has been timed on this segment yet."
+                    1 -> "The one timed run does not count yet — the row below says why."
+                    else -> "None of the ${state.attempts.size} timed runs counts yet — each " +
+                        "row below says why."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ResultPanel(
     label: String,
     attempt: StoredAttempt,
     segment: StoredSegment,
     rideTitle: String,
+    footnote: String? = null,
 ) {
     DhavaPanel(
         modifier = Modifier
@@ -356,6 +407,14 @@ private fun ResultPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             AttemptFlags(attempt)
+            if (footnote != null) {
+                Spacer(Modifier.height(DhavaSpacing.small))
+                Text(
+                    text = footnote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -390,24 +449,31 @@ private fun AttemptListRow(row: AttemptRow) {
     }
 }
 
+/**
+ * The verdict on a run, then the reasons behind it.
+ *
+ * A run quicker than the record has to carry its own explanation: without one,
+ * a list where the fastest row is not the PR reads as a defect rather than as
+ * honest measurement.
+ */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun AttemptFlags(attempt: StoredAttempt) {
-    if (attempt.flags.isEmpty()) return
+    if (attempt.countable && attempt.flags.isEmpty()) return
     Spacer(Modifier.height(DhavaSpacing.small))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.small),
         verticalArrangement = Arrangement.spacedBy(DhavaSpacing.small),
     ) {
-        attempt.flags.forEach { flag ->
+        if (!attempt.countable) {
             DhavaStatusPill(
-                text = flag.label(),
-                containerColor = if (attempt.quality == StoredAttemptQuality.UNCERTAIN) {
-                    MaterialTheme.colorScheme.secondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest
-                },
+                text = "Not counted",
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             )
+        }
+        attempt.flags.forEach { flag ->
+            DhavaStatusPill(text = flag.label())
         }
     }
 }
@@ -476,14 +542,19 @@ private fun RenameSegmentDialog(
 ) {
     var name by remember { mutableStateOf(initialName) }
     AlertDialog(
+        // Edge-to-edge windows are not resized for the keyboard, so a centred
+        // dialog would otherwise sit behind it.
+        modifier = Modifier.imePadding(),
         onDismissRequest = onDismiss,
         title = { Text("Rename segment") },
         text = {
-            OutlinedTextField(
+            DhavaTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Name") },
-                singleLine = true,
+                label = "Name",
+                keyboardActions = KeyboardActions(
+                    onDone = { if (name.isNotBlank()) onConfirm(name) },
+                ),
             )
         },
         confirmButton = {
