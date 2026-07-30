@@ -52,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -75,6 +76,7 @@ import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaEmptyState
 import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaSpacing
+import com.dhava.core.ui.rememberSheetFlingBoundary
 import com.dhava.core.ui.DhavaStatusPill
 import com.dhava.core.ui.DhavaTheme
 import com.dhava.fusion.ActivityState
@@ -473,6 +475,7 @@ private fun ActivityDetailsSheet(
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
+                    .nestedScroll(rememberSheetFlingBoundary())
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = DhavaSpacing.xLarge),
             ) {

@@ -32,7 +32,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
@@ -47,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.recording.Bike
@@ -55,6 +55,7 @@ import com.dhava.core.ui.DhavaMetric
 import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaScreenHeader
 import com.dhava.core.ui.DhavaSectionLabel
+import com.dhava.core.ui.DhavaTextField
 import com.dhava.core.ui.DhavaSizes
 import com.dhava.core.ui.DhavaSpacing
 import com.dhava.core.ui.DhavaTheme
@@ -171,20 +172,21 @@ internal fun SaveContent(
         DhavaSectionLabel("Details")
         Spacer(modifier = Modifier.height(DhavaSpacing.small))
 
-        OutlinedTextField(
+        DhavaTextField(
             value = title,
             onValueChange = { title = it },
-            label = { Text("Ride title") },
-            singleLine = true,
+            label = "Ride title",
+            imeAction = ImeAction.Next,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(modifier = Modifier.height(DhavaSpacing.small))
-        OutlinedTextField(
+        Spacer(modifier = Modifier.height(DhavaSpacing.large))
+        DhavaTextField(
             value = description,
             onValueChange = { description = it },
-            label = { Text("Notes (optional)") },
+            label = "Notes (optional)",
+            placeholder = "Conditions, feel, anything worth remembering",
+            singleLine = false,
             minLines = 2,
-            maxLines = 4,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(DhavaSpacing.large))
@@ -397,15 +399,17 @@ private fun AddBikeDialog(
     var type by rememberSaveable { mutableStateOf(BikeType.FULL_SUS) }
 
     AlertDialog(
+        // Edge-to-edge windows are not resized for the keyboard, so a centred
+        // dialog would otherwise sit behind it.
+        modifier = Modifier.imePadding(),
         onDismissRequest = onDismiss,
         title = { Text("Add bike") },
         text = {
             Column {
-                OutlinedTextField(
+                DhavaTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name") },
-                    singleLine = true,
+                    label = "Name",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
