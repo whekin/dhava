@@ -25,6 +25,7 @@ pub mod orientation;
 pub mod recording;
 pub mod replay;
 pub mod segment;
+pub mod segment_editor;
 
 pub use live::{LiveFusion, LiveSnapshot};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
@@ -46,6 +47,10 @@ pub use segment::{
     SegmentElevationPoint, SegmentError, SegmentMatchResult, SegmentProposal, build_segment,
     build_segment_continuous, match_segment, propose_segment, segment_match_version,
     segment_search_bounds,
+};
+pub use segment_editor::{
+    CandidateDescent, RideProfile, RideProfilePoint, SelectionOverlap, propose_descents,
+    ride_profile, selection_overlap,
 };
 
 /// Errors surfaced across the FFI boundary (Kotlin exceptions).

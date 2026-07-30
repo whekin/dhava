@@ -45,7 +45,7 @@ const DIRECTION_TOLERANCE_DEG: f64 = 60.0;
 /// Minimum planar distance used to estimate a stable gate tangent.
 const TANGENT_MIN_SPAN_M: f64 = 5.0;
 /// An attempt may not bridge a manual pause or a sensor/GPS gap.
-const MAX_ATTEMPT_GAP_MS: i64 = 3_000;
+pub(crate) const MAX_ATTEMPT_GAP_MS: i64 = 3_000;
 /// Allowed cumulative backward progress along the centerline, as a fraction of
 /// segment length. Absorbs GPS noise without accepting a rider who turned back.
 const MAX_BACKTRACK_FRACTION: f64 = 0.15;
@@ -432,7 +432,7 @@ fn build_segment_definition(
     })
 }
 
-fn continuous_selection(
+pub(crate) fn continuous_selection(
     track: &[CanonicalTrackPoint],
     start_position: f64,
     end_position: f64,
@@ -444,19 +444,42 @@ fn continuous_selection(
 
     let mut index = start_position.floor() as usize + 1;
     while (index as f64) < end_position {
-        selection.push(track[index].clone());
+        // A gate interpolated a hair short of the next canonical sample rounds
+        // to that sample's own timestamp. The rider's chosen endpoint is
+        // authoritative, so the duplicated inner sample is dropped rather than
+        // rejecting a selection that is geometrically fine.
+        if track[index].timestamp_ms
+            > selection
+                .last()
+                .map(|last| last.timestamp_ms)
+                .unwrap_or(i64::MIN)
+        {
+            selection.push(track[index].clone());
+        }
         index += 1;
     }
-    selection.push(interpolate_track_position(track, end_position)?);
-
+    let finish = interpolate_track_position(track, end_position)?;
     if selection
-        .windows(2)
-        .any(|pair| pair[1].timestamp_ms <= pair[0].timestamp_ms)
+        .last()
+        .is_some_and(|last| finish.timestamp_ms <= last.timestamp_ms)
     {
+        // Same collision at the finish: keep the authored gate, drop the sample
+        // it landed on.
+        selection.pop();
+    }
+    selection.push(finish);
+
+    if selection.len() < 2 {
         return Err(invalid(
             "selection endpoints are closer than the source timing resolution".to_string(),
         ));
     }
+    debug_assert!(
+        selection
+            .windows(2)
+            .all(|pair| pair[1].timestamp_ms > pair[0].timestamp_ms),
+        "selection timestamps must be strictly increasing",
+    );
     Ok(selection)
 }
 
@@ -1005,7 +1028,11 @@ fn coverage_fraction(progress: &[f64], total_length: f64) -> f64 {
 
 /// Perpendicular distance from `point` to `polyline`, plus the arclength of the
 /// nearest position along it.
-fn nearest_on_polyline(point: [f64; 2], polyline: &[[f64; 2]], arclength: &[f64]) -> (f64, f64) {
+pub(crate) fn nearest_on_polyline(
+    point: [f64; 2],
+    polyline: &[[f64; 2]],
+    arclength: &[f64],
+) -> (f64, f64) {
     let mut best = (f64::MAX, 0.0);
     for index in 0..polyline.len() - 1 {
         let (a, b) = (polyline[index], polyline[index + 1]);
@@ -1026,7 +1053,7 @@ fn nearest_on_polyline(point: [f64; 2], polyline: &[[f64; 2]], arclength: &[f64]
     best
 }
 
-fn arclength(polyline: &[[f64; 2]]) -> Vec<f64> {
+pub(crate) fn arclength(polyline: &[[f64; 2]]) -> Vec<f64> {
     let mut values = Vec::with_capacity(polyline.len());
     let mut total = 0.0;
     values.push(0.0);
@@ -1038,7 +1065,7 @@ fn arclength(polyline: &[[f64; 2]]) -> Vec<f64> {
     values
 }
 
-fn polyline_length_m(track: &[CanonicalTrackPoint]) -> f64 {
+pub(crate) fn polyline_length_m(track: &[CanonicalTrackPoint]) -> f64 {
     if track.len() < 2 {
         return 0.0;
     }

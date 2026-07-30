@@ -744,6 +744,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -771,13 +777,19 @@ fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
 fun uniffi_fusion_core_checksum_func_match_segment(
 ): Short
+fun uniffi_fusion_core_checksum_func_propose_descents(
+): Short
 fun uniffi_fusion_core_checksum_func_propose_segment(
 ): Short
 fun uniffi_fusion_core_checksum_func_replay_recording(
 ): Short
+fun uniffi_fusion_core_checksum_func_ride_profile(
+): Short
 fun uniffi_fusion_core_checksum_func_segment_match_version(
 ): Short
 fun uniffi_fusion_core_checksum_func_segment_search_bounds(
+): Short
+fun uniffi_fusion_core_checksum_func_selection_overlap(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
 ): Short
@@ -860,13 +872,19 @@ fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uni
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_match_segment(`definition`: RustBuffer.ByValue,`recordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_propose_descents(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_propose_segment(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_ride_profile(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_segment_match_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_segment_search_bounds(`definition`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_selection_overlap(`existing`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1012,16 +1030,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_match_segment() != 58736.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_propose_descents() != 29628.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_propose_segment() != 32802.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_replay_recording() != 45909.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_ride_profile() != 57811.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_segment_match_version() != 63275.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_segment_search_bounds() != 21236.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_selection_overlap() != 12877.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_push_gps() != 56011.toShort()) {
@@ -1684,6 +1711,60 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
 
 
 /**
+ * A descent the editor can offer as a ready-made selection.
+ */
+data class CandidateDescent (
+    var `startPosition`: kotlin.Double,
+    var `endPosition`: kotlin.Double,
+    var `lengthM`: kotlin.Double,
+    var `ascentM`: kotlin.Double?,
+    var `descentM`: kotlin.Double?,
+    /**
+     * Mean gradient over the candidate, percent. Negative is descending.
+     */
+    var `gradientPercent`: kotlin.Double?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCandidateDescent: FfiConverterRustBuffer<CandidateDescent> {
+    override fun read(buf: ByteBuffer): CandidateDescent {
+        return CandidateDescent(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CandidateDescent) = (
+            FfiConverterDouble.allocationSize(value.`startPosition`) +
+            FfiConverterDouble.allocationSize(value.`endPosition`) +
+            FfiConverterDouble.allocationSize(value.`lengthM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`ascentM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`descentM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`gradientPercent`)
+    )
+
+    override fun write(value: CandidateDescent, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`startPosition`, buf)
+            FfiConverterDouble.write(value.`endPosition`, buf)
+            FfiConverterDouble.write(value.`lengthM`, buf)
+            FfiConverterOptionalDouble.write(value.`ascentM`, buf)
+            FfiConverterOptionalDouble.write(value.`descentM`, buf)
+            FfiConverterOptionalDouble.write(value.`gradientPercent`, buf)
+    }
+}
+
+
+
+/**
  * Complete derived activity. Safe to delete and rebuild from the raw file.
  */
 data class CanonicalActivity (
@@ -2308,6 +2389,121 @@ public object FfiConverterTypeRideAnalysis: FfiConverterRustBuffer<RideAnalysis>
 
 
 /**
+ * A whole ride, reduced to what an elevation chart needs.
+ */
+data class RideProfile (
+    var `points`: List<RideProfilePoint>,
+    var `lengthM`: kotlin.Double,
+    var `minAltitudeM`: kotlin.Double?,
+    var `maxAltitudeM`: kotlin.Double?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRideProfile: FfiConverterRustBuffer<RideProfile> {
+    override fun read(buf: ByteBuffer): RideProfile {
+        return RideProfile(
+            FfiConverterSequenceTypeRideProfilePoint.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RideProfile) = (
+            FfiConverterSequenceTypeRideProfilePoint.allocationSize(value.`points`) +
+            FfiConverterDouble.allocationSize(value.`lengthM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`minAltitudeM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`maxAltitudeM`)
+    )
+
+    override fun write(value: RideProfile, buf: ByteBuffer) {
+            FfiConverterSequenceTypeRideProfilePoint.write(value.`points`, buf)
+            FfiConverterDouble.write(value.`lengthM`, buf)
+            FfiConverterOptionalDouble.write(value.`minAltitudeM`, buf)
+            FfiConverterOptionalDouble.write(value.`maxAltitudeM`, buf)
+    }
+}
+
+
+
+/**
+ * One sample of a whole ride's elevation and gradient story.
+ */
+data class RideProfilePoint (
+    /**
+     * Continuous position in the finalized track this sample came from, so the
+     * editor can map a point on the chart back to a gate position without
+     * doing geometry of its own.
+     */
+    var `position`: kotlin.Double,
+    /**
+     * Distance actually ridden from the start of the ride, meters. Manual
+     * pauses and recording gaps contribute nothing, so the axis never contains
+     * a jump the rider did not ride.
+     */
+    var `distanceM`: kotlin.Double,
+    var `altitudeM`: kotlin.Double?,
+    /**
+     * Signed gradient over a [`GRADIENT_WINDOW_M`] window, percent. Negative
+     * is descending.
+     */
+    var `gradientPercent`: kotlin.Double?,
+    /**
+     * Continuous recording section this sample belongs to.
+     */
+    var `sectionId`: kotlin.Int,
+    /**
+     * False when the previous sample is separated by a manual pause or a
+     * recording gap, so a chart can break the line instead of drawing across.
+     */
+    var `continues`: kotlin.Boolean
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRideProfilePoint: FfiConverterRustBuffer<RideProfilePoint> {
+    override fun read(buf: ByteBuffer): RideProfilePoint {
+        return RideProfilePoint(
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RideProfilePoint) = (
+            FfiConverterDouble.allocationSize(value.`position`) +
+            FfiConverterDouble.allocationSize(value.`distanceM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`altitudeM`) +
+            FfiConverterOptionalDouble.allocationSize(value.`gradientPercent`) +
+            FfiConverterInt.allocationSize(value.`sectionId`) +
+            FfiConverterBoolean.allocationSize(value.`continues`)
+    )
+
+    override fun write(value: RideProfilePoint, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`position`, buf)
+            FfiConverterDouble.write(value.`distanceM`, buf)
+            FfiConverterOptionalDouble.write(value.`altitudeM`, buf)
+            FfiConverterOptionalDouble.write(value.`gradientPercent`, buf)
+            FfiConverterInt.write(value.`sectionId`, buf)
+            FfiConverterBoolean.write(value.`continues`, buf)
+    }
+}
+
+
+
+/**
  * One completed run of a segment.
  */
 data class SegmentAttempt (
@@ -2673,6 +2869,49 @@ public object FfiConverterTypeSegmentProposal: FfiConverterRustBuffer<SegmentPro
             FfiConverterInt.write(value.`endIndex`, buf)
             FfiConverterDouble.write(value.`lengthM`, buf)
             FfiConverterOptionalDouble.write(value.`descentM`, buf)
+    }
+}
+
+
+
+/**
+ * How much a selection duplicates a segment that already exists.
+ */
+data class SelectionOverlap (
+    var `segmentId`: kotlin.String,
+    var `segmentName`: kotlin.String,
+    /**
+     * Fraction of the selection lying inside that segment's own corridor while
+     * running in the same direction.
+     */
+    var `coverage`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSelectionOverlap: FfiConverterRustBuffer<SelectionOverlap> {
+    override fun read(buf: ByteBuffer): SelectionOverlap {
+        return SelectionOverlap(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SelectionOverlap) = (
+            FfiConverterString.allocationSize(value.`segmentId`) +
+            FfiConverterString.allocationSize(value.`segmentName`) +
+            FfiConverterDouble.allocationSize(value.`coverage`)
+    )
+
+    override fun write(value: SelectionOverlap, buf: ByteBuffer) {
+            FfiConverterString.write(value.`segmentId`, buf)
+            FfiConverterString.write(value.`segmentName`, buf)
+            FfiConverterDouble.write(value.`coverage`, buf)
     }
 }
 
@@ -3301,6 +3540,38 @@ public object FfiConverterOptionalTypeSegmentProposal: FfiConverterRustBuffer<Se
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeSelectionOverlap: FfiConverterRustBuffer<SelectionOverlap?> {
+    override fun read(buf: ByteBuffer): SelectionOverlap? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSelectionOverlap.read(buf)
+    }
+
+    override fun allocationSize(value: SelectionOverlap?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSelectionOverlap.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SelectionOverlap?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSelectionOverlap.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeActivityState: FfiConverterRustBuffer<ActivityState?> {
     override fun read(buf: ByteBuffer): ActivityState? {
         if (buf.get().toInt() == 0) {
@@ -3379,6 +3650,34 @@ public object FfiConverterSequenceTypeAirtimeWindow: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeAirtimeWindow.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeCandidateDescent: FfiConverterRustBuffer<List<CandidateDescent>> {
+    override fun read(buf: ByteBuffer): List<CandidateDescent> {
+        val len = buf.getInt()
+        return List<CandidateDescent>(len) {
+            FfiConverterTypeCandidateDescent.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<CandidateDescent>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeCandidateDescent.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<CandidateDescent>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeCandidateDescent.write(it, buf)
         }
     }
 }
@@ -3501,6 +3800,34 @@ public object FfiConverterSequenceTypeRejectedAttempt: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeRideProfilePoint: FfiConverterRustBuffer<List<RideProfilePoint>> {
+    override fun read(buf: ByteBuffer): List<RideProfilePoint> {
+        val len = buf.getInt()
+        return List<RideProfilePoint>(len) {
+            FfiConverterTypeRideProfilePoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RideProfilePoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRideProfilePoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RideProfilePoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRideProfilePoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeSegmentAttempt: FfiConverterRustBuffer<List<SegmentAttempt>> {
     override fun read(buf: ByteBuffer): List<SegmentAttempt> {
         val len = buf.getInt()
@@ -3519,6 +3846,34 @@ public object FfiConverterSequenceTypeSegmentAttempt: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeSegmentAttempt.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeSegmentDefinition: FfiConverterRustBuffer<List<SegmentDefinition>> {
+    override fun read(buf: ByteBuffer): List<SegmentDefinition> {
+        val len = buf.getInt()
+        return List<SegmentDefinition>(len) {
+            FfiConverterTypeSegmentDefinition.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<SegmentDefinition>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeSegmentDefinition.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<SegmentDefinition>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeSegmentDefinition.write(it, buf)
         }
     }
 }
@@ -3692,6 +4047,24 @@ public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<A
 
 
         /**
+         * Every descent in `track` worth offering, longest first.
+         *
+         * Reuses the conservative [`ActivityState`] pass rather than inventing a
+         * gradient heuristic, because a car descending a switchback road is
+         * geometrically indistinguishable from a rider descending a trail. Stops,
+         * pauses, recording gaps and motorised evidence always end a candidate; short
+         * non-descending links inside one trail do not.
+         */ fun `proposeDescents`(`track`: List<CanonicalTrackPoint>): List<CandidateDescent> {
+            return FfiConverterSequenceTypeCandidateDescent.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_propose_descents(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),_status)
+}
+    )
+    }
+
+
+        /**
          * Suggests the longest continuous descent in `track` as a default selection.
          *
          * Uses the existing conservative [`ActivityState`] pass, so the suggestion
@@ -3718,6 +4091,18 @@ public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<A
 
 
         /**
+         * Elevation and gradient of a whole finalized track, sampled for a chart.
+         */ fun `rideProfile`(`track`: List<CanonicalTrackPoint>): RideProfile {
+            return FfiConverterTypeRideProfile.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_profile(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),_status)
+}
+    )
+    }
+
+
+        /**
          * Current matching rules identifier.
          */ fun `segmentMatchVersion`(): kotlin.String {
             return FfiConverterString.lift(
@@ -3738,6 +4123,23 @@ public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<A
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_segment_search_bounds(
         FfiConverterTypeSegmentDefinition.lower(`definition`),_status)
+}
+    )
+    }
+
+
+        /**
+         * The existing segment a selection duplicates, if any.
+         *
+         * Reported so the editor can warn a rider who is about to author the same
+         * trail twice. It never merges definitions and never changes how attempts are
+         * timed: whether two segments may cover one trail is decided when a segment is
+         * published, not here.
+         */ fun `selectionOverlap`(`existing`: List<SegmentDefinition>, `track`: List<CanonicalTrackPoint>, `startPosition`: kotlin.Double, `endPosition`: kotlin.Double): SelectionOverlap? {
+            return FfiConverterOptionalTypeSelectionOverlap.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_selection_overlap(
+        FfiConverterSequenceTypeSegmentDefinition.lower(`existing`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterDouble.lower(`startPosition`),FfiConverterDouble.lower(`endPosition`),_status)
 }
     )
     }

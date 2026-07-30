@@ -1,24 +1,30 @@
 package com.dhava.core.fusion
 
+import com.dhava.fusion.CandidateDescent
 import com.dhava.fusion.CanonicalActivity
 import com.dhava.fusion.CanonicalTrackPoint
 import com.dhava.fusion.GeoBounds
 import com.dhava.fusion.RideAnalysis
+import com.dhava.fusion.RideProfile
 import com.dhava.fusion.RecordingReplay
 import com.dhava.fusion.SegmentBuildResult
 import com.dhava.fusion.SegmentDefinition
 import com.dhava.fusion.SegmentMatchResult
 import com.dhava.fusion.SegmentProposal
+import com.dhava.fusion.SelectionOverlap
 import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
 import com.dhava.fusion.buildSegment as ffiBuildSegment
 import com.dhava.fusion.buildSegmentContinuous as ffiBuildSegmentContinuous
 import com.dhava.fusion.finalizeRecording as ffiFinalizeRecording
 import com.dhava.fusion.matchSegment as ffiMatchSegment
+import com.dhava.fusion.proposeDescents as ffiProposeDescents
 import com.dhava.fusion.proposeSegment as ffiProposeSegment
 import com.dhava.fusion.replayRecording as ffiReplayRecording
+import com.dhava.fusion.rideProfile as ffiRideProfile
 import com.dhava.fusion.segmentMatchVersion as ffiSegmentMatchVersion
 import com.dhava.fusion.segmentSearchBounds as ffiSegmentSearchBounds
+import com.dhava.fusion.selectionOverlap as ffiSelectionOverlap
 
 /**
  * Thin facade over the Rust `fusion-core` crate (UniFFI bindings in
@@ -116,6 +122,35 @@ object FusionCore {
         startPosition,
         endPosition,
     )
+
+    /**
+     * Elevation, gradient and pause structure of one finalized track, sampled
+     * for the editor's chart. Every sample carries the continuous track
+     * position it came from, so the editor maps a point on the chart back to a
+     * gate without doing geometry of its own.
+     */
+    fun rideProfile(track: List<CanonicalTrackPoint>): RideProfile = ffiRideProfile(track)
+
+    /**
+     * Every descent in one ride worth offering as a ready-made selection,
+     * longest first. Stops, pauses, recording gaps and motorized evidence end a
+     * candidate; a short link inside one trail does not.
+     */
+    fun proposeDescents(track: List<CanonicalTrackPoint>): List<CandidateDescent> =
+        ffiProposeDescents(track)
+
+    /**
+     * The existing segment a selection would duplicate, if any. Advisory only:
+     * it warns a rider about to author the same trail twice and never merges
+     * definitions or changes how attempts are timed.
+     */
+    fun selectionOverlap(
+        existing: List<SegmentDefinition>,
+        track: List<CanonicalTrackPoint>,
+        startPosition: Double,
+        endPosition: Double,
+    ): SelectionOverlap? =
+        ffiSelectionOverlap(existing, track, startPosition, endPosition)
 
     /** Corridor-padded bounds of a segment, for cheap candidate prefiltering. */
     fun segmentSearchBounds(definition: SegmentDefinition): GeoBounds? =
