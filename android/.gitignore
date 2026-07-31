@@ -13,10 +13,11 @@ local.properties
 # OS
 .DS_Store
 
-# Keystores (never commit release keys)
+# Keystores and their passwords (never commit release keys)
 *.jks
 *.keystore
 !debug.keystore
+keystore.properties
 
 # Logs / captures
 captures/

@@ -106,10 +106,23 @@ fun RecordScreen(
     var mapVisible by remember {
         mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
+    // The idle panel must not claim it is warming up GPS before the permission
+    // exists — on a fresh install that was the first thing the rider read, and it
+    // was false. Refreshed on ON_START so returning from the system dialog or
+    // from Settings updates it.
+    fun locationPermitted(): Boolean = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == PackageManager.PERMISSION_GRANTED
+
+    var locationGranted by remember { mutableStateOf(locationPermitted()) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> mapVisible = true
+                Lifecycle.Event.ON_START -> {
+                    mapVisible = true
+                    locationGranted = locationPermitted()
+                }
                 Lifecycle.Event.ON_STOP -> mapVisible = false
                 else -> Unit
             }
@@ -157,9 +170,10 @@ fun RecordScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
-        val locationGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        permissionDenied = !locationGranted
-        if (locationGranted) continueAfterForegroundLocation()
+        val granted = results[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        locationGranted = granted
+        permissionDenied = !granted
+        if (granted) continueAfterForegroundLocation()
     }
 
     fun startWithPermissions(continueId: String? = null) {
@@ -252,6 +266,7 @@ fun RecordScreen(
             )
             else -> IdleContent(
                 gpsAccuracyM = previewAccuracyM,
+                locationGranted = locationGranted,
                 interruptedRecording = interruptedRecording,
                 errorMessage = startError ?: if (permissionDenied) {
                     "Precise location is required to record a ride."
@@ -304,6 +319,7 @@ private data class SaveTarget(val id: String, val startedAtMs: Long, val duratio
 @Composable
 private fun IdleContent(
     gpsAccuracyM: Float?,
+    locationGranted: Boolean,
     interruptedRecording: LocalRecording?,
     errorMessage: String?,
     onContinue: () -> Unit,
@@ -345,6 +361,8 @@ private fun IdleContent(
                         Spacer(Modifier.height(DhavaSpacing.small))
                         Text(
                             when {
+                                !locationGranted ->
+                                    "Location permission is needed — Dhava asks when you start."
                                 gpsAccuracyM == null -> "GPS warming up while this screen is open."
                                 gpsAccuracyM <= 15f -> "GPS ready · ±${gpsAccuracyM.toInt()} m"
                                 else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
@@ -706,6 +724,7 @@ private fun IdleContentPreview() {
         Surface(color = MaterialTheme.colorScheme.background) {
             IdleContent(
                 gpsAccuracyM = 6f,
+                locationGranted = true,
                 interruptedRecording = null,
                 errorMessage = null,
                 onContinue = {},
@@ -723,6 +742,7 @@ private fun InterruptedContentPreview() {
         Surface(color = MaterialTheme.colorScheme.background) {
             IdleContent(
                 gpsAccuracyM = 6f,
+                locationGranted = true,
                 interruptedRecording = LocalRecording(
                     id = "recovered",
                     startedAtMs = 1_780_000_000_000,
