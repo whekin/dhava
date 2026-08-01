@@ -17,7 +17,11 @@ android {
         // Replace with the real backend URL (HTTPS) per build type once one exists.
         val apiBaseUrl = (project.findProperty("dhavaApiBaseUrl") as String?)
             ?: "http://10.0.2.2:8080"
+        // Private-alpha perimeter key. Keep it in ~/.gradle/gradle.properties
+        // or pass it at build time; never commit the real value.
+        val apiAccessKey = (project.findProperty("dhavaApiAccessKey") as String?) ?: ""
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+        buildConfigField("String", "API_ACCESS_KEY", "\"$apiAccessKey\"")
         // Written into the recording meta line. Keep in sync with the :app
         // versionName until version info is centralized in the catalog.
         buildConfigField("String", "APP_VERSION", "\"0.1.0\"")

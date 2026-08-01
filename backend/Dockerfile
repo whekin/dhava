@@ -7,14 +7,19 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /bin/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /bin/api ./cmd/api \
+    && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /bin/healthcheck ./cmd/healthcheck
 
-# Final stage: distroless static image with CA certificates included
-FROM gcr.io/distroless/static:nonroot
+# The migration image provides the pinned CLI and a minimal shell for the
+# startup script. Migrations complete before the API opens its listener.
+FROM migrate/migrate:v4.18.3
 
 COPY --from=builder /bin/api /api
+COPY --from=builder /bin/healthcheck /healthcheck
+COPY migrations /migrations
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 EXPOSE 8080
-USER nonroot:nonroot
+USER 65532:65532
 
-ENTRYPOINT ["/api"]
+ENTRYPOINT ["/bin/sh", "/docker-entrypoint.sh"]

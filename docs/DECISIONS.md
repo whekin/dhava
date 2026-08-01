@@ -444,3 +444,27 @@ activity results are always recomputed canonically from the raw on-device file.
   cached per raw fingerprint in `segment-results/track-bounds.json`. Authoring one
   segment must not force a full fusion pass over every ride ever recorded; the finalized
   track is only built for rides whose GPS hull can actually touch the segment.
+
+## 2026-08-01 — Private-alpha backend is proxy-gated and stores no raw rides
+
+- The first hosted backend is an owner-only alpha on Coolify, deployed from the
+  GitHub App using `deploy/docker-compose.yml`. Coolify's proxy is the only public
+  ingress: the API uses `expose`, never a host `ports` mapping, while PostGIS has
+  a persistent private volume.
+- The deployed stack contains only the Go API and PostGIS. The fusion worker is a
+  non-running skeleton and MinIO would exist only to receive raw recordings, so
+  neither belongs in production yet. SQL migrations run idempotently inside the
+  API container before the listener starts; failure keeps readiness closed.
+- Production raw-ingestion routes are opt-in and disabled. This enforces the durable
+  rule that immutable GPS, IMU and barometer input stays on the device; a future
+  server request may upload only a bounded verification window under a separate
+  contract.
+- During private alpha, every application API route requires a shared
+  `X-Dhava-Access-Key`. Health/readiness and the browser-facing Strava OAuth callback
+  stay public; Strava routes additionally retain their per-installation Bearer
+  credential. The shared key is compiled only into owner builds and is explicitly
+  not public-user authentication: it must be rotated if an APK escapes and replaced
+  with real identities before distribution.
+- GitHub auto-deploy owns normal releases. Coolify MCP receives a team-scoped read
+  token for resource state and redacted logs; any future manual deployment token is
+  separate and limited to deployment permission. Secrets never enter Git or chat.

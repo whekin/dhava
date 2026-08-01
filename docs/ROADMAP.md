@@ -38,6 +38,9 @@ skeleton and deployment scaffolding.
   awaits a registered Strava app and public backend callback
 - Minimal Go OAuth/upload broker for Strava credentials; implemented and tested
   locally, while the recorder itself remains fully usable without backend connectivity
+- Coolify private-alpha deployment contract: proxy-only API, PostGIS persistence,
+  startup migrations, readiness healthcheck, shared alpha perimeter and raw uploads
+  disabled — prepared and locally verified; first live deployment pending
 - FIT export with pause semantics and sport metadata
 - Upgrade Strava uploads from GPX to FIT once canonical pause and device metadata are
   stable

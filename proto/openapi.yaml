@@ -6,6 +6,8 @@ info:
     Contract-first spec for the Dhava backend. Skeleton — grows with each phase.
 servers:
   - url: /api/v1
+security:
+  - privateAlphaAccessKey: []
 paths:
   /me:
     get:
@@ -16,7 +18,8 @@ paths:
           description: Not implemented yet
   /activities:
     post:
-      summary: Create an activity (Phase 1, no auth)
+      summary: Create an activity through the opt-in legacy raw-ingestion path
+      description: Available only when the server enables `RAW_UPLOADS_ENABLED` for development.
       operationId: createActivity
       requestBody:
         required: true
@@ -42,6 +45,7 @@ paths:
   /activities/{id}/raw:
     put:
       summary: Upload the raw recording (gzipped JSON Lines, see raw-recording-format.md)
+      description: Development-only compatibility route; production keeps raw on-device.
       operationId: uploadRawRecording
       parameters:
         - name: id
@@ -84,6 +88,7 @@ paths:
   /activities/{id}/finish:
     post:
       summary: Finish an activity (status → `uploaded`)
+      description: Development-only companion to the opt-in raw-ingestion path.
       operationId: finishActivity
       parameters:
         - name: id
@@ -117,7 +122,9 @@ paths:
     post:
       summary: Start or restart the one-time Strava OAuth connection
       operationId: beginStravaConnect
-      security: [{ deviceBearer: [] }]
+      security:
+        - privateAlphaAccessKey: []
+          deviceBearer: []
       responses:
         "200":
           description: Mobile OAuth URL to open outside the app
@@ -138,7 +145,9 @@ paths:
     get:
       summary: Get this app installation's Strava connection state
       operationId: getStravaConnection
-      security: [{ deviceBearer: [] }]
+      security:
+        - privateAlphaAccessKey: []
+          deviceBearer: []
       responses:
         "200":
           description: Current connection state
@@ -154,6 +163,7 @@ paths:
     get:
       summary: Strava browser callback; exchanges code server-side and redirects to Dhava
       operationId: completeStravaConnect
+      security: []
       parameters:
         - { name: state, in: query, schema: { type: string } }
         - { name: code, in: query, schema: { type: string } }
@@ -170,7 +180,9 @@ paths:
         same external_id polls the existing Strava upload instead of submitting
         a second activity.
       operationId: exportActivityToStrava
-      security: [{ deviceBearer: [] }]
+      security:
+        - privateAlphaAccessKey: []
+          deviceBearer: []
       requestBody:
         required: true
         content:
@@ -214,6 +226,13 @@ paths:
               schema: { $ref: "#/components/schemas/StravaExportStatus" }
 components:
   securitySchemes:
+    privateAlphaAccessKey:
+      type: apiKey
+      in: header
+      name: X-Dhava-Access-Key
+      description: >
+        Shared private-alpha perimeter key compiled only into owner test builds.
+        This is not user authentication and must be replaced before public distribution.
     deviceBearer:
       type: http
       scheme: bearer

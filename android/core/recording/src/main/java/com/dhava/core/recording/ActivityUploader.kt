@@ -61,6 +61,7 @@ internal data class FinishActivityRequest(
  */
 internal class ActivityUploader(
     private val baseUrl: String = BuildConfig.API_BASE_URL,
+    private val accessKey: String = BuildConfig.API_ACCESS_KEY,
 ) {
 
     private val client = OkHttpClient.Builder()
@@ -90,6 +91,7 @@ internal class ActivityUploader(
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl/api/v1/activities")
+            .withDhavaAccessKey(accessKey)
             .post(body)
             .build()
         client.newCall(request).execute().use { response ->
@@ -105,6 +107,7 @@ internal class ActivityUploader(
     private fun putRaw(serverId: String, file: File) {
         val request = Request.Builder()
             .url("$baseUrl/api/v1/activities/$serverId/raw")
+            .withDhavaAccessKey(accessKey)
             .put(file.asRequestBody("application/gzip".toMediaType()))
             .build()
         client.newCall(request).execute().use { response ->
@@ -128,6 +131,7 @@ internal class ActivityUploader(
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
             .url("$baseUrl/api/v1/activities/$serverId/finish")
+            .withDhavaAccessKey(accessKey)
             .post(body)
             .build()
         client.newCall(request).execute().use { response ->

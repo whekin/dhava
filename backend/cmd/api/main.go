@@ -67,6 +67,17 @@ func main() {
 	}
 
 	var routerOptions []api.RouterOption
+	if cfg.APIAccessKey == "" {
+		logger.Warn("API_ACCESS_KEY not set; private-alpha access gate is disabled")
+	} else {
+		routerOptions = append(routerOptions, api.WithAccessKey(cfg.APIAccessKey))
+	}
+	if cfg.RawUploadsEnabled {
+		routerOptions = append(routerOptions, api.WithRawUploadsEnabled(true))
+		logger.Warn("legacy raw recording uploads are enabled")
+	} else {
+		logger.Info("raw recording uploads disabled; raw stays on-device")
+	}
 	if cfg.StravaConfigured() && pool != nil {
 		stravaClient := dhavastrava.NewClient(
 			&http.Client{Timeout: 30 * time.Second},

@@ -63,3 +63,58 @@ func TestMeNotImplemented(t *testing.T) {
 		t.Errorf("error field = %q, want %q", body["error"], "not_implemented")
 	}
 }
+
+func TestPrivateAlphaAccessKeyProtectsAPIRoutes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewRouter(logger, nil, nil, WithAccessKey("alpha-secret"))
+
+	for _, test := range []struct {
+		name       string
+		accessKey  string
+		wantStatus int
+	}{
+		{name: "missing", wantStatus: http.StatusUnauthorized},
+		{name: "wrong", accessKey: "wrong", wantStatus: http.StatusUnauthorized},
+		{name: "accepted", accessKey: "alpha-secret", wantStatus: http.StatusNotImplemented},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+			if test.accessKey != "" {
+				request.Header.Set("X-Dhava-Access-Key", test.accessKey)
+			}
+
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, test.wantStatus)
+			}
+		})
+	}
+}
+
+func TestPrivateAlphaAccessKeyDoesNotProtectHealth(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewRouter(logger, nil, nil, WithAccessKey("alpha-secret"))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+func TestRawUploadRoutesAreOptIn(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := NewRouter(logger, nil, nil)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/activities", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+}

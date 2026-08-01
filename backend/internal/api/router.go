@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -28,6 +29,8 @@ type Server struct {
 	blobs           blob.Store
 	maxRawBodyBytes int64
 	strava          StravaBroker
+	accessKey       string
+	rawUploads      bool
 }
 
 // StravaBroker is the OAuth/upload behavior exposed through the HTTP API.
@@ -45,6 +48,22 @@ type RouterOption func(*Server)
 func WithStravaBroker(broker StravaBroker) RouterOption {
 	return func(server *Server) {
 		server.strava = broker
+	}
+}
+
+// WithAccessKey protects private-alpha API routes with X-Dhava-Access-Key.
+// Health/readiness and the browser-facing Strava callback remain public.
+func WithAccessKey(key string) RouterOption {
+	return func(server *Server) {
+		server.accessKey = key
+	}
+}
+
+// WithRawUploadsEnabled exposes the legacy activity/raw ingestion contract.
+// Product deployments intentionally omit it because raw sensor data stays on-device.
+func WithRawUploadsEnabled(enabled bool) RouterOption {
+	return func(server *Server) {
+		server.rawUploads = enabled
 	}
 }
 
@@ -66,7 +85,7 @@ func NewRouter(
 
 // newRouter is the test seam: it accepts the Datastore interface directly.
 func newRouter(logger *slog.Logger, pool *pgxpool.Pool, db Datastore, blobs blob.Store) http.Handler {
-	return newRouterWithOptions(logger, pool, db, blobs)
+	return newRouterWithOptions(logger, pool, db, blobs, WithRawUploadsEnabled(true))
 }
 
 func newRouterWithOptions(
@@ -97,17 +116,38 @@ func newRouterWithOptions(
 	r.Get("/readyz", s.handleReadyz)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/me", s.handleMe)
-		r.Post("/activities", s.handleCreateActivity)
-		r.Put("/activities/{id}/raw", s.handleUploadRaw)
-		r.Post("/activities/{id}/finish", s.handleFinishActivity)
-		r.Post("/strava/connect", s.handleBeginStravaConnect)
-		r.Get("/strava/connection", s.handleStravaConnection)
+		// The browser returns here from Strava and cannot carry the private app header.
 		r.Get("/strava/oauth/callback", s.handleStravaOAuthCallback)
-		r.Post("/strava/exports", s.handleStravaExport)
+
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAccessKey)
+			r.Get("/me", s.handleMe)
+			if s.rawUploads {
+				r.Post("/activities", s.handleCreateActivity)
+				r.Put("/activities/{id}/raw", s.handleUploadRaw)
+				r.Post("/activities/{id}/finish", s.handleFinishActivity)
+			}
+			r.Post("/strava/connect", s.handleBeginStravaConnect)
+			r.Get("/strava/connection", s.handleStravaConnection)
+			r.Post("/strava/exports", s.handleStravaExport)
+		})
 	})
 
 	return r
+}
+
+func (s *Server) requireAccessKey(next http.Handler) http.Handler {
+	if s.accessKey == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provided := r.Header.Get("X-Dhava-Access-Key")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.accessKey)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "access_key_required"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

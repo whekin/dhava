@@ -4,6 +4,7 @@ package config
 import (
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,12 @@ type Config struct {
 	DatabaseURL string
 	// LogLevel is one of: debug, info, warn, error.
 	LogLevel string
+	// APIAccessKey gates the private-alpha API through X-Dhava-Access-Key.
+	// Empty keeps local development open; production deployment requires it.
+	APIAccessKey string
+	// RawUploadsEnabled retains the legacy raw-ingestion endpoints for explicit
+	// development use. Product deployments keep raw sensor data on-device.
+	RawUploadsEnabled bool
 	// S3Endpoint is the S3/MinIO endpoint, optionally with scheme
 	// (e.g. "http://localhost:9000"). Empty means: use filesystem blob storage.
 	S3Endpoint string
@@ -45,6 +52,8 @@ func Load() Config {
 		Port:               getenv("PORT", "8080"),
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		LogLevel:           getenv("LOG_LEVEL", "info"),
+		APIAccessKey:       strings.TrimSpace(getenv("API_ACCESS_KEY", "")),
+		RawUploadsEnabled:  getenvBool("RAW_UPLOADS_ENABLED", false),
 		S3Endpoint:         getenv("S3_ENDPOINT", ""),
 		S3Bucket:           getenv("S3_BUCKET", "dhava"),
 		S3AccessKey:        getenv("S3_ACCESS_KEY", ""),
@@ -86,4 +95,16 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getenvBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

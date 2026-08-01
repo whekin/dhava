@@ -1,5 +1,6 @@
-# Dhava stack — deployable on Coolify as a Docker Compose resource.
-# Coolify injects FQDN/SSL via its proxy; only `api` needs to be exposed.
+# Dhava private-alpha stack — deployable on Coolify from the GitHub repository.
+# Assign the public domain to `api:8080` in Coolify. No container port is
+# published directly on the host; TLS and public routing belong to the proxy.
 
 services:
   api:
@@ -8,34 +9,26 @@ services:
       dockerfile: Dockerfile
     environment:
       PORT: "8080"
-      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:-dhava}@db:5432/dhava?sslmode=disable
+      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/dhava?sslmode=disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      S3_ENDPOINT: http://minio:9000
-      S3_BUCKET: raw-recordings
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-dhava}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dhava-dev-secret}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      API_ACCESS_KEY: ${API_ACCESS_KEY:?API_ACCESS_KEY is required}
+      RAW_UPLOADS_ENABLED: "false"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-dhava://strava/connected}
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     depends_on:
       db:
         condition: service_healthy
-      minio:
-        condition: service_started
-
-  fusion-worker:
-    build:
-      context: ../fusion
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:-dhava}@db:5432/dhava?sslmode=disable
-      RUST_LOG: ${RUST_LOG:-info}
-    depends_on:
-      db:
-        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
 
   db:
     # imresamu/postgis: multi-arch PostGIS build (arm64 + amd64) — the official
@@ -44,25 +37,16 @@ services:
     image: imresamu/postgis:17-3.5
     environment:
       POSTGRES_USER: dhava
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dhava}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: dhava
     volumes:
       - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dhava -d dhava"]
       interval: 5s
       timeout: 3s
-      retries: 10
-
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dhava}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dhava-dev-secret}
-    volumes:
-      - minio-data:/data
+      retries: 20
 
 volumes:
   db-data:
-  minio-data:

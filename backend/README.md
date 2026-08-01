@@ -11,6 +11,12 @@ Go HTTP API for Dhava (downhill MTB ride recording: segments, leaderboards, GPS/
 - `PORT` — HTTP port (default `8080`)
 - `DATABASE_URL` — PostgreSQL connection string (optional; `/readyz` reports 503 without it)
 - `LOG_LEVEL` — `debug` | `info` | `warn` | `error` (default `info`)
+- `API_ACCESS_KEY` — shared private-alpha perimeter key expected in
+  `X-Dhava-Access-Key`. Leaving it empty is convenient for local development;
+  the production Compose file requires it. This is not user authentication.
+- `RAW_UPLOADS_ENABLED` — exposes the legacy activity/raw upload endpoints when
+  `true` (default `false`). Product deployments keep immutable raw sensor data
+  on-device and must leave this disabled.
 - `S3_ENDPOINT` — S3/MinIO endpoint, scheme optional (e.g. `http://localhost:9000`; no scheme implies HTTPS). Unset → filesystem blob storage
 - `S3_BUCKET` — bucket for raw recordings (default `dhava`; created at startup if missing)
 - `S3_ACCESS_KEY` / `S3_SECRET_KEY` — S3 credentials
@@ -40,7 +46,24 @@ allows `127.0.0.1` callbacks. Set the app's Authorization Callback Domain to
 The browser callback reaches the Mac through ADB, then the API redirects to the
 registered `dhava://strava/connected` app link.
 
+Private-alpha Android builds targeting a protected backend also need the same
+access key outside the repository:
+
+    ./gradlew :app:assembleDebug \
+      -PdhavaApiBaseUrl=https://api.example.com \
+      -PdhavaApiAccessKey=replace-with-the-private-alpha-key
+
+Prefer putting those two properties in the developer's untracked
+`~/.gradle/gradle.properties`. Use a URL-safe key so it can be represented as a
+Gradle string property without extra escaping. The key is compiled into the APK,
+so rotate it if that private build is shared and replace this perimeter with
+real account authentication before public distribution.
+
 ## Migrations
 
 SQL files in `migrations/` use the [golang-migrate](https://github.com/golang-migrate/migrate) format:
 `migrate -path migrations -database "$DATABASE_URL" up`. Requires PostgreSQL with PostGIS.
+
+The production API image runs this command before starting the HTTP server. A
+migration failure prevents the API from becoming ready; repeated starts are
+safe because already-applied migrations are skipped.

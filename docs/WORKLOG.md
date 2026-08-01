@@ -1682,3 +1682,48 @@ first real case of a segment with no countable run. It renders exactly as
 designed — `—` for the record, "the one timed run does not count yet", and the
 run itself listed with `NOT COUNTED`, `DEFINES SEGMENT` and `WIDE MARGIN`. That
 path had only unit coverage until now.
+
+## 2026-08-01 — Coolify private-alpha deployment prepared
+
+The first hosted-backend seam is ready without pretending that the future shared
+segment service already exists. `deploy/docker-compose.yml` now contains only the Go
+API and a persistent PostGIS database. MinIO was removed because production raw
+recordings stay on the phone, and the Rust worker was removed because it is still a
+skeleton that exits rather than consumes a verification queue. The API is reachable
+only through Coolify's proxy (`expose`, no host `ports`). Required Compose variables
+fail closed before deployment instead of silently using development passwords.
+
+The API image contains a pinned golang-migrate CLI and applies pending SQL before it
+opens the HTTP listener. This replaced an initial one-shot migration service: Coolify's
+`exclude_from_hc` extension handles that service correctly, but makes the same file
+invalid to standard `docker compose`, violating the single-source deployment contract.
+Startup migrations keep the file portable and make a failed schema upgrade prevent
+readiness. A static `/healthcheck` binary drives container readiness through `/readyz`.
+
+Private-alpha routes are guarded by `X-Dhava-Access-Key`, configured separately from
+the existing per-installation Strava Bearer credential. Android adds the shared header
+without overwriting `Authorization`; its value is supplied through the untracked
+`dhavaApiAccessKey` Gradle property. Health/readiness and Strava's browser callback stay
+public. This is deliberately only an owner-build perimeter: the key is recoverable
+from the APK, so it is documented for rotation and replacement with user identity
+before public distribution.
+
+The legacy activity/raw/finish API is now explicitly opt-in through
+`RAW_UPLOADS_ENABLED` and disabled by default and in production. The OpenAPI contract
+records both the private-alpha header and this dev-only compatibility status. The
+Coolify runbook documents GitHub App deployment, required secrets, domain routing,
+first-deploy probes, database backups, owner APK configuration, and read-only MCP
+registration; normal deploys remain GitHub-owned, with any future manual deploy token
+kept separate and least-privilege.
+
+Verified: backend `go vet`, all Go tests and build; recording unit tests and lint plus
+the full Android debug assembly; standard Compose config; production API image build;
+and an isolated API/PostGIS smoke stack. The clean database migrated to v4 and reported
+ready, then an API restart printed `no change` and returned healthy again. The isolated
+containers, network and volume were removed afterward.
+
+Open items: create the Coolify GitHub App resource, choose its public API hostname,
+enter secrets, configure a database backup, and perform the first live deployment.
+Strava remains disabled until its application credentials and callback domain exist.
+Coolify MCP can be registered after a team-scoped read token is created; no token or
+production secret belongs in this repository or chat.

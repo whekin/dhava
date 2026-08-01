@@ -69,6 +69,7 @@ internal class StravaCredentialStore(context: Context) {
 internal class StravaApi(
     private val credentialStore: StravaCredentialStore,
     private val baseUrl: String = BuildConfig.API_BASE_URL,
+    private val accessKey: String = BuildConfig.API_ACCESS_KEY,
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -127,6 +128,7 @@ internal class StravaApi(
 
     private fun authenticatedRequest(url: String): Request.Builder = Request.Builder()
         .url(url)
+        .withDhavaAccessKey(accessKey)
         .header("Authorization", "Bearer ${credentialStore.token()}")
 
     private inline fun <reified T> executeJson(
