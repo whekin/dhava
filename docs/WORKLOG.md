@@ -1727,3 +1727,21 @@ enter secrets, configure a database backup, and perform the first live deploymen
 Strava remains disabled until its application credentials and callback domain exist.
 Coolify MCP can be registered after a team-scoped read token is created; no token or
 production secret belongs in this repository or chat.
+
+## 2026-08-01 — Coolify build context follows the repository project directory
+
+The first live deployment exposed a Compose path assumption that the local command did
+not reproduce. Coolify invokes Compose with `--project-directory` set to the cloned
+repository root, so the API context `../backend` resolved outside the clone as
+`/artifacts/backend`. The exact command shape reproduced locally as
+`/Users/whekin/Projects/backend not found`.
+
+The API build context is now repository-root-relative (`./backend`). Local commands use
+the same explicit project directory, and `deploy/check-compose.sh` locks that invariant
+down without building an image. `AGENTS.md` and the deployment runbook now show the
+portable invocation.
+
+Verified both the fast context check and the original root-project Docker build. The
+same build command that failed before now builds the API image successfully. No debug
+instrumentation or throwaway containers remain. The deployment needs a new commit and
+Coolify redeploy; no environment-variable change is required for this failure.

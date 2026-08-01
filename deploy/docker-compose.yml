@@ -5,7 +5,9 @@
 services:
   api:
     build:
-      context: ../backend
+      # Coolify sets Compose's project directory to the repository root.
+      # Keep this path root-relative so local and hosted builds resolve alike.
+      context: ./backend
       dockerfile: Dockerfile
     environment:
       PORT: "8080"

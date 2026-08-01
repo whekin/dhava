@@ -32,7 +32,7 @@ Dhava uses a single-context domain documentation layout. See `docs/agents/domain
 | `backend/` | Go 1.26, chi, pgx, PostGIS | `cd backend && make vet test build` |
 | `fusion/`  | Rust (edition 2024), workspace: `fusion-core` (lib), `fusion-worker` (bin) | `cd fusion && cargo test && cargo clippy` |
 | `proto/`   | OpenAPI spec + raw recording format | contract-first: update spec with API changes |
-| `deploy/`  | docker-compose (api, fusion-worker, postgis, minio) for Coolify | `cd deploy && docker compose up` |
+| `deploy/`  | docker-compose (api + postgis) for Coolify | `cd deploy && docker compose --project-directory .. -f docker-compose.yml up` |
 
 ## Architecture principles (do not violate)
 

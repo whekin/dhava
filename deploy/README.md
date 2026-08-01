@@ -20,6 +20,14 @@ server has a real segment verification queue.
 The API container waits for PostGIS, applies every pending migration, and only
 then starts listening. Its readiness check includes a database ping.
 
+For local Compose commands, preserve the same repository-root project directory
+that Coolify uses:
+
+```sh
+cd deploy
+docker compose --project-directory .. -f docker-compose.yml up
+```
+
 ## Environment
 
 Set these as Coolify secrets/variables before the first deployment:
