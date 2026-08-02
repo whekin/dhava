@@ -42,6 +42,10 @@ Set these as Coolify secrets/variables before the first deployment:
   PostgreSQL connection URL. `openssl rand -hex 32` is suitable.
 - `API_ACCESS_KEY` — required and independent from the database password.
   `openssl rand -hex 32` is suitable.
+- `FIREBASE_PROJECT_ID` — `nakvali-app` to enable Firebase ID-token verification.
+- `GOOGLE_APPLICATION_CREDENTIALS` — path inside the API container to a Coolify
+  secret file containing the Firebase service-account JSON. Mount it read-only and
+  make it readable by container user `65532`; never commit or paste its contents.
 - `PUBLIC_BASE_URL` — required HTTPS origin without a trailing slash, for
   example `https://api.example.com`.
 - `LOG_LEVEL` — optional; defaults to `info`.
@@ -77,10 +81,12 @@ curl -i -H "X-Nakvali-Access-Key: $NAKVALI_API_ACCESS_KEY" \
   https://api.example.com/api/v1/me
 ```
 
-Expected results are `200`, `200`, `401`, then `501` (the `/me` endpoint is
-still a contract stub). Also verify that the database volume is persistent and
-configure encrypted daily database backups before relying on Strava: OAuth
-tokens are stored in Postgres. Test a restore, not only backup creation.
+Expected results are `200`, `200`, `401`, then `401`: the final request passes the
+private-alpha perimeter but intentionally has no Firebase bearer token. Complete the
+end-to-end check from the Android Profile screen; a valid signed-in request returns
+`200` and creates or refreshes the local user. Also verify that the database volume is
+persistent and configure encrypted daily database backups before relying on Strava:
+OAuth tokens are stored in Postgres. Test a restore, not only backup creation.
 
 When Strava credentials are added, register the hostname from
 `PUBLIC_BASE_URL` as its Authorization Callback Domain. The full callback is

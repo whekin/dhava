@@ -1,0 +1,5 @@
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_firebase_uid_key;
+ALTER TABLE users DROP COLUMN IF EXISTS updated_at;
+ALTER TABLE users DROP COLUMN IF EXISTS email_verified;
+ALTER TABLE users DROP COLUMN IF EXISTS avatar_url;
+ALTER TABLE users DROP COLUMN IF EXISTS firebase_uid;

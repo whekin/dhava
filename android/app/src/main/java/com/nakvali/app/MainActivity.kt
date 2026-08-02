@@ -6,7 +6,9 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
@@ -17,12 +19,20 @@ import com.nakvali.core.ui.NakvaliTheme
 /** Single activity hosting the whole Compose UI. */
 class MainActivity : ComponentActivity() {
     private var openRecorderRequest by mutableLongStateOf(0L)
+    private val accountViewModel by viewModels<AccountViewModel>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            NakvaliRoot(openRecorderRequest)
+            val profileState by accountViewModel.state.collectAsState()
+            NakvaliRoot(
+                openRecorderRequest = openRecorderRequest,
+                profileState = profileState,
+                onSignIn = { accountViewModel.signIn(this) },
+                onSignOut = accountViewModel::signOut,
+                onRetryProfileSync = accountViewModel::retrySync,
+            )
         }
         handleAppIntent(intent)
     }
@@ -64,9 +74,21 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun NakvaliRoot(openRecorderRequest: Long) {
+private fun NakvaliRoot(
+    openRecorderRequest: Long,
+    profileState: com.nakvali.feature.profile.ProfileUiState,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onRetryProfileSync: () -> Unit,
+) {
     // Dark is the primary look for now; follows the system setting.
     NakvaliTheme {
-        NakvaliApp(openRecorderRequest)
+        NakvaliApp(
+            openRecorderRequest = openRecorderRequest,
+            profileState = profileState,
+            onSignIn = onSignIn,
+            onSignOut = onSignOut,
+            onRetryProfileSync = onRetryProfileSync,
+        )
     }
 }

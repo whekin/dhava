@@ -20,6 +20,7 @@ import (
 // Datastore is the subset of database operations the handlers need.
 // It is an interface so handlers can be tested without a live database.
 type Datastore interface {
+	UpsertFirebaseUser(ctx context.Context, identity store.FirebaseIdentity) (store.User, error)
 	CreateActivity(ctx context.Context, sport string, startedAt time.Time) (string, error)
 	ActivityExists(ctx context.Context, id string) (bool, error)
 	AttachRawRecording(ctx context.Context, activityID, storageKey, format string, sizeBytes int64) error

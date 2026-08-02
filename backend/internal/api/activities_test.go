@@ -27,6 +27,13 @@ type fakeDatastore struct {
 	rawSize    int64
 }
 
+func (f *fakeDatastore) UpsertFirebaseUser(
+	context.Context,
+	store.FirebaseIdentity,
+) (store.User, error) {
+	panic("unexpected UpsertFirebaseUser call")
+}
+
 func newFakeDatastore() *fakeDatastore {
 	return &fakeDatastore{
 		activities: map[string]bool{},

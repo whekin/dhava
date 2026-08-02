@@ -1958,3 +1958,34 @@ The resulting debug APK was installed as an in-place update to `com.nakvali.app`
 OnePlus `49b5d08f`; the process launched and remained alive with no Firebase startup
 or Android fatal exception in the captured log. The retired prototype package and its
 data were not touched.
+
+## 2026-08-02 — Google account sign-in and verified `/me` identity
+
+Implemented the first complete Nakvali account path. The new Profile destination uses
+Android Credential Manager to choose a Google account, exchanges the Google ID token
+through Firebase Authentication, restores Firebase sessions, signs out cleanly and
+shows explicit loading, signing-in, synced, local-only and retryable-error states.
+Raw recordings and local segments remain visibly account-independent. A fresh Firebase
+ID token is fetched only for API sync, never persisted by Nakvali, and one forced token
+refresh is attempted after a 401.
+
+Added `GET /api/v1/me` to the OpenAPI contract and Go API. The endpoint keeps the
+private-alpha access-key perimeter, additionally verifies the Firebase bearer token
+with the official Admin SDK, and upserts a Postgres user by verified Firebase UID.
+Migration 0005 adds the unique external UID plus selected profile fields while keeping
+the existing UUID as the internal product identity. Raw tokens and arbitrary claims
+are not logged or stored. Deployment now accepts the Firebase project ID and an ADC
+service-account path; the private JSON remains a Coolify-mounted secret, outside Git.
+
+Verified Go vet/tests/build and the full Android `test lintDebug assembleDebug` plus
+signed `:app:assembleRelease` pass. A debug APK configured for the deployed backend
+and local private-alpha key was installed
+over `com.nakvali.app` on OnePlus without touching either app's recordings. The Profile
+layout was inspected on-device; Credential Manager opened the system account chooser
+for Nakvali, cancellation restored the signed-out UI, and no fatal Android exception
+was observed. The shared Coolify Compose build context also passed `just deploy-check`.
+
+Production sync remains intentionally unverified until Coolify mounts a Firebase
+service-account JSON, sets `FIREBASE_PROJECT_ID=nakvali-app`, and redeploys. The later
+identity migration must deliberately link the existing anonymous installation/Strava
+credential to the signed-in user rather than silently changing those routes now.

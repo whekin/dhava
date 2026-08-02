@@ -16,6 +16,7 @@ import (
 	"github.com/whekin/nakvali/backend/internal/api"
 	"github.com/whekin/nakvali/backend/internal/blob"
 	"github.com/whekin/nakvali/backend/internal/config"
+	"github.com/whekin/nakvali/backend/internal/identity"
 	"github.com/whekin/nakvali/backend/internal/store"
 	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
@@ -77,6 +78,17 @@ func main() {
 		logger.Warn("legacy raw recording uploads are enabled")
 	} else {
 		logger.Info("raw recording uploads disabled; raw stays on-device")
+	}
+	if cfg.FirebaseProjectID != "" {
+		verifier, err := identity.NewFirebaseVerifier(ctx, cfg.FirebaseProjectID)
+		if err != nil {
+			logger.Error("failed to initialize Firebase identity verifier", "error", err)
+			os.Exit(1)
+		}
+		routerOptions = append(routerOptions, api.WithIdentityVerifier(verifier))
+		logger.Info("firebase identity verification enabled", "project_id", cfg.FirebaseProjectID)
+	} else {
+		logger.Warn("firebase identity verification disabled; FIREBASE_PROJECT_ID is not set")
 	}
 	if cfg.StravaConfigured() && pool != nil {
 		stravaClient := nakvalistrava.NewClient(

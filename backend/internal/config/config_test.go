@@ -5,6 +5,7 @@ import "testing"
 func TestLoadPrivateAlphaSettings(t *testing.T) {
 	t.Setenv("API_ACCESS_KEY", "  alpha-secret  ")
 	t.Setenv("RAW_UPLOADS_ENABLED", "true")
+	t.Setenv("FIREBASE_PROJECT_ID", "  nakvali-app  ")
 
 	config := Load()
 
@@ -13,6 +14,9 @@ func TestLoadPrivateAlphaSettings(t *testing.T) {
 	}
 	if !config.RawUploadsEnabled {
 		t.Fatal("RawUploadsEnabled = false, want true")
+	}
+	if config.FirebaseProjectID != "nakvali-app" {
+		t.Fatalf("FirebaseProjectID = %q, want trimmed value", config.FirebaseProjectID)
 	}
 }
 

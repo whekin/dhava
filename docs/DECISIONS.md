@@ -533,5 +533,22 @@ activity results are always recomputed canonically from the raw on-device file.
 - Firebase Analytics is not enabled merely because it appears in the console's setup
   example. Authentication does not require it, and telemetry remains a separate
   product/privacy decision.
-- Android sign-in UI/session state and Go ID-token verification remain separate next
-  steps; adding SDK dependencies alone is not treated as completed authentication.
+- Android sign-in UI/session state and Go ID-token verification remain separate
+  modules; adding SDK dependencies alone is not treated as completed authentication.
+
+## 2026-08-02 — Firebase identity is optional for local riding and mapped to a local user
+
+- Profile is Nakvali's account surface. Android uses Credential Manager for Google,
+  lets Firebase persist the session, requests a current ID token only when syncing,
+  and never stores or logs the token itself.
+- `GET /api/v1/me` is the first Firebase-authenticated API route. The Go API verifies
+  the bearer token with the official Firebase Admin SDK and trusts only the verified
+  UID and selected profile claims. Firebase UID is a unique external identity; a
+  Nakvali UUID remains the stable internal key for future rides, PRs and leaderboards.
+- Authentication is additive to the private-alpha perimeter: `/me` currently requires
+  both `X-Nakvali-Access-Key` and a Firebase bearer token. Strava keeps its anonymous
+  installation bearer until an explicit migration links existing credentials; the two
+  token types must never be guessed from the same route.
+- Account/backend failure never blocks recording, local segment matching, exports or
+  raw archives. A restored Firebase session may remain `Local only` while `/me` is
+  unavailable, then retry opportunistically. This preserves offline-first behavior.

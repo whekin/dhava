@@ -43,7 +43,7 @@ are independent.
    SHA-256 certificates as well as the local upload/release certificate, then download
    the refreshed `google-services.json` again.
 
-## Repository work after the console setup
+## Implemented application flow
 
 The Android foundation is configured: the Google services Gradle plugin, Firebase
 Android BoM, `firebase-auth`, Credential Manager, the Play Services credential bridge,
@@ -51,21 +51,38 @@ the Google ID library and the refreshed `android/app/google-services.json` are p
 Both debug and release builds generate `default_web_client_id` from that config; no
 client secret is embedded in source. Firebase Analytics is deliberately not included.
 
-The next Android step is the actual Credential Manager sign-in interaction and session
-state. The next backend step is Firebase ID-token verification and a local user keyed
-by verified Firebase `uid`; those are not implemented by the dependency/configuration
-setup alone.
+The Profile tab owns the explicit signed-out, signing-in, signed-in, syncing,
+local-only, retryable-error and sign-out states. Credential Manager obtains the
+Google ID token, Firebase exchanges it for a Firebase session, and Firebase itself
+persists that session. Nakvali never writes the Firebase ID token to app storage.
 
 After Firebase sign-in, Android obtains a Firebase ID token and sends it to the API as
 `Authorization: Bearer <token>` over HTTPS. The Go API verifies that token with the
 Firebase Admin SDK and uses only the verified Firebase `uid` as the external identity.
 Email and display name are profile attributes, not authorization keys.
 
-The backend then needs a local user row keyed by Firebase UID and a migration path
-from the current anonymous installation/device credential, including any future
-Strava connection. The private-alpha `X-Nakvali-Access-Key` may remain as a temporary
-deployment perimeter, but it is not user authentication and must not be required by a
-public release.
+`GET /api/v1/me` verifies a fresh Firebase ID token with the official Go Admin SDK and
+upserts a local user keyed by verified Firebase `uid`. The local UUID remains the
+stable key for Nakvali product data. Only verified profile claims (email, display
+name, avatar URL, email-verification state) are copied; raw tokens and arbitrary
+claims are neither persisted nor logged.
+
+If `/me` is unavailable, the Firebase session stays signed in and Profile reports
+`Local only`; recording, local segments and raw archives continue to work. A 401 gets
+one forced token refresh before becoming a retryable state. The anonymous installation
+credential used by the current Strava prototype remains separate until its deliberate
+account-migration step.
+
+The private-alpha `X-Nakvali-Access-Key` remains an additional deployment perimeter,
+but it is not user authentication and must not be required by a public release.
+
+## Production handoff
+
+Set `FIREBASE_PROJECT_ID=nakvali-app` in Coolify. Mount the service-account JSON as a
+read-only secret file and set `GOOGLE_APPLICATION_CREDENTIALS` to that container path.
+After redeploying, choose an account from Profile on a test build: the expected final
+state is `Synced`, and Postgres should contain one `users.firebase_uid` row. Do not
+paste the service-account JSON or a Firebase ID token into logs, Git, or chat.
 
 ## References
 

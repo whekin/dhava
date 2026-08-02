@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/whekin/nakvali/backend/internal/blob"
+	"github.com/whekin/nakvali/backend/internal/identity"
 	"github.com/whekin/nakvali/backend/internal/store"
 	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
@@ -29,6 +30,7 @@ type Server struct {
 	blobs           blob.Store
 	maxRawBodyBytes int64
 	strava          StravaBroker
+	identity        identity.Verifier
 	accessKey       string
 	rawUploads      bool
 }
@@ -48,6 +50,13 @@ type RouterOption func(*Server)
 func WithStravaBroker(broker StravaBroker) RouterOption {
 	return func(server *Server) {
 		server.strava = broker
+	}
+}
+
+// WithIdentityVerifier enables Firebase ID-token authentication for user routes.
+func WithIdentityVerifier(verifier identity.Verifier) RouterOption {
+	return func(server *Server) {
+		server.identity = verifier
 	}
 }
 
@@ -121,7 +130,7 @@ func newRouterWithOptions(
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAccessKey)
-			r.Get("/me", s.handleMe)
+			r.With(s.requireFirebaseIdentity).Get("/me", s.handleMe)
 			if s.rawUploads {
 				r.Post("/activities", s.handleCreateActivity)
 				r.Put("/activities/{id}/raw", s.handleUploadRaw)
@@ -169,11 +178,6 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// handleMe is a stub for the authenticated user profile endpoint.
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "not_implemented"})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

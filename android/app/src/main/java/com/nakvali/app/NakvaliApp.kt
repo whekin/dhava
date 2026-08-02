@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
@@ -31,6 +32,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.nakvali.feature.activity.ActivityDetailScreen
+import com.nakvali.feature.profile.ProfileScreen
+import com.nakvali.feature.profile.ProfileUiState
 import com.nakvali.feature.record.RecordScreen
 import com.nakvali.feature.record.ActivitiesScreen
 import com.nakvali.feature.record.SaveRecordingScreen
@@ -48,12 +51,19 @@ private enum class NakvaliDestination(
     Record("record", "Record", Icons.Filled.PlayArrow),
     Activities("activities", "Activities", Icons.AutoMirrored.Filled.List),
     Segments("segments", "Segments", Icons.Filled.Timer),
+    Profile("profile", "Profile", Icons.Filled.Person),
     Settings("settings", "Settings", Icons.Filled.Settings),
 }
 
 /** App scaffold: bottom navigation bar plus the navigation host. */
 @Composable
-fun NakvaliApp(openRecorderRequest: Long = 0L) {
+fun NakvaliApp(
+    openRecorderRequest: Long = 0L,
+    profileState: ProfileUiState = ProfileUiState.Loading,
+    onSignIn: () -> Unit = {},
+    onSignOut: () -> Unit = {},
+    onRetryProfileSync: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
@@ -138,6 +148,14 @@ fun NakvaliApp(openRecorderRequest: Long = 0L) {
                     onEditImportedTrace = { id ->
                         navController.navigate("segment-import-editor/$id")
                     },
+                )
+            }
+            composable(NakvaliDestination.Profile.route) {
+                ProfileScreen(
+                    state = profileState,
+                    onSignIn = onSignIn,
+                    onSignOut = onSignOut,
+                    onRetrySync = onRetryProfileSync,
                 )
             }
             composable(NakvaliDestination.Settings.route) { SettingsScreen() }

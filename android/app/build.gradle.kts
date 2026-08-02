@@ -46,6 +46,12 @@ android {
         versionCode = 2
         versionName = "0.1.0-test1"
 
+        val apiBaseUrl = (project.findProperty("nakvaliApiBaseUrl") as String?)
+            ?: "http://10.0.2.2:8080"
+        val apiAccessKey = (project.findProperty("nakvaliApiAccessKey") as String?) ?: ""
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+        buildConfigField("String", "API_ACCESS_KEY", "\"$apiAccessKey\"")
+
         ndk {
             // Ship only the ABIs the whole app supports. MapLibre publishes
             // four, but fusion-core is cross-compiled for these two, so a device
@@ -82,6 +88,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -92,6 +99,7 @@ dependencies {
     implementation(project(":feature:record"))
     implementation(project(":feature:activity"))
     implementation(project(":feature:segments"))
+    implementation(project(":feature:profile"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -102,6 +110,9 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.okhttp)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

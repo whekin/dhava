@@ -45,22 +45,22 @@ func TestReadyzWithoutDatabase(t *testing.T) {
 	}
 }
 
-func TestMeNotImplemented(t *testing.T) {
+func TestMeUnavailableWithoutFirebaseVerifier(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 
 	newTestRouter(t).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 
 	var body map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("invalid JSON body: %v", err)
 	}
-	if body["error"] != "not_implemented" {
-		t.Errorf("error field = %q, want %q", body["error"], "not_implemented")
+	if body["error"] != "auth_unavailable" {
+		t.Errorf("error field = %q, want %q", body["error"], "auth_unavailable")
 	}
 }
 
@@ -75,7 +75,7 @@ func TestPrivateAlphaAccessKeyProtectsAPIRoutes(t *testing.T) {
 	}{
 		{name: "missing", wantStatus: http.StatusUnauthorized},
 		{name: "wrong", accessKey: "wrong", wantStatus: http.StatusUnauthorized},
-		{name: "accepted", accessKey: "alpha-secret", wantStatus: http.StatusNotImplemented},
+		{name: "accepted", accessKey: "alpha-secret", wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()

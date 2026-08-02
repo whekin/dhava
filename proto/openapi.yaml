@@ -13,9 +13,25 @@ paths:
     get:
       summary: Current user profile
       operationId: getMe
+      security:
+        - privateAlphaAccessKey: []
+          firebaseBearer: []
       responses:
-        "501":
-          description: Not implemented yet
+        "200":
+          description: Verified Firebase identity mapped to the local Nakvali user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserProfile" }
+        "401":
+          description: Missing, expired or invalid Firebase ID token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Firebase verification or the product database is unavailable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /activities:
     post:
       summary: Create an activity through the opt-in legacy raw-ingestion path
@@ -239,7 +255,23 @@ components:
       description: >
         Random per-installation credential generated and retained by Android.
         The backend stores only its SHA-256 hash; it is not a Nakvali user account.
+    firebaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Firebase ID token obtained by the signed-in Android user and verified by the
+        API with the Firebase Admin SDK. Its verified uid is the external identity.
   schemas:
+    UserProfile:
+      type: object
+      required: [id, email, display_name, avatar_url, email_verified]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        display_name: { type: string }
+        avatar_url: { type: string, format: uri }
+        email_verified: { type: boolean }
     CreateActivityRequest:
       type: object
       required: [sport, started_at_ms]

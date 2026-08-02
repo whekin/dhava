@@ -19,6 +19,9 @@ type Config struct {
 	// APIAccessKey gates the private-alpha API through X-Nakvali-Access-Key.
 	// Empty keeps local development open; production deployment requires it.
 	APIAccessKey string
+	// FirebaseProjectID enables Firebase ID-token verification. The Admin SDK
+	// reads credentials through GOOGLE_APPLICATION_CREDENTIALS.
+	FirebaseProjectID string
 	// RawUploadsEnabled retains the legacy raw-ingestion endpoints for explicit
 	// development use. Product deployments keep raw sensor data on-device.
 	RawUploadsEnabled bool
@@ -53,6 +56,7 @@ func Load() Config {
 		DatabaseURL:        getenv("DATABASE_URL", ""),
 		LogLevel:           getenv("LOG_LEVEL", "info"),
 		APIAccessKey:       strings.TrimSpace(getenv("API_ACCESS_KEY", "")),
+		FirebaseProjectID:  strings.TrimSpace(getenv("FIREBASE_PROJECT_ID", "")),
 		RawUploadsEnabled:  getenvBool("RAW_UPLOADS_ENABLED", false),
 		S3Endpoint:         getenv("S3_ENDPOINT", ""),
 		S3Bucket:           getenv("S3_BUCKET", "nakvali"),
