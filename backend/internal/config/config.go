@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const defaultFirebaseCredentialsFile = "/run/secrets/firebase-service-account.json"
+
 // Config holds all runtime configuration, loaded from environment variables.
 type Config struct {
 	// Port is the TCP port the HTTP server listens on.
@@ -20,8 +22,11 @@ type Config struct {
 	// Empty keeps local development open; production deployment requires it.
 	APIAccessKey string
 	// FirebaseProjectID enables Firebase ID-token verification. The Admin SDK
-	// reads credentials through GOOGLE_APPLICATION_CREDENTIALS.
+	// reads credentials from FirebaseCredentialsFile.
 	FirebaseProjectID string
+	// FirebaseCredentialsFile is the runtime-secret mount. The standard Google
+	// environment variable may override it for a native local backend process.
+	FirebaseCredentialsFile string
 	// RawUploadsEnabled retains the legacy raw-ingestion endpoints for explicit
 	// development use. Product deployments keep raw sensor data on-device.
 	RawUploadsEnabled bool
@@ -52,11 +57,15 @@ type Config struct {
 // Load reads configuration from the environment, applying defaults.
 func Load() Config {
 	return Config{
-		Port:               getenv("PORT", "8080"),
-		DatabaseURL:        getenv("DATABASE_URL", ""),
-		LogLevel:           getenv("LOG_LEVEL", "info"),
-		APIAccessKey:       strings.TrimSpace(getenv("API_ACCESS_KEY", "")),
-		FirebaseProjectID:  strings.TrimSpace(getenv("FIREBASE_PROJECT_ID", "")),
+		Port:              getenv("PORT", "8080"),
+		DatabaseURL:       getenv("DATABASE_URL", ""),
+		LogLevel:          getenv("LOG_LEVEL", "info"),
+		APIAccessKey:      strings.TrimSpace(getenv("API_ACCESS_KEY", "")),
+		FirebaseProjectID: strings.TrimSpace(getenv("FIREBASE_PROJECT_ID", "")),
+		FirebaseCredentialsFile: strings.TrimSpace(getenv(
+			"GOOGLE_APPLICATION_CREDENTIALS",
+			defaultFirebaseCredentialsFile,
+		)),
 		RawUploadsEnabled:  getenvBool("RAW_UPLOADS_ENABLED", false),
 		S3Endpoint:         getenv("S3_ENDPOINT", ""),
 		S3Bucket:           getenv("S3_BUCKET", "nakvali"),

@@ -43,9 +43,10 @@ Set these as Coolify secrets/variables before the first deployment:
 - `API_ACCESS_KEY` — required and independent from the database password.
   `openssl rand -hex 32` is suitable.
 - `FIREBASE_PROJECT_ID` — `nakvali-app` to enable Firebase ID-token verification.
-- `FIREBASE_SERVICE_ACCOUNT_JSON` — the complete downloaded service-account JSON.
-  Create it in Coolify's **Normal view** as a locked **Multiline**, **Runtime-only**
-  variable (disable Build Variable). Native Compose mounts it read-only at
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — the complete service-account JSON compacted to
+  one line (`jq -c .`). Create it in Coolify's **Normal view** as a locked
+  **Literal**, **Runtime-only** variable with **Multiline disabled** and Build Variable
+  disabled. Native Compose mounts it read-only at
   `/run/secrets/firebase-service-account.json`; it is not passed into the API process
   environment or embedded in the image. Never commit or paste its contents into logs
   or chat.
@@ -56,6 +57,10 @@ Set these as Coolify secrets/variables before the first deployment:
   is registered.
 - `STRAVA_APP_REDIRECT_URL` — optional; defaults to
   `nakvali://strava/connected`.
+
+Do not create `GOOGLE_APPLICATION_CREDENTIALS` in Coolify. The backend passes the
+fixed runtime-secret path directly to the Firebase Admin SDK. If an older deployment
+left this variable in Coolify, remove it after updating the Compose source.
 
 Keep `RAW_UPLOADS_ENABLED=false`; it is fixed in the production Compose file.
 Never paste the access key, Strava secret, database password, or Coolify token

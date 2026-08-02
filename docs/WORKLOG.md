@@ -2017,3 +2017,18 @@ stack helper automatically reads that file into the runtime Compose secret and e
 project `nakvali-app`, while absence of the file keeps Firebase disabled with the
 inert local placeholder. Common Firebase Admin filenames and the whole secrets folder
 remain ignored as defense in depth.
+
+## 2026-08-02 — Firebase credential path no longer creates a Coolify variable
+
+Removed `GOOGLE_APPLICATION_CREDENTIALS` from the Git Compose environment after an
+accidental JSON value became locked under that name in Coolify. Backend configuration
+now passes the fixed mount path explicitly to the Firebase Admin SDK, while Compose
+still mounts only `FIREBASE_SERVICE_ACCOUNT_JSON` at that location. This permanently
+keeps the path out of Coolify's managed variables and lets the stale value be deleted
+after the updated Compose source is loaded. No credential content moved into the image
+or process environment.
+
+Coolify serialized the initially recommended multiline JSON into invalid raw `.env`
+lines. Production guidance now uses `jq -c .` output as a locked literal runtime value
+with Multiline disabled; the mounted file remains valid JSON because private-key line
+breaks stay escaped as `\n`.

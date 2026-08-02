@@ -6,7 +6,7 @@ repo_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-compose-check-password}
 export API_ACCESS_KEY=${API_ACCESS_KEY:-compose-check-access-key}
 export PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-https://api.example.com}
-# The real value is a locked multiline Coolify variable. Compose requires the
+# The real value is a locked compact-JSON Coolify variable. Compose requires the
 # secret source even when Firebase is disabled for this configuration-only check.
 export FIREBASE_SERVICE_ACCOUNT_JSON=${FIREBASE_SERVICE_ACCOUNT_JSON:-{}}
 
@@ -22,7 +22,6 @@ if ! printf '%s\n' "$rendered" | grep -F "$expected" >/dev/null; then
 fi
 
 for expected in \
-    "GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json" \
     "source: firebase_service_account" \
     "target: firebase-service-account.json" \
     "environment: FIREBASE_SERVICE_ACCOUNT_JSON"

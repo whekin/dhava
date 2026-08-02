@@ -8,6 +8,7 @@ import (
 
 	firebase "firebase.google.com/go/v4"
 	firebaseauth "firebase.google.com/go/v4/auth"
+	"google.golang.org/api/option"
 )
 
 // User is the verified identity carried by a Firebase ID token.
@@ -29,14 +30,24 @@ type FirebaseVerifier struct {
 	client *firebaseauth.Client
 }
 
-// NewFirebaseVerifier initializes Firebase with Application Default Credentials.
-// Outside Google infrastructure, GOOGLE_APPLICATION_CREDENTIALS must point to the
-// mounted service-account JSON file.
-func NewFirebaseVerifier(ctx context.Context, projectID string) (*FirebaseVerifier, error) {
+// NewFirebaseVerifier initializes Firebase from the explicitly mounted service-account
+// file, without relying on a Coolify-managed credentials environment variable.
+func NewFirebaseVerifier(
+	ctx context.Context,
+	projectID string,
+	credentialsFile string,
+) (*FirebaseVerifier, error) {
 	if projectID == "" {
 		return nil, errors.New("firebase project id is required")
 	}
-	app, err := firebase.NewApp(ctx, &firebase.Config{ProjectID: projectID})
+	if credentialsFile == "" {
+		return nil, errors.New("firebase credentials file is required")
+	}
+	app, err := firebase.NewApp(
+		ctx,
+		&firebase.Config{ProjectID: projectID},
+		option.WithCredentialsFile(credentialsFile),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize firebase app: %w", err)
 	}

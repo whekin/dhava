@@ -1,10 +1,21 @@
 package identity
 
 import (
+	"context"
 	"testing"
 
 	firebaseauth "firebase.google.com/go/v4/auth"
 )
+
+func TestNewFirebaseVerifierRequiresConfiguration(t *testing.T) {
+	ctx := context.Background()
+	if _, err := NewFirebaseVerifier(ctx, "", "/tmp/firebase.json"); err == nil {
+		t.Fatal("expected missing project id error")
+	}
+	if _, err := NewFirebaseVerifier(ctx, "nakvali-app", ""); err == nil {
+		t.Fatal("expected missing credentials file error")
+	}
+}
 
 func TestUserFromTokenExtractsOnlyStableProfileClaims(t *testing.T) {
 	user, err := userFromToken(&firebaseauth.Token{

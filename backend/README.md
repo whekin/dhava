@@ -16,9 +16,10 @@ processed GPX export, plus explicitly opt-in legacy GPS/IMU ingest routes.
   `X-Nakvali-Access-Key`. Leaving it empty is convenient for local development;
   the production Compose file requires it. This is not user authentication.
 - `FIREBASE_PROJECT_ID` — enables Firebase ID-token verification for `/api/v1/me`.
-  Outside Google infrastructure, `GOOGLE_APPLICATION_CREDENTIALS` must point to a
-  readable mounted service-account JSON file. The API never accepts client-provided
-  UID/email fields without first verifying the Firebase bearer token.
+  The API reads `/run/secrets/firebase-service-account.json` by default; a native local
+  process may override that path with `GOOGLE_APPLICATION_CREDENTIALS`. The API never
+  accepts client-provided UID/email fields without first verifying the Firebase bearer
+  token.
 - `RAW_UPLOADS_ENABLED` — exposes the legacy activity/raw upload endpoints when
   `true` (default `false`). Product deployments keep immutable raw sensor data
   on-device and must leave this disabled.

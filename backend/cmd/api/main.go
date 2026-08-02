@@ -80,7 +80,11 @@ func main() {
 		logger.Info("raw recording uploads disabled; raw stays on-device")
 	}
 	if cfg.FirebaseProjectID != "" {
-		verifier, err := identity.NewFirebaseVerifier(ctx, cfg.FirebaseProjectID)
+		verifier, err := identity.NewFirebaseVerifier(
+			ctx,
+			cfg.FirebaseProjectID,
+			cfg.FirebaseCredentialsFile,
+		)
 		if err != nil {
 			logger.Error("failed to initialize Firebase identity verifier", "error", err)
 			os.Exit(1)
