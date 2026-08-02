@@ -2007,3 +2007,13 @@ missing credentials then fail startup rather than silently accepting identities.
 Recommended local storage is `~/.config/nakvali/firebase-service-account.json` with
 mode `600`; repository ignore rules also reject common Firebase Admin key filenames as
 defense in depth without ignoring the public Android `google-services.json`.
+
+## 2026-08-02 — Local Firebase key uses a repository-local ignored slot
+
+The owner preferred project-local secret storage for development. The earlier
+home-directory recommendation is superseded by the explicit ignored path
+`deploy/secrets/firebase-service-account.json`; only a `.gitkeep` is tracked. The local
+stack helper automatically reads that file into the runtime Compose secret and enables
+project `nakvali-app`, while absence of the file keeps Firebase disabled with the
+inert local placeholder. Common Firebase Admin filenames and the whole secrets folder
+remain ignored as defense in depth.

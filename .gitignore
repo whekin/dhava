@@ -17,6 +17,8 @@
 # Firebase Admin private keys (the Android google-services.json is public config).
 firebase-service-account*.json
 *firebase-adminsdk*.json
+deploy/secrets/*
+!deploy/secrets/.gitkeep
 
 # Claude Code local
 .claude/settings.local.json

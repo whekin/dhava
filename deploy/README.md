@@ -61,20 +61,20 @@ Keep `RAW_UPLOADS_ENABLED=false`; it is fixed in the production Compose file.
 Never paste the access key, Strava secret, database password, or Coolify token
 into chat, Git, screenshots, or deployment logs.
 
-For optional local Firebase verification, keep the downloaded private JSON outside
-the repository, for example at
-`~/.config/nakvali/firebase-service-account.json`, with mode `600`. Load its content
-for the lifetime of the shell before starting the stack:
+For optional local Firebase verification, put the downloaded private JSON at the
+repository-local, gitignored path
+`deploy/secrets/firebase-service-account.json` and keep mode `600`:
 
 ```sh
-export FIREBASE_PROJECT_ID=nakvali-app
-export FIREBASE_SERVICE_ACCOUNT_JSON="$(< "$HOME/.config/nakvali/firebase-service-account.json")"
+chmod 600 deploy/secrets/firebase-service-account.json
 just stack-up
 ```
 
-Without those exports, `just stack-up` supplies an inert `{}` secret and leaves
-Firebase verification disabled, so normal credential-free backend development still
-works.
+The local stack helper reads that file into the Compose secret and automatically uses
+Firebase project `nakvali-app`. Without the file, it supplies an inert `{}` secret and
+leaves Firebase verification disabled, so normal credential-free backend development
+still works. An explicitly exported `FIREBASE_SERVICE_ACCOUNT_JSON` still overrides
+the file when needed.
 
 For the owner's Android build, put this in the untracked
 `~/.gradle/gradle.properties`:

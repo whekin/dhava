@@ -59,8 +59,8 @@ deploy-check:
 
 # Start the local API and PostGIS stack with private development defaults.
 stack-up:
-    POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-nakvali-local}" API_ACCESS_KEY="${API_ACCESS_KEY:-nakvali-local}" PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://127.0.0.1:8080}" FIREBASE_SERVICE_ACCOUNT_JSON="${FIREBASE_SERVICE_ACCOUNT_JSON:-{}}" docker compose --project-directory . -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml up --build
+    ./deploy/local-stack.sh up
 
 # Stop the local stack without deleting its database volume.
 stack-down:
-    POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-nakvali-local}" API_ACCESS_KEY="${API_ACCESS_KEY:-nakvali-local}" PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-http://127.0.0.1:8080}" FIREBASE_SERVICE_ACCOUNT_JSON="${FIREBASE_SERVICE_ACCOUNT_JSON:-{}}" docker compose --project-directory . -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml down
+    ./deploy/local-stack.sh down
