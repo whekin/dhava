@@ -14,6 +14,9 @@
 .env
 .env.*
 !.env.example
+# Firebase Admin private keys (the Android google-services.json is public config).
+firebase-service-account*.json
+*firebase-adminsdk*.json
 
 # Claude Code local
 .claude/settings.local.json

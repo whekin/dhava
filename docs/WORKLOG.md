@@ -1989,3 +1989,21 @@ Production sync remains intentionally unverified until Coolify mounts a Firebase
 service-account JSON, sets `FIREBASE_PROJECT_ID=nakvali-app`, and redeploys. The later
 identity migration must deliberately link the existing anonymous installation/Strava
 credential to the signed-in user rather than silently changing those routes now.
+
+## 2026-08-02 — Firebase Admin credentials use a runtime Compose secret
+
+Completed the production credential mount that the authentication implementation had
+previously only documented. Coolify now receives the complete service-account JSON as
+the manually created `FIREBASE_SERVICE_ACCOUNT_JSON` locked multiline runtime
+variable. Native Docker Compose mounts that value read-only into only the API container
+at `/run/secrets/firebase-service-account.json`; the API process receives only the
+`GOOGLE_APPLICATION_CREDENTIALS` path. The private key is not a build argument, image
+layer, ordinary process environment variable or repository file.
+
+The Compose validation script and local stack recipes provide an inert `{}` secret
+while Firebase is disabled, preserving credential-free local development. Production
+enables verification only when `FIREBASE_PROJECT_ID=nakvali-app` is set; malformed or
+missing credentials then fail startup rather than silently accepting identities.
+Recommended local storage is `~/.config/nakvali/firebase-service-account.json` with
+mode `600`; repository ignore rules also reject common Firebase Admin key filenames as
+defense in depth without ignoring the public Android `google-services.json`.

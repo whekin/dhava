@@ -552,3 +552,7 @@ activity results are always recomputed canonically from the raw on-device file.
 - Account/backend failure never blocks recording, local segment matching, exports or
   raw archives. A restored Firebase session may remain `Local only` while `/me` is
   unavailable, then retry opportunistically. This preserves offline-first behavior.
+- The Firebase Admin service-account JSON enters Coolify as a locked multiline,
+  runtime-only value consumed by a native Docker Compose secret. Only the read-only
+  file path reaches the API environment; the credential is neither a build argument
+  nor a normal process environment variable and never belongs in Git.

@@ -36,8 +36,10 @@ are independent.
    place it at `android/app/google-services.json`. The file contains project IDs, not
    a server secret; the service-account private key must never be placed there.
 6. Under **Project settings → Service accounts**, create credentials for the Go API.
-   Store the JSON as a Coolify secret file and point
-   `GOOGLE_APPLICATION_CREDENTIALS` at its mounted path. Never commit or paste this
+   In Coolify's Normal environment-variable view, create
+   `FIREBASE_SERVICE_ACCOUNT_JSON`, paste the complete JSON, enable **Multiline** and
+   **Locked**, keep it **Runtime-only**, and disable Build Variable. Compose consumes
+   this value as a runtime secret and mounts it read-only; never commit or paste the
    private key into Gradle properties, Compose files, logs, or chat.
 7. When Google Play App Signing is enabled, add the Play **app-signing** SHA-1 and
    SHA-256 certificates as well as the local upload/release certificate, then download
@@ -78,11 +80,13 @@ but it is not user authentication and must not be required by a public release.
 
 ## Production handoff
 
-Set `FIREBASE_PROJECT_ID=nakvali-app` in Coolify. Mount the service-account JSON as a
-read-only secret file and set `GOOGLE_APPLICATION_CREDENTIALS` to that container path.
-After redeploying, choose an account from Profile on a test build: the expected final
-state is `Synced`, and Postgres should contain one `users.firebase_uid` row. Do not
-paste the service-account JSON or a Firebase ID token into logs, Git, or chat.
+Set `FIREBASE_PROJECT_ID=nakvali-app` and the locked multiline runtime variable
+`FIREBASE_SERVICE_ACCOUNT_JSON` in Coolify, then redeploy. Compose mounts the latter at
+`/run/secrets/firebase-service-account.json`, while the API receives only that path in
+`GOOGLE_APPLICATION_CREDENTIALS`. Choose an account from Profile on a test build: the
+expected final state is `Synced`, and Postgres should contain one
+`users.firebase_uid` row. Do not paste the service-account JSON or a Firebase ID token
+into logs, Git, or chat.
 
 ## References
 

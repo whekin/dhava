@@ -17,7 +17,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       API_ACCESS_KEY: ${API_ACCESS_KEY:?API_ACCESS_KEY is required}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
       RAW_UPLOADS_ENABLED: "false"
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
@@ -25,6 +25,9 @@ services:
       STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-nakvali://strava/connected}
     expose:
       - "8080"
+    secrets:
+      - source: firebase_service_account
+        target: firebase-service-account.json
     depends_on:
       db:
         condition: service_healthy
@@ -56,3 +59,10 @@ services:
 
 volumes:
   db-data:
+
+secrets:
+  # Coolify provides the downloaded JSON as a locked multiline runtime variable.
+  # Native Compose mounts it read-only and does not expose its contents to the API
+  # process environment or bake it into the image.
+  firebase_service_account:
+    environment: FIREBASE_SERVICE_ACCOUNT_JSON

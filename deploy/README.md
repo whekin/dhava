@@ -43,9 +43,12 @@ Set these as Coolify secrets/variables before the first deployment:
 - `API_ACCESS_KEY` — required and independent from the database password.
   `openssl rand -hex 32` is suitable.
 - `FIREBASE_PROJECT_ID` — `nakvali-app` to enable Firebase ID-token verification.
-- `GOOGLE_APPLICATION_CREDENTIALS` — path inside the API container to a Coolify
-  secret file containing the Firebase service-account JSON. Mount it read-only and
-  make it readable by container user `65532`; never commit or paste its contents.
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — the complete downloaded service-account JSON.
+  Create it in Coolify's **Normal view** as a locked **Multiline**, **Runtime-only**
+  variable (disable Build Variable). Native Compose mounts it read-only at
+  `/run/secrets/firebase-service-account.json`; it is not passed into the API process
+  environment or embedded in the image. Never commit or paste its contents into logs
+  or chat.
 - `PUBLIC_BASE_URL` — required HTTPS origin without a trailing slash, for
   example `https://api.example.com`.
 - `LOG_LEVEL` — optional; defaults to `info`.
@@ -57,6 +60,21 @@ Set these as Coolify secrets/variables before the first deployment:
 Keep `RAW_UPLOADS_ENABLED=false`; it is fixed in the production Compose file.
 Never paste the access key, Strava secret, database password, or Coolify token
 into chat, Git, screenshots, or deployment logs.
+
+For optional local Firebase verification, keep the downloaded private JSON outside
+the repository, for example at
+`~/.config/nakvali/firebase-service-account.json`, with mode `600`. Load its content
+for the lifetime of the shell before starting the stack:
+
+```sh
+export FIREBASE_PROJECT_ID=nakvali-app
+export FIREBASE_SERVICE_ACCOUNT_JSON="$(< "$HOME/.config/nakvali/firebase-service-account.json")"
+just stack-up
+```
+
+Without those exports, `just stack-up` supplies an inert `{}` secret and leaves
+Firebase verification disabled, so normal credential-free backend development still
+works.
 
 For the owner's Android build, put this in the untracked
 `~/.gradle/gradle.properties`:
