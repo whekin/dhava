@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/whekin/dhava/backend/internal/store"
+	"github.com/whekin/nakvali/backend/internal/store"
 )
 
 const testDeviceToken = "test-device-token-that-is-at-least-thirty-two-bytes"
@@ -210,7 +210,7 @@ func testService(repo *fakeRepository, api *fakeAPI, now time.Time) *Service {
 	service := NewService(repo, api, Config{
 		ClientID:       "123",
 		PublicBaseURL:  "https://api.example.test",
-		AppRedirectURL: "dhava://strava/connected",
+		AppRedirectURL: "nakvali://strava/connected",
 	})
 	service.now = func() time.Time { return now }
 	service.random = func(bytes []byte) (int, error) {
@@ -286,7 +286,7 @@ func TestExportIsIdempotentAndPollsExistingUpload(t *testing.T) {
 	}
 	service := testService(repo, api, now)
 	input := ExportRequest{
-		ExternalID: "dhava-recording-algorithm.gpx",
+		ExternalID: "nakvali-recording-algorithm.gpx",
 		Title:      "Forest ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
@@ -333,7 +333,7 @@ func TestExportPersistsRotatedRefreshToken(t *testing.T) {
 	service := testService(repo, api, now)
 
 	_, err := service.Export(context.Background(), testDeviceToken, ExportRequest{
-		ExternalID: "dhava-id-v1.gpx",
+		ExternalID: "nakvali-id-v1.gpx",
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
@@ -354,7 +354,7 @@ func TestDuplicateAfterAmbiguousRetryBecomesUploaded(t *testing.T) {
 		connection: connectedConnection(now),
 		export: store.StravaExport{
 			ConnectionID:   "connection-id",
-			ExternalID:     "dhava-id-v1.gpx",
+			ExternalID:     "nakvali-id-v1.gpx",
 			Title:          "Ride",
 			SportType:      "MountainBikeRide",
 			StravaUploadID: &uploadID,
@@ -368,7 +368,7 @@ func TestDuplicateAfterAmbiguousRetryBecomesUploaded(t *testing.T) {
 	service := testService(repo, api, now)
 
 	status, err := service.Export(context.Background(), testDeviceToken, ExportRequest{
-		ExternalID: "dhava-id-v1.gpx",
+		ExternalID: "nakvali-id-v1.gpx",
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
@@ -393,7 +393,7 @@ func TestUnauthorizedRefreshRevokesConnection(t *testing.T) {
 	service := testService(repo, api, now)
 
 	_, err := service.Export(context.Background(), testDeviceToken, ExportRequest{
-		ExternalID: "dhava-id-v1.gpx",
+		ExternalID: "nakvali-id-v1.gpx",
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",

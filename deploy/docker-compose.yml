@@ -1,6 +1,8 @@
-# Dhava private-alpha stack — deployable on Coolify from the GitHub repository.
+# Nakvali private-alpha stack — deployable on Coolify from the GitHub repository.
 # Assign the public domain to `api:8080` in Coolify. No container port is
 # published directly on the host; TLS and public routing belong to the proxy.
+
+name: nakvali
 
 services:
   api:
@@ -11,14 +13,14 @@ services:
       dockerfile: Dockerfile
     environment:
       PORT: "8080"
-      DATABASE_URL: postgres://dhava:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/dhava?sslmode=disable
+      DATABASE_URL: postgres://nakvali:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/nakvali?sslmode=disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       API_ACCESS_KEY: ${API_ACCESS_KEY:?API_ACCESS_KEY is required}
       RAW_UPLOADS_ENABLED: "false"
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
-      STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-dhava://strava/connected}
+      STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-nakvali://strava/connected}
     expose:
       - "8080"
     depends_on:
@@ -38,14 +40,14 @@ services:
     # Coolify VPS are ARM.
     image: imresamu/postgis:17-3.5
     environment:
-      POSTGRES_USER: dhava
+      POSTGRES_USER: nakvali
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: dhava
+      POSTGRES_DB: nakvali
     volumes:
       - db-data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dhava -d dhava"]
+      test: ["CMD-SHELL", "pg_isready -U nakvali -d nakvali"]
       interval: 5s
       timeout: 3s
       retries: 20

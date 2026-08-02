@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Dhava API
+  title: Nakvali API
   version: 0.1.0
   description: >
-    Contract-first spec for the Dhava backend. Skeleton — grows with each phase.
+    Contract-first spec for the Nakvali backend. Skeleton — grows with each phase.
 servers:
   - url: /api/v1
 security:
@@ -161,7 +161,7 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
   /strava/oauth/callback:
     get:
-      summary: Strava browser callback; exchanges code server-side and redirects to Dhava
+      summary: Strava browser callback; exchanges code server-side and redirects to Nakvali
       operationId: completeStravaConnect
       security: []
       parameters:
@@ -171,7 +171,7 @@ paths:
         - { name: error, in: query, schema: { type: string } }
       responses:
         "302":
-          description: Redirect to `dhava://strava/connected?result=...`
+          description: Redirect to `nakvali://strava/connected?result=...`
   /strava/exports:
     post:
       summary: Idempotently export one canonical processed GPX to Strava
@@ -229,7 +229,7 @@ components:
     privateAlphaAccessKey:
       type: apiKey
       in: header
-      name: X-Dhava-Access-Key
+      name: X-Nakvali-Access-Key
       description: >
         Shared private-alpha perimeter key compiled only into owner test builds.
         This is not user authentication and must be replaced before public distribution.
@@ -238,7 +238,7 @@ components:
       scheme: bearer
       description: >
         Random per-installation credential generated and retained by Android.
-        The backend stores only its SHA-256 hash; it is not a Dhava user account.
+        The backend stores only its SHA-256 hash; it is not a Nakvali user account.
   schemas:
     CreateActivityRequest:
       type: object

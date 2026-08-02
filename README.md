@@ -4,9 +4,8 @@ Nakvali is an offline-first Android ride tracker built around downhill segments:
 reliable recording, honest timing with uncertainty, local segment matching and
 sensor-assisted track reconstruction.
 
-The repository and established technical identifiers still use `dhava`. In
-particular, Android keeps `com.dhava.app` so signed updates preserve the private
-alpha's irreplaceable on-device recordings.
+The active Android application ID is `com.nakvali.app`; Kotlin source packages use
+the `com.nakvali` root.
 
 The app is currently a private alpha. It is designed to keep recording without
 connectivity and to preserve the rider's original sensor data so improved

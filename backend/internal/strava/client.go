@@ -1,4 +1,4 @@
-// Package strava implements the small OAuth and upload surface Dhava needs.
+// Package strava implements the small OAuth and upload surface Nakvali needs.
 package strava
 
 import (

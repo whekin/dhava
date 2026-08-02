@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.core.map"
+    namespace = "com.nakvali.core.map"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

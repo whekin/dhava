@@ -1,4 +1,4 @@
-module github.com/whekin/dhava/backend
+module github.com/whekin/nakvali/backend
 
 go 1.26.3
 

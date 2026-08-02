@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.feature.feed"
+    namespace = "com.nakvali.feature.feed"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

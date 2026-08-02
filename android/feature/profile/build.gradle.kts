@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.feature.profile"
+    namespace = "com.nakvali.feature.profile"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

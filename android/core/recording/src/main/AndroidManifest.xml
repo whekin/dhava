@@ -16,7 +16,7 @@
             services that receive location updates in the background.
         -->
         <service
-            android:name="com.dhava.core.recording.RecordingService"
+            android:name="com.nakvali.core.recording.RecordingService"
             android:exported="false"
             android:foregroundServiceType="location" />
     </application>

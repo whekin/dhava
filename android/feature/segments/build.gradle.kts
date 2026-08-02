@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.feature.segments"
+    namespace = "com.nakvali.feature.segments"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

@@ -8,7 +8,7 @@ plugins {
 
 /**
  * Release signing, read from `android/keystore.properties` (gitignored) or from
- * `DHAVA_KEYSTORE_*` environment variables for a machine without that file.
+ * `NAKVALI_KEYSTORE_*` environment variables for a machine without that file.
  *
  * A missing keystore deliberately leaves the release unsigned instead of falling
  * back to the debug key: a debug-signed build cannot later be updated by a real
@@ -23,10 +23,10 @@ val keystoreProperties = Properties().apply {
 fun signingValue(property: String, environment: String): String? =
     keystoreProperties.getProperty(property) ?: System.getenv(environment)
 
-val releaseStoreFile = signingValue("storeFile", "DHAVA_KEYSTORE_FILE")
-val releaseStorePassword = signingValue("storePassword", "DHAVA_KEYSTORE_PASSWORD")
-val releaseKeyAlias = signingValue("keyAlias", "DHAVA_KEY_ALIAS")
-val releaseKeyPassword = signingValue("keyPassword", "DHAVA_KEY_PASSWORD")
+val releaseStoreFile = signingValue("storeFile", "NAKVALI_KEYSTORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "NAKVALI_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "NAKVALI_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "NAKVALI_KEY_PASSWORD")
 val releaseSigningReady = listOf(
     releaseStoreFile,
     releaseStorePassword,
@@ -35,11 +35,11 @@ val releaseSigningReady = listOf(
 ).none { it.isNullOrBlank() } && rootProject.file(releaseStoreFile!!).exists()
 
 android {
-    namespace = "com.dhava.app"
+    namespace = "com.nakvali.app"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.dhava.app"
+        applicationId = "com.nakvali.app"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 2

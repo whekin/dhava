@@ -1,4 +1,4 @@
-// Package store contains database access for the Dhava backend.
+// Package store contains database access for the Nakvali backend.
 package store
 
 import (

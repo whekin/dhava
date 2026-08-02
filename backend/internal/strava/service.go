@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/whekin/dhava/backend/internal/store"
+	"github.com/whekin/nakvali/backend/internal/store"
 )
 
 const (

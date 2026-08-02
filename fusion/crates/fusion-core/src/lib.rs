@@ -1,4 +1,4 @@
-//! Dhava sensor-fusion core.
+//! Nakvali sensor-fusion core.
 //!
 //! This crate is the shared fusion engine for downhill MTB ride recordings.
 //! It will eventually contain:

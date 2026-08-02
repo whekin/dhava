@@ -1,4 +1,4 @@
-// Package config provides environment-based configuration for the Dhava backend.
+// Package config provides environment-based configuration for the Nakvali backend.
 package config
 
 import (
@@ -16,7 +16,7 @@ type Config struct {
 	DatabaseURL string
 	// LogLevel is one of: debug, info, warn, error.
 	LogLevel string
-	// APIAccessKey gates the private-alpha API through X-Dhava-Access-Key.
+	// APIAccessKey gates the private-alpha API through X-Nakvali-Access-Key.
 	// Empty keeps local development open; production deployment requires it.
 	APIAccessKey string
 	// RawUploadsEnabled retains the legacy raw-ingestion endpoints for explicit
@@ -34,14 +34,14 @@ type Config struct {
 	// used when S3Endpoint is unset.
 	BlobDir string
 	// PublicBaseURL is the externally reachable origin used for OAuth callbacks,
-	// for example https://api.dhava.app. http://127.0.0.1:8080 is also valid
+	// for example https://api.nakvali.app. http://127.0.0.1:8080 is also valid
 	// for an attached-device development flow using adb reverse.
 	PublicBaseURL string
 	// StravaClientID and StravaClientSecret come from the Strava API dashboard.
 	// The secret must never be shipped in an Android build.
 	StravaClientID     string
 	StravaClientSecret string
-	// StravaAppRedirectURL returns the browser to Dhava after the server has
+	// StravaAppRedirectURL returns the browser to Nakvali after the server has
 	// exchanged the one-time authorization code.
 	StravaAppRedirectURL string
 }
@@ -55,7 +55,7 @@ func Load() Config {
 		APIAccessKey:       strings.TrimSpace(getenv("API_ACCESS_KEY", "")),
 		RawUploadsEnabled:  getenvBool("RAW_UPLOADS_ENABLED", false),
 		S3Endpoint:         getenv("S3_ENDPOINT", ""),
-		S3Bucket:           getenv("S3_BUCKET", "dhava"),
+		S3Bucket:           getenv("S3_BUCKET", "nakvali"),
 		S3AccessKey:        getenv("S3_ACCESS_KEY", ""),
 		S3SecretKey:        getenv("S3_SECRET_KEY", ""),
 		BlobDir:            getenv("BLOB_DIR", "./data/blobs"),
@@ -64,7 +64,7 @@ func Load() Config {
 		StravaClientSecret: getenv("STRAVA_CLIENT_SECRET", ""),
 		StravaAppRedirectURL: getenv(
 			"STRAVA_APP_REDIRECT_URL",
-			"dhava://strava/connected",
+			"nakvali://strava/connected",
 		),
 	}
 }

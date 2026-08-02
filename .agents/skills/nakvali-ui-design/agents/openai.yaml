@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nakvali UI Design"
+  short_description: "Design polished downhill-first Android UI"
+  default_prompt: "Use $nakvali-ui-design to refine this Nakvali screen and verify it on Android."

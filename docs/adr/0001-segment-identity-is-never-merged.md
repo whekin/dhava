@@ -2,7 +2,7 @@
 
 A rider can author a local draft segment on a trail that a published segment
 already covers, so the same descent can produce two independent results. We
-decided that Dhava never deduplicates or merges segment definitions: a draft and
+decided that Nakvali never deduplicates or merges segment definitions: a draft and
 a published segment are separate identities with separate geometry versions,
 separate attempts and separate personal records, and both are timed. Whether two
 segments may cover the same trail is decided at publication time — by moderation

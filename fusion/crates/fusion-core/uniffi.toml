@@ -3,8 +3,8 @@
 
 [bindings.kotlin]
 # Keep the generated Kotlin package stable regardless of crate renames.
-package_name = "com.dhava.fusion"
+package_name = "com.nakvali.fusion"
 cdylib_name = "fusion_core"
 # Android exposes java.lang.ref.Cleaner only from API 33. Use UniFFI's
-# Android-aware cleaner with a JNA fallback for Dhava's minSdk 26.
+# Android-aware cleaner with a JNA fallback for Nakvali's minSdk 26.
 android_cleaner = true

@@ -11,7 +11,7 @@
           alone did not stop an OEM power manager from killing the app
           mid-ride (2026-07 OnePlus "o-kill" incident)
         - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: one-time prompt asking the
-          user to exempt Dhava from aggressive battery managers (same incident)
+          user to exempt Nakvali from aggressive battery managers (same incident)
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Optional but strongly recommended: lets Android restart the location
@@ -36,7 +36,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Dhava">
+        android:theme="@style/Theme.Nakvali">
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -53,7 +53,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.Dhava">
+            android:theme="@style/Theme.Nakvali">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -63,7 +63,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="dhava"
+                    android:scheme="nakvali"
                     android:host="strava"
                     android:path="/connected" />
             </intent-filter>

@@ -1,6 +1,6 @@
-# Dhava fusion
+# Nakvali fusion
 
-Rust is the single implementation of Dhava's ride reconstruction and segment
+Rust is the single implementation of Nakvali's ride reconstruction and segment
 timing logic.
 
 - `crates/fusion-core` parses raw GPS/IMU/barometer recordings and implements

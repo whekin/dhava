@@ -10,20 +10,20 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	dhavastrava "github.com/whekin/dhava/backend/internal/strava"
+	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 type fakeStravaBroker struct {
 	deviceToken string
-	export      dhavastrava.ExportRequest
+	export      nakvalistrava.ExportRequest
 }
 
 func (f *fakeStravaBroker) BeginConnect(
 	_ context.Context,
 	deviceToken string,
-) (dhavastrava.ConnectStart, error) {
+) (nakvalistrava.ConnectStart, error) {
 	f.deviceToken = deviceToken
-	return dhavastrava.ConnectStart{AuthorizeURL: "https://www.strava.com/oauth/mobile/authorize"}, nil
+	return nakvalistrava.ConnectStart{AuthorizeURL: "https://www.strava.com/oauth/mobile/authorize"}, nil
 }
 
 func (f *fakeStravaBroker) CompleteConnect(
@@ -36,26 +36,26 @@ func (f *fakeStravaBroker) CompleteConnect(
 }
 
 func (f *fakeStravaBroker) AppRedirectURL(result string) string {
-	return "dhava://strava/connected?result=" + result
+	return "nakvali://strava/connected?result=" + result
 }
 
 func (f *fakeStravaBroker) Connection(
 	_ context.Context,
 	deviceToken string,
-) (dhavastrava.ConnectionStatus, error) {
+) (nakvalistrava.ConnectionStatus, error) {
 	f.deviceToken = deviceToken
-	return dhavastrava.ConnectionStatus{Connected: true, AthleteName: "Alex Rider"}, nil
+	return nakvalistrava.ConnectionStatus{Connected: true, AthleteName: "Alex Rider"}, nil
 }
 
 func (f *fakeStravaBroker) Export(
 	_ context.Context,
 	deviceToken string,
-	input dhavastrava.ExportRequest,
-) (dhavastrava.ExportStatus, error) {
+	input nakvalistrava.ExportRequest,
+) (nakvalistrava.ExportStatus, error) {
 	f.deviceToken = deviceToken
 	f.export = input
 	uploadID := int64(9001)
-	return dhavastrava.ExportStatus{
+	return nakvalistrava.ExportStatus{
 		Status:         "processing",
 		StravaUploadID: &uploadID,
 	}, nil
@@ -108,7 +108,7 @@ func TestStravaExportAcceptsOnlyProcessedGPXFields(t *testing.T) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	_ = writer.WriteField("external_id", "dhava-ride-v1.gpx")
+	_ = writer.WriteField("external_id", "nakvali-ride-v1.gpx")
 	_ = writer.WriteField("title", "Forest ride")
 	_ = writer.WriteField("description", "Dry trails")
 	_ = writer.WriteField("sport_type", "MountainBikeRide")
@@ -129,7 +129,7 @@ func TestStravaExportAcceptsOnlyProcessedGPXFields(t *testing.T) {
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, body=%s", response.Code, response.Body)
 	}
-	if broker.export.ExternalID != "dhava-ride-v1.gpx" {
+	if broker.export.ExternalID != "nakvali-ride-v1.gpx" {
 		t.Errorf("external id = %q", broker.export.ExternalID)
 	}
 	if string(broker.export.GPX) != "<gpx/>" {

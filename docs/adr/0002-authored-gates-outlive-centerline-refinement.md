@@ -24,7 +24,7 @@ different travel direction.
 - **Store only the two gates.** Rejected: gates cannot distinguish a parallel
   trail, shortcut or incomplete traversal. Matching still needs the directed
   reference centerline for corridor, progress and coverage checks.
-- **Treat imported GPX as a ride.** Rejected: it lacks Dhava's raw GPS/IMU/baro
+- **Treat imported GPX as a ride.** Rejected: it lacks Nakvali's raw GPS/IMU/baro
   evidence and cannot honestly produce an attempt, PR or leaderboard result.
 
 ## Consequences
@@ -36,7 +36,7 @@ different travel direction.
 - An imported GPX trace is copied into durable local source storage and used
   only as seed geometry for a local draft segment. Deleting or refining the
   segment does not erase the original import.
-- Future Dhava attempts may refine the reference centerline when their evidence
+- Future Nakvali attempts may refine the reference centerline when their evidence
   quality is acceptable. That process increments the geometry version but keeps
   both authored gate centers unchanged; moving a gate is a separate explicit
   edit and necessarily creates a new scoring geometry version.

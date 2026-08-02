@@ -36,7 +36,7 @@ func TestClientExchangesCodeAndUploadsGPX(t *testing.T) {
 				t.Fatal(err)
 			}
 			if r.FormValue("data_type") != "gpx" ||
-				r.FormValue("external_id") != "dhava-id.gpx" {
+				r.FormValue("external_id") != "nakvali-id.gpx" {
 				t.Errorf("upload form = %v", r.MultipartForm.Value)
 			}
 			file, _, err := r.FormFile("file")
@@ -73,7 +73,7 @@ func TestClientExchangesCodeAndUploadsGPX(t *testing.T) {
 		File:       []byte("<gpx/>"),
 		Filename:   "ride.gpx",
 		Title:      "Ride",
-		ExternalID: "dhava-id.gpx",
+		ExternalID: "nakvali-id.gpx",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-// Command api runs the Dhava backend HTTP server.
+// Command api runs the Nakvali backend HTTP server.
 package main
 
 import (
@@ -13,11 +13,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/whekin/dhava/backend/internal/api"
-	"github.com/whekin/dhava/backend/internal/blob"
-	"github.com/whekin/dhava/backend/internal/config"
-	"github.com/whekin/dhava/backend/internal/store"
-	dhavastrava "github.com/whekin/dhava/backend/internal/strava"
+	"github.com/whekin/nakvali/backend/internal/api"
+	"github.com/whekin/nakvali/backend/internal/blob"
+	"github.com/whekin/nakvali/backend/internal/config"
+	"github.com/whekin/nakvali/backend/internal/store"
+	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 func main() {
@@ -79,15 +79,15 @@ func main() {
 		logger.Info("raw recording uploads disabled; raw stays on-device")
 	}
 	if cfg.StravaConfigured() && pool != nil {
-		stravaClient := dhavastrava.NewClient(
+		stravaClient := nakvalistrava.NewClient(
 			&http.Client{Timeout: 30 * time.Second},
 			cfg.StravaClientID,
 			cfg.StravaClientSecret,
 		)
-		stravaService := dhavastrava.NewService(
+		stravaService := nakvalistrava.NewService(
 			store.New(pool),
 			stravaClient,
-			dhavastrava.Config{
+			nakvalistrava.Config{
 				ClientID:       cfg.StravaClientID,
 				PublicBaseURL:  cfg.PublicBaseURL,
 				AppRedirectURL: cfg.StravaAppRedirectURL,

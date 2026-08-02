@@ -7,19 +7,21 @@ Database, and Firebase Storage are not required for authentication.
 ## Stable identifiers
 
 - Public product name: **Nakvali**.
-- Android application ID registered with Firebase: **`com.dhava.app`**.
+- Android application ID registered with Firebase: **`com.nakvali.app`**.
 - Suggested Firebase project display name: **Nakvali**.
 - Suggested globally unique project ID: `nakvali-prod-<suffix>`.
 
-Do not create a second Android identity solely to make the package match the brand.
-The existing application ID and release certificate are what let a signed update keep
-the recordings already stored on the OnePlus.
+`com.nakvali.app` is intentionally a new Android identity while the app is still in
+private development. It installs separately from the retired prototype. Restore the
+verified local backup into Nakvali before removing the old installation. The same
+release certificate remains valid and is reused; application ID and signing identity
+are independent.
 
 ## Console checklist
 
 1. Create one Firebase project for production. Google Analytics is optional and is
    not needed for Authentication.
-2. Add an Android app with package name `com.dhava.app` and nickname
+2. Add an Android app with package name `com.nakvali.app` and nickname
    `Nakvali Android`.
 3. Add both current signing-certificate pairs from `./gradlew :app:signingReport`:
 
@@ -55,7 +57,7 @@ Email and display name are profile attributes, not authorization keys.
 
 The backend then needs a local user row keyed by Firebase UID and a migration path
 from the current anonymous installation/device credential, including any future
-Strava connection. The private-alpha `X-Dhava-Access-Key` may remain as a temporary
+Strava connection. The private-alpha `X-Nakvali-Access-Key` may remain as a temporary
 deployment perimeter, but it is not user authentication and must not be required by a
 public release.
 

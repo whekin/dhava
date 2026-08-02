@@ -1,4 +1,4 @@
-# Dhava private-alpha deployment
+# Nakvali private-alpha deployment
 
 This stack deploys the Go API and PostGIS only. Immutable raw recordings remain
 on the phone, so production does not run MinIO or expose the legacy raw-upload
@@ -7,7 +7,7 @@ server has a real segment verification queue.
 
 ## Create the Coolify resource
 
-1. Connect `whekin/dhava` through the Coolify GitHub App and create a Docker
+1. Connect `whekin/nakvali` through the Coolify GitHub App and create a Docker
    Compose application.
 2. Use branch `main`, base directory `/`, and Compose location
    `/deploy/docker-compose.yml`.
@@ -25,7 +25,7 @@ localhost while keeping the production file unchanged:
 
 ```sh
 just stack-up
-curl -H 'X-Dhava-Access-Key: dhava-local' http://127.0.0.1:8080/api/v1/me
+curl -H 'X-Nakvali-Access-Key: nakvali-local' http://127.0.0.1:8080/api/v1/me
 just stack-down
 ```
 
@@ -48,7 +48,7 @@ Set these as Coolify secrets/variables before the first deployment:
 - `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET` — optional until the Strava app
   is registered.
 - `STRAVA_APP_REDIRECT_URL` — optional; defaults to
-  `dhava://strava/connected`.
+  `nakvali://strava/connected`.
 
 Keep `RAW_UPLOADS_ENABLED=false`; it is fixed in the production Compose file.
 Never paste the access key, Strava secret, database password, or Coolify token
@@ -58,8 +58,8 @@ For the owner's Android build, put this in the untracked
 `~/.gradle/gradle.properties`:
 
 ```properties
-dhavaApiBaseUrl=https://api.example.com
-dhavaApiAccessKey=the-same-private-alpha-access-key
+nakvaliApiBaseUrl=https://api.example.com
+nakvaliApiAccessKey=the-same-private-alpha-access-key
 ```
 
 The shared key only prevents casual access to an owner-only alpha deployment.
@@ -73,7 +73,7 @@ Replace the hostname and use the access key only in your local terminal:
 curl --fail https://api.example.com/healthz
 curl --fail https://api.example.com/readyz
 curl -i https://api.example.com/api/v1/me
-curl -i -H "X-Dhava-Access-Key: $DHAVA_API_ACCESS_KEY" \
+curl -i -H "X-Nakvali-Access-Key: $NAKVALI_API_ACCESS_KEY" \
   https://api.example.com/api/v1/me
 ```
 

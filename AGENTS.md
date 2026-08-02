@@ -1,6 +1,6 @@
 # Nakvali — Agent Guide
 
-Nakvali is the public brand; the repository and internal identifiers remain `dhava`.
+Nakvali is both the public brand and the active technical identifier.
 Downhill-first ride tracking app. Android (Kotlin/Compose) + Go API + Rust fusion core.
 Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
 `docs/WORKLOG.md` for what has been done and why.
@@ -15,7 +15,7 @@ Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `whekin/dhava`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `whekin/nakvali`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
@@ -57,4 +57,4 @@ Nakvali uses a single-context domain documentation layout. See `docs/agents/doma
 - Android modules: `:core:*` shared, `:feature:*` one per screen/domain; features depend on core, never on each other.
 - Go: stdlib + chi + pgx, slog for logging, no frameworks. Migrations via golang-migrate files in `backend/migrations/`.
 - Rust: minimal deps, no geo mega-crates; the math is small and ours.
-- Android package root: `com.dhava`.
+- Android package root: `com.nakvali`.

@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.feature.activity"
+    namespace = "com.nakvali.feature.activity"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/whekin/dhava/backend/internal/store"
+	"github.com/whekin/nakvali/backend/internal/store"
 )
 
 const testActivityID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"

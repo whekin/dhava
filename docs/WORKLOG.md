@@ -1898,3 +1898,38 @@ Verified the full Android `test lintDebug assembleDebug` run. The resulting APK 
 has package `com.dhava.app` and now reports application label `Nakvali` through `aapt`.
 The OnePlus was connected, but no production APK was installed for this naming/docs
 step and its local recordings were not touched.
+
+## 2026-08-02 — Full technical rename to Nakvali
+
+The private-alpha compatibility choice above was superseded after the rider created
+and verified a local backup. Nakvali is now both the product name and the active
+technical identity: Android uses application ID `com.nakvali.app` and package root
+`com.nakvali`; source directories, Compose theme/map/backup symbols, Gradle
+properties, the UniFFI Kotlin package, Go module imports, API headers, Strava deep
+links, GPX/backup names, deployment/database defaults, OpenAPI, scripts and the
+repository-local UI skill were renamed consistently.
+
+The existing release signing certificate is deliberately reused. A key alias and
+keystore filename are private signing implementation details and do not need a
+cosmetic rename. The new application ID installs alongside the retired prototype,
+so the old installation remains the safety copy until its format-v1 archive has been
+restored and checked in Nakvali. Backup v1 contains no brand or Android package marker;
+its manifest and durable payload paths are unchanged, making the existing archive
+compatible without conversion.
+
+Regenerated both Android native libraries and Kotlin UniFFI bindings from Rust after
+changing the binding package. Verified a clean Android `test lintDebug assembleDebug`
+run, including the renamed backup tests and lint; `aapt` reports package
+`com.nakvali.app` and label `Nakvali`, and the built dex contains none of the retired
+package/header/deep-link identifiers. Verified Go vet/tests/build, 103 Rust unit tests
+plus two forest fixtures, Cargo clippy with warnings denied, and the rendered local
+Compose configuration under project name `nakvali`.
+
+Installed the debug APK on OnePlus `49b5d08f` as `com.nakvali.app` and launched it
+successfully. Android reports both the new and retired packages installed; no old app
+data was cleared or uninstalled. External follow-up remains: rename the GitHub
+repository/remote, point Coolify at it and redeploy with Nakvali's API header,
+database/user and `nakvali://strava/connected` redirect, choose the final API domain,
+and finish Firebase Google-provider/SHA setup before downloading a refreshed config
+and implementing sign-in. The first `google-services.json` already targets
+`com.nakvali.app` but contains no OAuth clients, so it is intentionally not committed.

@@ -10,7 +10,7 @@
 #
 # Outputs:
 #   android/core/fusion/src/main/jniLibs/<abi>/libfusion_core.so   (arm64-v8a, x86_64)
-#   android/core/fusion/src/main/java/com/dhava/fusion/fusion_core.kt
+#   android/core/fusion/src/main/java/com/nakvali/fusion/fusion_core.kt
 #
 # Requirements: rustup toolchain with Android targets, cargo-ndk, Android NDK.
 set -euo pipefail
@@ -51,4 +51,4 @@ find "$KOTLIN_OUT_DIR" -name '*.kt' -exec perl -pi -e 's/[ \t]+$//' {} +
 
 echo "==> Done"
 find "$JNILIBS_DIR" -name '*.so' -exec ls -lh {} +
-find "$KOTLIN_OUT_DIR" -name '*.kt' -path '*com/dhava/fusion*' -exec ls -lh {} +
+find "$KOTLIN_OUT_DIR" -name '*.kt' -path '*com/nakvali/fusion*' -exec ls -lh {} +

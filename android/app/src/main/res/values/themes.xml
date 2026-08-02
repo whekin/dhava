@@ -2,10 +2,10 @@
 <resources>
     <!--
         Window-level theme only; all real theming happens in Compose
-        (DhavaTheme in :core:ui). Dark parent because dark is the app's
+        (NakvaliTheme in :core:ui). Dark parent because dark is the app's
         primary look — avoids a white flash before Compose attaches.
     -->
-    <style name="Theme.Dhava" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Nakvali" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
 </resources>

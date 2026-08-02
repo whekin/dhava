@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.core.ui"
+    namespace = "com.nakvali.core.ui"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

@@ -1,0 +1,212 @@
+package com.nakvali.app
+
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.nakvali.feature.activity.ActivityDetailScreen
+import com.nakvali.feature.record.RecordScreen
+import com.nakvali.feature.record.ActivitiesScreen
+import com.nakvali.feature.record.SaveRecordingScreen
+import com.nakvali.feature.segments.SegmentDetailScreen
+import com.nakvali.feature.segments.SegmentEditorScreen
+import com.nakvali.feature.segments.SegmentEditorSource
+import com.nakvali.feature.segments.SegmentsScreen
+
+/** Top-level bottom-navigation destinations. */
+private enum class NakvaliDestination(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+) {
+    Record("record", "Record", Icons.Filled.PlayArrow),
+    Activities("activities", "Activities", Icons.AutoMirrored.Filled.List),
+    Segments("segments", "Segments", Icons.Filled.Timer),
+    Settings("settings", "Settings", Icons.Filled.Settings),
+}
+
+/** App scaffold: bottom navigation bar plus the navigation host. */
+@Composable
+fun NakvaliApp(openRecorderRequest: Long = 0L) {
+    val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = backStackEntry?.destination
+    var recordImmersive by remember { mutableStateOf(false) }
+    val isTopLevelDestination = NakvaliDestination.entries.any { destination ->
+        currentDestination?.hierarchy?.any { it.route == destination.route } == true
+    }
+    val showBottomBar = isTopLevelDestination && !recordImmersive
+
+    LaunchedEffect(openRecorderRequest) {
+        if (openRecorderRequest > 0L) {
+            navController.navigate(NakvaliDestination.Record.route) {
+                popUpTo(navController.graph.findStartDestination().id)
+                launchSingleTop = true
+            }
+        }
+    }
+
+    Scaffold(
+        bottomBar = {
+          if (showBottomBar) {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+            ) {
+                NakvaliDestination.entries.forEach { destination ->
+                    val selected = currentDestination?.hierarchy
+                        ?.any { it.route == destination.route } == true
+                    NavigationBarItem(
+                        selected = selected,
+                        onClick = {
+                            navController.navigate(destination.route) {
+                                // Keep a single copy of each destination and
+                                // restore its state when reselected.
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = destination.icon,
+                                contentDescription = destination.label,
+                            )
+                        },
+                        label = { Text(destination.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                    )
+                }
+            }
+          }
+        },
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = NakvaliDestination.Record.route,
+            modifier = Modifier.padding(innerPadding),
+        ) {
+            composable(NakvaliDestination.Record.route) {
+                RecordScreen(
+                    onImmersiveChanged = { recordImmersive = it },
+                    onSaveRecovered = { id -> navController.navigate("save/$id") },
+                )
+            }
+            composable(NakvaliDestination.Activities.route) {
+                ActivitiesScreen(
+                    onOpenActivity = { id -> navController.navigate("activity/$id") },
+                    onFinishSaving = { id -> navController.navigate("save/$id") },
+                )
+            }
+            composable(NakvaliDestination.Segments.route) {
+                SegmentsScreen(
+                    onOpenSegment = { id -> navController.navigate("segment/$id") },
+                    onEditImportedTrace = { id ->
+                        navController.navigate("segment-import-editor/$id")
+                    },
+                )
+            }
+            composable(NakvaliDestination.Settings.route) { SettingsScreen() }
+            // Detail screen for one recorded activity; pushed on top of the
+            // Record tab, so system/app back both return to the list.
+            composable(
+                route = "activity/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                val recordingId = entry.arguments?.getString("id").orEmpty()
+                ActivityDetailScreen(
+                    recordingId = recordingId,
+                    onBack = { navController.popBackStack() },
+                    onCreateSegment = { navController.navigate("segment-editor/$recordingId") },
+                )
+            }
+            composable(
+                route = "segment/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentDetailScreen(
+                    segmentId = entry.arguments?.getString("id").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            // Authoring a segment from one ride. On success the editor is
+            // replaced by the new segment so Back returns to the ride.
+            composable(
+                route = "segment-editor/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentEditorScreen(
+                    source = SegmentEditorSource.Ride(
+                        entry.arguments?.getString("id").orEmpty(),
+                    ),
+                    onBack = { navController.popBackStack() },
+                    onCreated = { segmentId ->
+                        navController.navigate("segment/$segmentId") {
+                            popUpTo("segment-editor/{id}") { inclusive = true }
+                        }
+                    },
+                )
+            }
+            composable(
+                route = "segment-import-editor/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentEditorScreen(
+                    source = SegmentEditorSource.ImportedGpx(
+                        entry.arguments?.getString("id").orEmpty(),
+                    ),
+                    onBack = { navController.popBackStack() },
+                    onCreated = { segmentId ->
+                        navController.navigate("segment/$segmentId") {
+                            popUpTo("segment-import-editor/{id}") { inclusive = true }
+                        }
+                    },
+                )
+            }
+            composable(
+                route = "save/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SaveRecordingScreen(
+                    recordingId = entry.arguments?.getString("id").orEmpty(),
+                    onFinished = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+    }
+}

@@ -1,4 +1,4 @@
-//! Dhava fusion worker (skeleton).
+//! Nakvali fusion worker (skeleton).
 //!
 //! Future design: an async worker (likely tokio + sqlx) that
 //! 1. `LISTEN`s on a Postgres channel (or polls) for newly uploaded raw

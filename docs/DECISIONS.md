@@ -18,7 +18,7 @@ Short log of architecture/product decisions. Newest last.
   most of the size gap. Revisit if upload sizes hurt.
 - **No auth in Phase 1** — endpoints open, device-token auth comes in v1.5. Fine while
   the API is not public.
-- **Package root** `com.dhava`, module deps: features → core, never feature → feature.
+- **Package root** `com.nakvali`, module deps: features → core, never feature → feature.
 - **PostGIS image: `imresamu/postgis`** (multi-arch) — official `postgis/postgis` has
   no arm64 manifest; dev Mac and the Coolify VPS are both ARM.
 - **Upload model**: recording and saving are fully offline; upload is a background
@@ -64,10 +64,10 @@ activity results are always recomputed canonically from the raw on-device file.
   stationarity, preserve motion-onset evidence and tune device-specific noise.
   Adaptive stationary sampling is allowed later only with heartbeat plus pre-roll.
 
-## 2026-07-13 — Dhava design system wraps Material 3
+## 2026-07-13 — Nakvali design system wraps Material 3
 
 - Keep Material 3 Expressive as the behavior/accessibility foundation, but expose
-  Dhava product components and tokens from `:core:ui` for visually significant UI.
+  Nakvali product components and tokens from `:core:ui` for visually significant UI.
   Feature screens may still use low-level Compose primitives and appropriate Material
   controls, but ride controls, panels, metrics, headers, status pills, spacing, shapes
   and palette must remain coherent through the shared layer.
@@ -305,16 +305,16 @@ activity results are always recomputed canonically from the raw on-device file.
 
 ## 2026-07-28 — Strava connection is anonymous-device authenticated
 
-- Dhava does not yet require a product account just to export a local ride. Android
+- Nakvali does not yet require a product account just to export a local ride. Android
   generates a random 256-bit installation credential and sends it as a bearer token;
   the backend stores only its SHA-256 hash. This credential authorizes only that
-  installation's Strava connection and exports, not any future Dhava social API.
+  installation's Strava connection and exports, not any future Nakvali social API.
 - Strava's client secret, rotating refresh token and short-lived access token stay in
   the Go broker. OAuth returns first to its public HTTPS callback, which consumes a
   ten-minute random state and redirects only a success/denied/failure result through
-  `dhava://strava/connected`. No OAuth token enters the APK or deep link.
+  `nakvali://strava/connected`. No OAuth token enters the APK or deep link.
 - Each export sends only Rust's canonical processed GPX and uses
-  `dhava-<recording-id>-<algorithm-version>.gpx` as its stable external id. A unique
+  `nakvali-<recording-id>-<algorithm-version>.gpx` as its stable external id. A unique
   database row persists Strava upload/activity ids; retries poll an accepted upload
   instead of resubmitting it. If an ambiguous network retry reaches Strava twice, its
   documented duplicate response is resolved back to the existing activity id.
@@ -366,7 +366,7 @@ activity results are always recomputed canonically from the raw on-device file.
 
 ## 2026-07-28 — Android UniFFI bindings use the Android-aware cleaner
 
-- Dhava supports Android API 26, so generated Kotlin bindings must not directly
+- Nakvali supports Android API 26, so generated Kotlin bindings must not directly
   reference the API 33 `java.lang.ref.Cleaner` path selected by UniFFI's
   platform-neutral default.
 - Keep `android_cleaner = true` in `fusion-core/uniffi.toml`. Generated bindings use
@@ -460,7 +460,7 @@ activity results are always recomputed canonically from the raw on-device file.
   server request may upload only a bounded verification window under a separate
   contract.
 - During private alpha, every application API route requires a shared
-  `X-Dhava-Access-Key`. Health/readiness and the browser-facing Strava OAuth callback
+  `X-Nakvali-Access-Key`. Health/readiness and the browser-facing Strava OAuth callback
   stay public; Strava routes additionally retain their per-installation Bearer
   credential. The shared key is compiled only into owner builds and is explicitly
   not public-user authentication: it must be rotated if an APK escapes and replaced
@@ -479,7 +479,7 @@ activity results are always recomputed canonically from the raw on-device file.
   source sample. Rust still derives their direction from the adjacent centerline
   tangent and owns all matching geometry.
 - An imported GPX trace is preserved locally as seed evidence, not represented as a
-  ride or attempt. It may create a local draft segment, and later real Dhava rides
+  ride or attempt. It may create a local draft segment, and later real Nakvali rides
   may contribute to a more trusted centerline while the source file remains available
   for recomputation.
 
@@ -487,7 +487,7 @@ activity results are always recomputed canonically from the raw on-device file.
 
 - Backup is an offline Android Storage Access Framework operation, not a server sync
   feature. The rider chooses where the ZIP lives and can copy it to any storage
-  provider without granting Dhava a broad filesystem permission.
+  provider without granting Nakvali a broad filesystem permission.
 - Format v1 contains only irreplaceable or rider-authored input: the recording and
   bike indexes, raw GPS/IMU/barometer streams, recording health logs, authored segment
   definitions and preserved GPX seeds. Canonical tracks, segment results and maps are
@@ -502,16 +502,21 @@ activity results are always recomputed canonically from the raw on-device file.
   actively changing sensor stream never enters an archive.
 - The format contract is documented in `docs/local-backup-format.md`.
 
-## 2026-08-02 — Nakvali is the working public brand
+## 2026-08-02 — Nakvali replaces the product and technical identity
 
 - Use **Nakvali** as the customer-facing name. Georgian `ნაკვალი` means a trace,
   footprint, or track left behind, matching recorded lines, multi-ride refinement,
   and ride history without constraining the product to one gravity sport.
 - The selection passed a preliminary exact web/store/domain check but still requires
   native-speaker tone validation and formal trademark clearance before public launch.
-- Keep repository, package, API, database, backup-format, deep-link and deployment
-  identifiers using `dhava`. Android specifically retains `com.dhava.app`: it is the
-  signed installed identity holding irreplaceable private-alpha recordings, and a new
-  application ID would create a separate app rather than an update.
-- Firebase must register the existing `com.dhava.app` Android application. The
-  Firebase project display name and all user-visible identity should use Nakvali.
+- The earlier compatibility decision to retain the prototype's internal identity is
+  superseded while the app is still private and a verified local backup exists.
+  Repository/module paths, Kotlin packages, API headers, deep links, backup/export
+  names, deployment defaults and database defaults all use Nakvali.
+- Android's new application ID is `com.nakvali.app`, with package root `com.nakvali`.
+  It installs separately from the retired prototype; restore the format-v1 backup
+  before removing that installation. The backup schema itself contains no brand or
+  package marker, so the existing archive remains compatible.
+- Firebase must register `com.nakvali.app`. Reuse the established release signing
+  certificate; signing identity is independent of application ID and its key alias is
+  not renamed merely for cosmetics.

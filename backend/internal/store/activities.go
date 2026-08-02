@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Store runs database queries for the Dhava backend.
+// Store runs database queries for the Nakvali backend.
 type Store struct {
 	pool *pgxpool.Pool
 }

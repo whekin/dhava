@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/whekin/dhava/backend/internal/store"
-	dhavastrava "github.com/whekin/dhava/backend/internal/strava"
+	"github.com/whekin/nakvali/backend/internal/store"
+	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 const maxStravaGPXBytes = 32 << 20
@@ -146,7 +146,7 @@ func (s *Server) handleStravaExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.strava.Export(r.Context(), token, dhavastrava.ExportRequest{
+	status, err := s.strava.Export(r.Context(), token, nakvalistrava.ExportRequest{
 		ExternalID:  externalID,
 		Title:       title,
 		Description: description,
@@ -179,12 +179,12 @@ func deviceBearerToken(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 func (s *Server) writeStravaError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, dhavastrava.ErrInvalidDeviceToken):
+	case errors.Is(err, nakvalistrava.ErrInvalidDeviceToken):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_device_token"})
-	case errors.Is(err, dhavastrava.ErrNotConnected),
+	case errors.Is(err, nakvalistrava.ErrNotConnected),
 		errors.Is(err, store.ErrStravaConnectionNotFound):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "strava_not_connected"})
-	case errors.Is(err, dhavastrava.ErrWriteScopeMissing):
+	case errors.Is(err, nakvalistrava.ErrWriteScopeMissing):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "strava_write_scope_required"})
 	default:
 		s.logger.Error("strava request failed", "error", err)

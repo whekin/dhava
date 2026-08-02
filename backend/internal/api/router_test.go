@@ -81,7 +81,7 @@ func TestPrivateAlphaAccessKeyProtectsAPIRoutes(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
 			if test.accessKey != "" {
-				request.Header.Set("X-Dhava-Access-Key", test.accessKey)
+				request.Header.Set("X-Nakvali-Access-Key", test.accessKey)
 			}
 
 			handler.ServeHTTP(recorder, request)

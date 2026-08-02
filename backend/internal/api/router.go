@@ -13,9 +13,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/whekin/dhava/backend/internal/blob"
-	"github.com/whekin/dhava/backend/internal/store"
-	dhavastrava "github.com/whekin/dhava/backend/internal/strava"
+	"github.com/whekin/nakvali/backend/internal/blob"
+	"github.com/whekin/nakvali/backend/internal/store"
+	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 // maxRawBodyBytes caps raw recording uploads at 256 MB.
@@ -36,11 +36,11 @@ type Server struct {
 // StravaBroker is the OAuth/upload behavior exposed through the HTTP API.
 // The interface keeps handler tests independent of PostgreSQL and Strava.
 type StravaBroker interface {
-	BeginConnect(context.Context, string) (dhavastrava.ConnectStart, error)
+	BeginConnect(context.Context, string) (nakvalistrava.ConnectStart, error)
 	CompleteConnect(context.Context, string, string, string) error
 	AppRedirectURL(string) string
-	Connection(context.Context, string) (dhavastrava.ConnectionStatus, error)
-	Export(context.Context, string, dhavastrava.ExportRequest) (dhavastrava.ExportStatus, error)
+	Connection(context.Context, string) (nakvalistrava.ConnectionStatus, error)
+	Export(context.Context, string, nakvalistrava.ExportRequest) (nakvalistrava.ExportStatus, error)
 }
 
 type RouterOption func(*Server)
@@ -51,7 +51,7 @@ func WithStravaBroker(broker StravaBroker) RouterOption {
 	}
 }
 
-// WithAccessKey protects private-alpha API routes with X-Dhava-Access-Key.
+// WithAccessKey protects private-alpha API routes with X-Nakvali-Access-Key.
 // Health/readiness and the browser-facing Strava callback remain public.
 func WithAccessKey(key string) RouterOption {
 	return func(server *Server) {
@@ -141,7 +141,7 @@ func (s *Server) requireAccessKey(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		provided := r.Header.Get("X-Dhava-Access-Key")
+		provided := r.Header.Get("X-Nakvali-Access-Key")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.accessKey)) != 1 {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "access_key_required"})
 			return

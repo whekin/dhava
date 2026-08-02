@@ -20,7 +20,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "dhava"
+rootProject.name = "nakvali"
 
 include(":app")
 include(":core:ui")

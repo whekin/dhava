@@ -1,4 +1,4 @@
--- Initial minimal schema for Dhava. Real schema comes later.
+-- Initial minimal schema for Nakvali. Real schema comes later.
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 

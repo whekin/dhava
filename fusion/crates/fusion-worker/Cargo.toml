@@ -1,6 +1,6 @@
 [package]
 name = "fusion-worker"
-description = "Dhava server-side worker: processes raw recordings through fusion-core"
+description = "Nakvali server-side worker: processes raw recordings through fusion-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,8 +1,12 @@
-# Dhava local backup format
+# Nakvali local backup format
 
-Dhava backups are user-owned ZIP archives created and opened through Android's
+Nakvali backups are user-owned ZIP archives created and opened through Android's
 Storage Access Framework. The suggested filename is
-`dhava-backup-YYYY-MM-DD-HHmm.zip`.
+`nakvali-backup-YYYY-MM-DD-HHmm.zip`.
+
+The archive schema does not contain an application/package identifier. Format v1
+archives exported by the retired prototype therefore remain valid Nakvali restore
+inputs even when their filename uses the former brand.
 
 ## Format version 1
 
@@ -49,7 +53,7 @@ Deliberately excluded:
 
 Restore first reads the bounded manifest, then extracts every payload into an
 app-private staging directory and verifies its declared size, ZIP CRC and SHA-256.
-Only after the whole archive passes verification does Dhava merge it into local
+Only after the whole archive passes verification does Nakvali merge it into local
 storage.
 
 - Existing rides, metadata, bikes, segments, GPX sources and diagnostic tails win.
@@ -62,4 +66,4 @@ storage.
 
 Import accepts at most 10,000 payload files, a 2 MB manifest and 50 GB of declared
 payload data. Entry names use an allowlist and cannot contain nested or parent paths.
-Dhava also keeps 64 MB of free internal space beyond the staging requirement.
+Nakvali also keeps 64 MB of free internal space beyond the staging requirement.

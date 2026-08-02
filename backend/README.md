@@ -1,6 +1,6 @@
-# Dhava Backend
+# Nakvali Backend
 
-Go HTTP API for Dhava's private alpha: health/readiness, Strava OAuth and
+Go HTTP API for Nakvali's private alpha: health/readiness, Strava OAuth and
 processed GPX export, plus explicitly opt-in legacy GPS/IMU ingest routes.
 
 ## Run
@@ -13,22 +13,22 @@ processed GPX export, plus explicitly opt-in legacy GPS/IMU ingest routes.
 - `DATABASE_URL` — PostgreSQL connection string (optional; `/readyz` reports 503 without it)
 - `LOG_LEVEL` — `debug` | `info` | `warn` | `error` (default `info`)
 - `API_ACCESS_KEY` — shared private-alpha perimeter key expected in
-  `X-Dhava-Access-Key`. Leaving it empty is convenient for local development;
+  `X-Nakvali-Access-Key`. Leaving it empty is convenient for local development;
   the production Compose file requires it. This is not user authentication.
 - `RAW_UPLOADS_ENABLED` — exposes the legacy activity/raw upload endpoints when
   `true` (default `false`). Product deployments keep immutable raw sensor data
   on-device and must leave this disabled.
 - `S3_ENDPOINT` — S3/MinIO endpoint, scheme optional (e.g. `http://localhost:9000`; no scheme implies HTTPS). Unset → filesystem blob storage
-- `S3_BUCKET` — bucket for raw recordings (default `dhava`; created at startup if missing)
+- `S3_BUCKET` — bucket for raw recordings (default `nakvali`; created at startup if missing)
 - `S3_ACCESS_KEY` / `S3_SECRET_KEY` — S3 credentials
 - `BLOB_DIR` — base directory for the filesystem blob store (default `./data/blobs`; used when `S3_ENDPOINT` is unset)
 - `PUBLIC_BASE_URL` — public HTTPS origin of the API, without a trailing slash
-  (for example `https://api.dhava.app`); used to build the Strava callback
+  (for example `https://api.nakvali.app`); used to build the Strava callback
 - `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` — credentials from the
   [Strava API dashboard](https://www.strava.com/settings/api). The secret is
   backend-only and must never be put in Gradle properties or the APK.
 - `STRAVA_APP_REDIRECT_URL` — post-OAuth Android deep link
-  (default `dhava://strava/connected`)
+  (default `nakvali://strava/connected`)
 
 Strava export is enabled only when PostgreSQL and all three of
 `PUBLIC_BASE_URL`, `STRAVA_CLIENT_ID`, and `STRAVA_CLIENT_SECRET` are configured.
@@ -40,19 +40,19 @@ For a USB-attached Android test, no tunnel is required: Strava explicitly
 allows `127.0.0.1` callbacks. Set the app's Authorization Callback Domain to
 `127.0.0.1`, run the API with
 `PUBLIC_BASE_URL=http://127.0.0.1:8080`, build Android with
-`-PdhavaApiBaseUrl=http://127.0.0.1:8080`, and forward the phone port:
+`-PnakvaliApiBaseUrl=http://127.0.0.1:8080`, and forward the phone port:
 
     adb reverse tcp:8080 tcp:8080
 
 The browser callback reaches the Mac through ADB, then the API redirects to the
-registered `dhava://strava/connected` app link.
+registered `nakvali://strava/connected` app link.
 
 Private-alpha Android builds targeting a protected backend also need the same
 access key outside the repository:
 
     ./gradlew :app:assembleDebug \
-      -PdhavaApiBaseUrl=https://api.example.com \
-      -PdhavaApiAccessKey=replace-with-the-private-alpha-key
+      -PnakvaliApiBaseUrl=https://api.example.com \
+      -PnakvaliApiAccessKey=replace-with-the-private-alpha-key
 
 Prefer putting those two properties in the developer's untracked
 `~/.gradle/gradle.properties`. Use a URL-safe key so it can be represented as a

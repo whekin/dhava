@@ -234,7 +234,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("dhava-replay-{unique}.jsonl.gz"));
+        let path = std::env::temp_dir().join(format!("nakvali-replay-{unique}.jsonl.gz"));
         let file = File::create(&path).unwrap();
         let mut gzip = GzEncoder::new(file, Compression::fast());
         for line in [
@@ -276,7 +276,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("dhava-replay-pause-{unique}.jsonl.gz"));
+        let path = std::env::temp_dir().join(format!("nakvali-replay-pause-{unique}.jsonl.gz"));
         let file = File::create(&path).unwrap();
         let mut gzip = GzEncoder::new(file, Compression::fast());
         for line in [

@@ -1,6 +1,6 @@
 # Android release builds
 
-Dhava's release build deliberately has no debug-signing fallback. A build signed
+Nakvali's release build deliberately has no debug-signing fallback. A build signed
 with a different certificate cannot update an installed app, and uninstalling the
 old app would remove recordings that have not been backed up.
 
@@ -10,8 +10,8 @@ Put owner-build values in the untracked user Gradle file
 `~/.gradle/gradle.properties`:
 
 ```properties
-dhavaApiBaseUrl=https://api.example.com
-dhavaApiAccessKey=replace-with-the-private-alpha-key
+nakvaliApiBaseUrl=https://api.example.com
+nakvaliApiAccessKey=replace-with-the-private-alpha-key
 ```
 
 The access key is compiled into the APK. It is only a private-alpha perimeter,
@@ -27,19 +27,19 @@ Without an override, debug builds target the Android emulator host at
 Create `android/keystore.properties` locally. It is ignored by Git:
 
 ```properties
-storeFile=/absolute/path/to/dhava-release.jks
+storeFile=/absolute/path/to/nakvali-release.jks
 storePassword=replace-me
-keyAlias=dhava
+keyAlias=existing-alias
 keyPassword=replace-me
 ```
 
 The same values can instead be provided by CI or another machine:
 
 ```sh
-export DHAVA_KEYSTORE_FILE=/absolute/path/to/dhava-release.jks
-export DHAVA_KEYSTORE_PASSWORD=replace-me
-export DHAVA_KEY_ALIAS=dhava
-export DHAVA_KEY_PASSWORD=replace-me
+export NAKVALI_KEYSTORE_FILE=/absolute/path/to/nakvali-release.jks
+export NAKVALI_KEYSTORE_PASSWORD=replace-me
+export NAKVALI_KEY_ALIAS=existing-alias
+export NAKVALI_KEY_PASSWORD=replace-me
 ```
 
 `storeFile` may be absolute or relative to `android/`. Keep the keystore and its
@@ -50,12 +50,14 @@ If a release key does not exist yet, Android's `keytool` can create one:
 
 ```sh
 keytool -genkeypair -v \
-  -keystore /secure/path/dhava-release.jks \
-  -alias dhava \
+  -keystore /secure/path/nakvali-release.jks \
+  -alias nakvali \
   -keyalg RSA -keysize 4096 -validity 10000
 ```
 
-Do not replace an existing production key with a newly generated one.
+Reuse the existing private-alpha key when available; the alias and filename are not
+part of the public Android identity. Do not replace an existing key merely for a
+cosmetic rename.
 
 ## Build and verify
 
@@ -85,9 +87,9 @@ To compare it with an installed build, first ask Android for the installed APK
 path, pull that `base.apk`, and run the same `apksigner` command on the copy:
 
 ```sh
-adb -s DEVICE_SERIAL shell pm path com.dhava.app
-adb -s DEVICE_SERIAL pull /data/app/.../base.apk /tmp/dhava-installed.apk
-apksigner verify --print-certs /tmp/dhava-installed.apk
+adb -s DEVICE_SERIAL shell pm path com.nakvali.app
+adb -s DEVICE_SERIAL pull /data/app/.../base.apk /tmp/nakvali-installed.apk
+apksigner verify --print-certs /tmp/nakvali-installed.apk
 ```
 
 Back up important rides before changing signing or installation tooling. To

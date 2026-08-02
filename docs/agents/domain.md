@@ -1,6 +1,6 @@
 # Domain Docs
 
-How engineering skills should consume Dhava's domain documentation while exploring the codebase.
+How engineering skills should consume Nakvali's domain documentation while exploring the codebase.
 
 ## Before exploring, read these
 
@@ -13,7 +13,7 @@ If `CONTEXT.md` or `docs/adr/` does not exist, proceed silently. Do not propose 
 
 ## Layout
 
-Dhava uses a single-context domain documentation layout across its Android, backend, fusion, protocol, and deployment components:
+Nakvali uses a single-context domain documentation layout across its Android, backend, fusion, protocol, and deployment components:
 
 ```text
 /

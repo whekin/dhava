@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/whekin/dhava/backend/internal/store"
+	"github.com/whekin/nakvali/backend/internal/store"
 )
 
 // Datastore is the subset of database operations the handlers need.

@@ -1,7 +1,7 @@
 // :core:fusion — Kotlin facade over the Rust fusion-core crate (UniFFI).
 //
 // COMMITTED ARTIFACTS: src/main/jniLibs/<abi>/libfusion_core.so and the
-// generated bindings in src/main/java/com/dhava/fusion/ are build outputs of
+// generated bindings in src/main/java/com/nakvali/fusion/ are build outputs of
 // fusion/crates/fusion-core, committed to the repo so the app builds without
 // a local Rust toolchain. Trade-off accepted for now; CI will own artifact
 // generation later. After ANY fusion-core change, regenerate both with:
@@ -12,7 +12,7 @@ plugins {
 }
 
 android {
-    namespace = "com.dhava.core.fusion"
+    namespace = "com.nakvali.core.fusion"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

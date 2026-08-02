@@ -1,4 +1,0 @@
-interface:
-  display_name: "Dhava UI Design"
-  short_description: "Design polished downhill-first Android UI"
-  default_prompt: "Use $dhava-ui-design to refine this Dhava screen and verify it on Android."
