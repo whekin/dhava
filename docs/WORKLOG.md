@@ -1838,3 +1838,22 @@ Coolify build-context check; full `just check` (Android tests/lint/debug APK, Go
 vet/tests/build, 103 Rust unit tests plus two forest fixtures, Cargo clippy); signed
 release APK and signed release AAB through the documented `just` targets. Both release
 artifacts were produced successfully; no APK was installed and no app data was touched.
+
+## 2026-08-02 — Preliminary public brand screening
+
+The current public name has a direct collision with an active GPS fitness-tracking
+app in Google Play, so naming was screened before binding a Firebase project, OAuth
+identity, store listing, and application ID to the brand. The research in
+`docs/research/brand-name-screening.md` evaluates names against Dhava's actual
+downhill-first positioning rather than generic activity tracking.
+
+The initial shortlist is Gravtrace, Daghma, LoamSignal, and Gravra. Gravtrace is the
+current product-fit recommendation; Daghma has the strongest Georgian story;
+LoamSignal is the strongest deliberately MTB-only direction; Gravra is the most
+flexible invented blank canvas. Exact indexed Play/App Store searches found no direct
+matches for those four and their `.com` names returned no Verisign RDAP record at the
+time checked. These are preliminary signals, not legal clearance or a reservation.
+
+No rename decision was made and no code identifiers changed. Next step: select one or
+two tonal directions, test spoken spelling with riders, then perform formal trademark
+and handle checks before buying identity work or configuring production auth.
