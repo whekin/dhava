@@ -1,8 +1,10 @@
 package com.dhava.core.recording
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.dhava.core.fusion.FusionCore
+import com.dhava.fusion.LatLon
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -44,6 +46,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         private const val ARTIFACTS_DIR = "activity-artifacts"
         private const val SEGMENTS_DIR = "segments"
         private const val SEGMENT_RESULTS_DIR = "segment-results"
+        private const val IMPORTED_TRACES_DIR = "imported-traces"
         private const val LOG_TAG = "RecordingRepository"
 
         @Volatile
@@ -67,6 +70,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val segmentStore = SegmentStore(
         segmentsDir = File(appContext.filesDir, SEGMENTS_DIR),
         resultsDir = File(appContext.filesDir, SEGMENT_RESULTS_DIR),
+    )
+    private val importedTraceStore = ImportedTraceStore(
+        context = appContext,
+        directory = File(appContext.filesDir, IMPORTED_TRACES_DIR),
     )
     private val segmentMatcher = SegmentMatcher(
         store = segmentStore,
@@ -179,6 +186,18 @@ class RecordingRepository private constructor(private val appContext: Context) {
         return _segments.value.firstOrNull { it.id == id }
     }
 
+    /** Copies and validates a GPX into durable local seed storage. */
+    suspend fun importGpx(uri: Uri): ImportedTrace {
+        loaded.await()
+        return withContext(Dispatchers.IO) { importedTraceStore.import(uri) }
+    }
+
+    /** Loads an imported source without treating it as a recorded activity. */
+    suspend fun importedTrace(id: String): ImportedTrace? {
+        loaded.await()
+        return withContext(Dispatchers.IO) { importedTraceStore.load(id) }
+    }
+
     /**
      * Authors a draft segment from a selection on one ride's finalized track.
      *
@@ -195,22 +214,60 @@ class RecordingRepository private constructor(private val appContext: Context) {
         name: String,
         startPosition: Double,
         endPosition: Double,
+        startGateCenter: LatLon,
+        finishGateCenter: LatLon,
     ): StoredSegment {
         loaded.await()
         val artifact = canonicalActivity(recordingId)
             ?: error("Canonical artifact unavailable for $recordingId")
         return segmentsMutex.withLock {
             val definition = withContext(Dispatchers.Default) {
-                FusionCore.buildSegmentContinuous(
+                FusionCore.buildSegmentContinuousWithGates(
                     id = UUID.randomUUID().toString(),
                     name = name.trim().ifBlank { "Segment" },
                     sourceRecordingId = recordingId,
                     track = artifact.finalizedTrack.toCanonicalTrack(),
                     startPosition = startPosition,
                     endPosition = endPosition,
+                    startGateCenter = startGateCenter,
+                    finishGateCenter = finishGateCenter,
                 ).definition
             }
             val segment = definition.toStored(createdAtMs = System.currentTimeMillis())
+            segmentStore.saveSegment(segment)
+            _segments.update { list -> (list + segment).sortedBy { it.createdAtMs } }
+            segment
+        }
+    }
+
+    /** Authors a draft segment from preserved GPX seed geometry. */
+    suspend fun createSegmentFromImportedTrace(
+        traceId: String,
+        name: String,
+        startPosition: Double,
+        endPosition: Double,
+        startGateCenter: LatLon,
+        finishGateCenter: LatLon,
+    ): StoredSegment {
+        loaded.await()
+        val trace = importedTrace(traceId) ?: error("Imported GPX unavailable: $traceId")
+        return segmentsMutex.withLock {
+            val definition = withContext(Dispatchers.Default) {
+                FusionCore.buildSegmentContinuousWithGates(
+                    id = UUID.randomUUID().toString(),
+                    name = name.trim().ifBlank { "Segment" },
+                    sourceRecordingId = "imported-gpx:$traceId",
+                    track = trace.points.toCanonicalTrack(),
+                    startPosition = startPosition,
+                    endPosition = endPosition,
+                    startGateCenter = startGateCenter,
+                    finishGateCenter = finishGateCenter,
+                ).definition
+            }
+            val segment = definition.toStored(
+                createdAtMs = System.currentTimeMillis(),
+                sourceKind = SegmentSourceKind.IMPORTED_GPX,
+            )
             segmentStore.saveSegment(segment)
             _segments.update { list -> (list + segment).sortedBy { it.createdAtMs } }
             segment

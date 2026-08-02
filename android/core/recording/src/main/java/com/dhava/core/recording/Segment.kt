@@ -26,8 +26,15 @@ data class StoredSegment(
     val id: String,
     val name: String,
     @SerialName("source_recording_id") val sourceRecordingId: String,
+    @SerialName("source_kind") val sourceKind: SegmentSourceKind = SegmentSourceKind.RIDE,
     @SerialName("geometry_version") val geometryVersion: Int,
     val centerline: List<StoredLatLon>,
+    /**
+     * Explicit gate centers were introduced with geometry v3. Null means an
+     * older segment whose gates live at the first/last centerline point.
+     */
+    @SerialName("start_gate_center") val startGateCenter: StoredLatLon? = null,
+    @SerialName("finish_gate_center") val finishGateCenter: StoredLatLon? = null,
     @SerialName("gate_half_width_m") val gateHalfWidthM: Double,
     @SerialName("corridor_m") val corridorM: Double,
     @SerialName("length_m") val lengthM: Double,
@@ -43,6 +50,13 @@ data class StoredSegment(
     val trusted: Boolean = false,
     @SerialName("created_at_ms") val createdAtMs: Long,
 )
+
+@Serializable
+enum class SegmentSourceKind {
+    @SerialName("ride") RIDE,
+
+    @SerialName("imported_gpx") IMPORTED_GPX,
+}
 
 @Serializable
 data class StoredLatLon(val lat: Double, val lon: Double)
@@ -171,6 +185,8 @@ fun StoredSegment.toDefinition(): SegmentDefinition = SegmentDefinition(
     sourceRecordingId = sourceRecordingId,
     geometryVersion = geometryVersion,
     centerline = centerline.map { LatLon(it.lat, it.lon) },
+    startGateCenter = (startGateCenter ?: centerline.first()).let { LatLon(it.lat, it.lon) },
+    finishGateCenter = (finishGateCenter ?: centerline.last()).let { LatLon(it.lat, it.lon) },
     gateHalfWidthM = gateHalfWidthM,
     corridorM = corridorM,
     lengthM = lengthM,
@@ -185,12 +201,18 @@ fun StoredSegment.toDefinition(): SegmentDefinition = SegmentDefinition(
     trusted = trusted,
 )
 
-fun SegmentDefinition.toStored(createdAtMs: Long): StoredSegment = StoredSegment(
+fun SegmentDefinition.toStored(
+    createdAtMs: Long,
+    sourceKind: SegmentSourceKind = SegmentSourceKind.RIDE,
+): StoredSegment = StoredSegment(
     id = id,
     name = name,
     sourceRecordingId = sourceRecordingId,
+    sourceKind = sourceKind,
     geometryVersion = geometryVersion,
     centerline = centerline.map { StoredLatLon(it.lat, it.lon) },
+    startGateCenter = startGateCenter.let { StoredLatLon(it.lat, it.lon) },
+    finishGateCenter = finishGateCenter.let { StoredLatLon(it.lat, it.lon) },
     gateHalfWidthM = gateHalfWidthM,
     corridorM = corridorM,
     lengthM = lengthM,

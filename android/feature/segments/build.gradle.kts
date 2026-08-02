@@ -26,6 +26,7 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:recording"))
     implementation(project(":core:fusion"))
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     // Map rendering: MapLibre native SDK hosted in Compose through AndroidView.
     implementation(libs.maplibre.android)

@@ -10,8 +10,20 @@ A directed, timed trail section bounded by start and finish gates and represente
 _Avoid_: Route, activity
 
 **Draft segment**:
-A segment whose reference geometry comes from one ride and is not yet trusted for correcting rider positions.
+A segment whose reference geometry comes from one Dhava ride or an imported GPX seed and is not yet trusted for correcting rider positions.
 _Avoid_: Trusted segment, published segment
+
+**Reference centerline**:
+The ordered trail polyline used for direction, corridor coverage and future multi-pass refinement. It is evidence about where the trail runs, not the authored timing boundary.
+_Avoid_: Route, gate line, ground truth
+
+**Gate center**:
+The rider-authored geographic anchor at the middle of a segment's start or finish gate. It stays fixed when the reference centerline is refined unless a rider explicitly edits it.
+_Avoid_: Track endpoint, GPS point, handle position
+
+**Imported GPX trace**:
+A preserved external GPX file used as seed evidence for a draft segment's reference centerline. Importing it does not create an activity, segment attempt, PR or KOM.
+_Avoid_: Raw recording, imported ride, canonical track
 
 **Candidate descent**:
 A continuous rideable descent found in one ride that the editor offers as a ready-made segment selection, without a stop, a recording gap or motorised evidence inside it.

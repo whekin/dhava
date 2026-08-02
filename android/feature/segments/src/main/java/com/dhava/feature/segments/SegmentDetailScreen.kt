@@ -48,6 +48,7 @@ import com.dhava.core.map.SegmentMap
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.recording.StoredAttempt
 import com.dhava.core.recording.StoredSegment
+import com.dhava.core.recording.SegmentSourceKind
 import com.dhava.core.recording.countable
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaMetric
@@ -184,6 +185,10 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
             SegmentMap(
                 sections = emptyList(),
                 segment = centerline,
+                startGate = (segment.startGateCenter ?: segment.centerline.firstOrNull())
+                    ?.let { SegmentMapPoint(it.lat, it.lon) },
+                finishGate = (segment.finishGateCenter ?: segment.centerline.lastOrNull())
+                    ?.let { SegmentMapPoint(it.lat, it.lon) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(260.dp),
@@ -321,8 +326,14 @@ private fun DraftNotice(segment: StoredSegment) {
             }
             Spacer(Modifier.height(DhavaSpacing.small))
             Text(
-                text = "The geometry comes from a single ride, so it is not treated as ground " +
-                    "truth and does not correct GPS. Runs are matched inside a " +
+                text = (if (segment.sourceKind == SegmentSourceKind.IMPORTED_GPX) {
+                    "The geometry is an imported GPX seed, not a recorded attempt. It can " +
+                        "be refined by later Dhava rides, while its authored gates stay fixed. "
+                } else {
+                    "The geometry comes from a single ride, so it is not treated as ground " +
+                        "truth and does not correct GPS. "
+                }) +
+                    "Runs are matched inside a " +
                     "${segment.corridorM.toInt()} m corridor with " +
                     "${(segment.gateHalfWidthM * 2).toInt()} m wide gates.",
                 style = MaterialTheme.typography.bodySmall,

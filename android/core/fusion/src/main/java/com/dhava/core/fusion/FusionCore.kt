@@ -9,6 +9,7 @@ import com.dhava.fusion.RideProfile
 import com.dhava.fusion.RecordingReplay
 import com.dhava.fusion.SegmentBuildResult
 import com.dhava.fusion.SegmentDefinition
+import com.dhava.fusion.SegmentGateCenters
 import com.dhava.fusion.SegmentMatchResult
 import com.dhava.fusion.SegmentProposal
 import com.dhava.fusion.SelectionOverlap
@@ -16,6 +17,7 @@ import com.dhava.fusion.algorithmVersion as ffiAlgorithmVersion
 import com.dhava.fusion.analyzeRecording as ffiAnalyzeRecording
 import com.dhava.fusion.buildSegment as ffiBuildSegment
 import com.dhava.fusion.buildSegmentContinuous as ffiBuildSegmentContinuous
+import com.dhava.fusion.buildSegmentContinuousWithGates as ffiBuildSegmentContinuousWithGates
 import com.dhava.fusion.finalizeRecording as ffiFinalizeRecording
 import com.dhava.fusion.matchSegment as ffiMatchSegment
 import com.dhava.fusion.proposeDescents as ffiProposeDescents
@@ -121,6 +123,30 @@ object FusionCore {
         track,
         startPosition,
         endPosition,
+    )
+
+    /**
+     * Builds geometry v3 while keeping authored timing gates independent from
+     * the selected centerline endpoints. The centers are never snapped in
+     * Kotlin; Rust validates and persists the exact map coordinates.
+     */
+    fun buildSegmentContinuousWithGates(
+        id: String,
+        name: String,
+        sourceRecordingId: String,
+        track: List<CanonicalTrackPoint>,
+        startPosition: Double,
+        endPosition: Double,
+        startGateCenter: com.dhava.fusion.LatLon,
+        finishGateCenter: com.dhava.fusion.LatLon,
+    ): SegmentBuildResult = ffiBuildSegmentContinuousWithGates(
+        id,
+        name,
+        sourceRecordingId,
+        track,
+        startPosition,
+        endPosition,
+        SegmentGateCenters(start = startGateCenter, finish = finishGateCenter),
     )
 
     /**

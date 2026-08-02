@@ -25,7 +25,7 @@ use crate::{
 
 /// Version of the matching rules. Stored on every attempt: results produced by
 /// an older version must be recomputed rather than trusted.
-pub const SEGMENT_MATCH_VERSION: &str = "gates-0.2";
+pub const SEGMENT_MATCH_VERSION: &str = "gates-0.3";
 
 /// Shortest acceptable segment. Below this, gate geometry and GPS uncertainty
 /// dominate the result.
@@ -98,6 +98,14 @@ pub struct SegmentDefinition {
     /// store the version that scored them.
     pub geometry_version: i32,
     pub centerline: Vec<LatLon>,
+    /// Authored center of the directed start gate. It is deliberately
+    /// independent from the first centerline point: later multi-pass
+    /// refinement may improve the trail geometry without silently moving the
+    /// timing boundary chosen by the author.
+    pub start_gate_center: LatLon,
+    /// Authored center of the directed finish gate. See
+    /// [`SegmentDefinition::start_gate_center`].
+    pub finish_gate_center: LatLon,
     /// Half-width of both gate lines, meters.
     pub gate_half_width_m: f64,
     /// Allowed lateral deviation from the centerline, meters.
@@ -130,6 +138,13 @@ pub struct SegmentBuildResult {
     pub definition: SegmentDefinition,
     pub started_at_ms: i64,
     pub finished_at_ms: i64,
+}
+
+/// Independently authored timing anchors for a geometry v3 segment.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct SegmentGateCenters {
+    pub start: LatLon,
+    pub finish: LatLon,
 }
 
 /// A suggested selection for the segment editor.
@@ -328,7 +343,17 @@ pub fn build_segment(
         )));
     }
     let selection = &track[start..=end];
-    build_segment_definition(id, name, source_recording_id, selection, 1)
+    let start_gate_center = lat_lon(selection.first().expect("validated non-empty selection"));
+    let finish_gate_center = lat_lon(selection.last().expect("validated non-empty selection"));
+    build_segment_definition(
+        id,
+        name,
+        source_recording_id,
+        selection,
+        start_gate_center,
+        finish_gate_center,
+        1,
+    )
 }
 
 /// Builds geometry v2 with gates at continuous positions on the finalized
@@ -369,7 +394,78 @@ pub fn build_segment_continuous(
         .last()
         .map(|point| point.timestamp_ms)
         .ok_or_else(|| invalid("empty selection".to_string()))?;
-    let definition = build_segment_definition(id, name, source_recording_id, &selection, 2)?;
+    let start_gate_center = lat_lon(selection.first().expect("validated non-empty selection"));
+    let finish_gate_center = lat_lon(selection.last().expect("validated non-empty selection"));
+    let definition = build_segment_definition(
+        id,
+        name,
+        source_recording_id,
+        &selection,
+        start_gate_center,
+        finish_gate_center,
+        2,
+    )?;
+    Ok(SegmentBuildResult {
+        definition,
+        started_at_ms,
+        finished_at_ms,
+    })
+}
+
+/// Builds geometry v3 with continuous centerline positions and independently
+/// authored gate centers.
+///
+/// The gate direction still comes from the nearby centerline tangent. Moving a
+/// center therefore changes where timing starts or finishes, but cannot rotate
+/// a gate into accepting travel along a crossing trail. Gate centers are not
+/// snapped: map editors may place them at any valid geographic coordinate.
+#[uniffi::export]
+pub fn build_segment_continuous_with_gates(
+    id: String,
+    name: String,
+    source_recording_id: String,
+    track: Vec<CanonicalTrackPoint>,
+    start_position: f64,
+    end_position: f64,
+    gate_centers: SegmentGateCenters,
+) -> Result<SegmentBuildResult, SegmentError> {
+    let invalid = |msg: String| SegmentError::InvalidSelection { msg };
+    if track.len() < 2 {
+        return Err(invalid("track has fewer than two points".to_string()));
+    }
+    if !start_position.is_finite() || !end_position.is_finite() {
+        return Err(invalid("position is not finite".to_string()));
+    }
+    let last_position = (track.len() - 1) as f64;
+    if start_position < 0.0 || end_position > last_position {
+        return Err(invalid(format!(
+            "positions {start_position:.3}..{end_position:.3} outside track 0..{last_position}"
+        )));
+    }
+    if end_position <= start_position {
+        return Err(invalid("finish must come after start".to_string()));
+    }
+    validate_gate_center(gate_centers.start, "start")?;
+    validate_gate_center(gate_centers.finish, "finish")?;
+
+    let selection = continuous_selection(&track, start_position, end_position)?;
+    let started_at_ms = selection
+        .first()
+        .map(|point| point.timestamp_ms)
+        .ok_or_else(|| invalid("empty selection".to_string()))?;
+    let finished_at_ms = selection
+        .last()
+        .map(|point| point.timestamp_ms)
+        .ok_or_else(|| invalid("empty selection".to_string()))?;
+    let definition = build_segment_definition(
+        id,
+        name,
+        source_recording_id,
+        &selection,
+        gate_centers.start,
+        gate_centers.finish,
+        3,
+    )?;
     Ok(SegmentBuildResult {
         definition,
         started_at_ms,
@@ -382,6 +478,8 @@ fn build_segment_definition(
     name: String,
     source_recording_id: String,
     selection: &[CanonicalTrackPoint],
+    start_gate_center: LatLon,
+    finish_gate_center: LatLon,
     geometry_version: i32,
 ) -> Result<SegmentDefinition, SegmentError> {
     let invalid = |msg: String| SegmentError::InvalidSelection { msg };
@@ -421,6 +519,8 @@ fn build_segment_definition(
                 lon: point.lon,
             })
             .collect(),
+        start_gate_center,
+        finish_gate_center,
         gate_half_width_m: (accuracy * GATE_ACCURACY_MULTIPLIER)
             .clamp(GATE_MIN_HALF_WIDTH_M, GATE_MAX_HALF_WIDTH_M),
         corridor_m: (accuracy * CORRIDOR_ACCURACY_MULTIPLIER).clamp(CORRIDOR_MIN_M, CORRIDOR_MAX_M),
@@ -430,6 +530,26 @@ fn build_segment_definition(
         elevation_profile: elevation_profile(selection),
         trusted: false,
     })
+}
+
+fn lat_lon(point: &CanonicalTrackPoint) -> LatLon {
+    LatLon {
+        lat: point.lat,
+        lon: point.lon,
+    }
+}
+
+fn validate_gate_center(center: LatLon, name: &str) -> Result<(), SegmentError> {
+    if !center.lat.is_finite()
+        || !center.lon.is_finite()
+        || !(-90.0..=90.0).contains(&center.lat)
+        || !(-180.0..=180.0).contains(&center.lon)
+    {
+        return Err(SegmentError::InvalidSelection {
+            msg: format!("{name} gate is not a valid coordinate"),
+        });
+    }
+    Ok(())
 }
 
 pub(crate) fn continuous_selection(
@@ -568,6 +688,12 @@ pub fn segment_search_bounds(definition: SegmentDefinition) -> Option<GeoBounds>
         bounds.max_lat = bounds.max_lat.max(point.lat);
         bounds.max_lon = bounds.max_lon.max(point.lon);
     }
+    for point in [definition.start_gate_center, definition.finish_gate_center] {
+        bounds.min_lat = bounds.min_lat.min(point.lat);
+        bounds.min_lon = bounds.min_lon.min(point.lon);
+        bounds.max_lat = bounds.max_lat.max(point.lat);
+        bounds.max_lon = bounds.max_lon.max(point.lon);
+    }
     let pad_m = definition.corridor_m.max(definition.gate_half_width_m);
     let lat_pad = pad_m / 111_320.0;
     let mid_lat = ((bounds.min_lat + bounds.max_lat) / 2.0).to_radians();
@@ -607,10 +733,15 @@ pub fn match_segment(
         return result;
     }
 
-    let Some(start_gate) = gate_at_start(&centerline, definition.gate_half_width_m) else {
+    let start_center = project(definition.start_gate_center, origin);
+    let finish_center = project(definition.finish_gate_center, origin);
+    let Some(start_gate) = gate_at_start(&centerline, start_center, definition.gate_half_width_m)
+    else {
         return result;
     };
-    let Some(finish_gate) = gate_at_finish(&centerline, definition.gate_half_width_m) else {
+    let Some(finish_gate) =
+        gate_at_finish(&centerline, finish_center, definition.gate_half_width_m)
+    else {
         return result;
     };
 
@@ -725,23 +856,23 @@ struct GateEvent {
     index: usize,
 }
 
-fn gate_at_start(centerline: &[[f64; 2]], half_width_m: f64) -> Option<GateLine> {
+fn gate_at_start(centerline: &[[f64; 2]], center: [f64; 2], half_width_m: f64) -> Option<GateLine> {
     let tangent = forward_tangent(centerline)?;
-    Some(gate_line(centerline[0], tangent, half_width_m))
+    Some(gate_line(center, tangent, half_width_m))
 }
 
-fn gate_at_finish(centerline: &[[f64; 2]], half_width_m: f64) -> Option<GateLine> {
+fn gate_at_finish(
+    centerline: &[[f64; 2]],
+    center: [f64; 2],
+    half_width_m: f64,
+) -> Option<GateLine> {
     let mut reversed: Vec<[f64; 2]> = centerline.to_vec();
     reversed.reverse();
     // Tangent of the reversed polyline points backwards; flip it so the gate
     // still requires travel in the segment direction.
     let backward = forward_tangent(&reversed)?;
     let tangent = [-backward[0], -backward[1]];
-    Some(gate_line(
-        centerline[centerline.len() - 1],
-        tangent,
-        half_width_m,
-    ))
+    Some(gate_line(center, tangent, half_width_m))
 }
 
 /// Unit tangent leaving the first point, measured over at least
@@ -1524,6 +1655,41 @@ mod tests {
         let last = result.definition.centerline.last().unwrap();
         assert!((first.lat - (LAT + 0.25 / M_PER_DEG_LAT)).abs() < 1e-10);
         assert!((last.lat - (LAT + 199.75 / M_PER_DEG_LAT)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn authored_gate_centers_move_timing_without_moving_the_centerline() {
+        let track = straight_track(0);
+        let start_gate_center = LatLon {
+            lat: LAT + 10.0 / M_PER_DEG_LAT,
+            lon: LON,
+        };
+        let finish_gate_center = LatLon {
+            lat: LAT + 190.0 / M_PER_DEG_LAT,
+            lon: LON,
+        };
+        let definition = build_segment_continuous_with_gates(
+            "seg".to_string(),
+            "Moved gates".to_string(),
+            "source".to_string(),
+            track.clone(),
+            0.0,
+            200.0,
+            SegmentGateCenters {
+                start: start_gate_center,
+                finish: finish_gate_center,
+            },
+        )
+        .expect("free gate centers should be valid")
+        .definition;
+
+        assert_eq!(definition.geometry_version, 3);
+        assert_eq!(definition.start_gate_center, start_gate_center);
+        assert_eq!(definition.finish_gate_center, finish_gate_center);
+        assert!((definition.centerline.first().unwrap().lat - LAT).abs() < 1e-12);
+        let result = match_segment(definition, "other".to_string(), track);
+        assert_eq!(result.attempts.len(), 1);
+        assert!((result.attempts[0].elapsed_ms - 36_000).abs() <= 400);
     }
 
     #[test]

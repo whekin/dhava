@@ -1,5 +1,8 @@
 package com.dhava.core.map
 
+import android.graphics.PointF
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +32,8 @@ import org.maplibre.geojson.Point
 
 /** One coordinate of a segment or of the ride it was authored from. */
 data class SegmentMapPoint(val lat: Double, val lon: Double)
+
+enum class SegmentMapGate { START, FINISH }
 
 enum class SegmentMapCameraTarget { SEGMENT, FULL_RIDE }
 
@@ -73,11 +78,16 @@ fun SegmentMap(
     trackedPoint: SegmentMapPoint? = null,
     trackingBottomInset: Dp = 0.dp,
     onZoomChanged: (Double) -> Unit = {},
+    startGate: SegmentMapPoint? = segment.firstOrNull(),
+    finishGate: SegmentMapPoint? = segment.lastOrNull(),
+    onGateDrag: ((SegmentMapGate, SegmentMapPoint) -> Unit)? = null,
+    onGateDragStateChanged: (SegmentMapGate?) -> Unit = {},
 ) {
     val mapView = rememberDhavaMapView()
     val palette = rememberDhavaMapPalette()
     val edgeMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     val cameraPaddingPx = with(LocalDensity.current) { 32.dp.roundToPx() }
+    val gateHitRadiusPx = with(LocalDensity.current) { 32.dp.toPx() }
     val trackingTopInsetPx = with(LocalDensity.current) { 96.dp.roundToPx() }
     val trackingBottomInsetPx = with(LocalDensity.current) {
         (trackingBottomInset + 32.dp).roundToPx()
@@ -86,10 +96,15 @@ fun SegmentMap(
     val currentSegment = rememberUpdatedState(segment)
     val currentFocus = rememberUpdatedState(focusOnSegment)
     val currentOnZoomChanged = rememberUpdatedState(onZoomChanged)
+    val currentStartGate = rememberUpdatedState(startGate)
+    val currentFinishGate = rememberUpdatedState(finishGate)
+    val currentOnGateDrag = rememberUpdatedState(onGateDrag)
+    val currentOnGateDragStateChanged = rememberUpdatedState(onGateDragStateChanged)
     AndroidView(factory = { mapView }, modifier = modifier)
 
-    DisposableEffect(mapView) {
+    DisposableEffect(mapView, gateHitRadiusPx) {
         var boundMap: MapLibreMap? = null
+        var draggedGate: SegmentMapGate? = null
         val listener = MapLibreMap.OnCameraIdleListener {
             boundMap?.let { currentOnZoomChanged.value(it.cameraPosition.zoom) }
         }
@@ -98,8 +113,61 @@ fun SegmentMap(
             map.addOnCameraIdleListener(listener)
             currentOnZoomChanged.value(map.cameraPosition.zoom)
         }
+        mapView.setOnTouchListener { view, event ->
+            val map = boundMap
+            if (map == null || currentOnGateDrag.value == null) {
+                false
+            } else {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        val touch = PointF(event.x, event.y)
+                        val candidates = listOfNotNull(
+                            currentStartGate.value?.let { SegmentMapGate.START to it },
+                            currentFinishGate.value?.let { SegmentMapGate.FINISH to it },
+                        )
+                        draggedGate = candidates.minByOrNull { (_, point) ->
+                            val screen = map.projection.toScreenLocation(LatLng(point.lat, point.lon))
+                            val dx = screen.x - touch.x
+                            val dy = screen.y - touch.y
+                            dx * dx + dy * dy
+                        }?.takeIf { (_, point) ->
+                            val screen = map.projection.toScreenLocation(LatLng(point.lat, point.lon))
+                            val dx = screen.x - touch.x
+                            val dy = screen.y - touch.y
+                            dx * dx + dy * dy <= gateHitRadiusPx * gateHitRadiusPx
+                        }?.first
+                        draggedGate?.let { gate ->
+                            view.parent?.requestDisallowInterceptTouchEvent(true)
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            currentOnGateDragStateChanged.value(gate)
+                        }
+                        draggedGate != null
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val gate = draggedGate ?: return@setOnTouchListener false
+                        val coordinate = map.projection.fromScreenLocation(PointF(event.x, event.y))
+                        currentOnGateDrag.value?.invoke(
+                            gate,
+                            SegmentMapPoint(coordinate.latitude, coordinate.longitude),
+                        )
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        val wasDragging = draggedGate != null
+                        if (wasDragging) {
+                            draggedGate = null
+                            view.parent?.requestDisallowInterceptTouchEvent(false)
+                            currentOnGateDragStateChanged.value(null)
+                        }
+                        wasDragging
+                    }
+                    else -> draggedGate != null
+                }
+            }
+        }
         onDispose {
             boundMap?.removeOnCameraIdleListener(listener)
+            mapView.setOnTouchListener(null)
         }
     }
 
@@ -165,6 +233,8 @@ fun SegmentMap(
                     style,
                     currentSections.value,
                     currentSegment.value,
+                    currentStartGate.value,
+                    currentFinishGate.value,
                 )
                 val initialFocus = currentSegment.value
                     .takeIf { currentFocus.value && it.isNotEmpty() }
@@ -177,9 +247,9 @@ fun SegmentMap(
     // Geometry updates while the rider drags a selection must not reset the
     // camera. In particular, a manually zoomed start/finish view stays exactly
     // where the rider left it.
-    LaunchedEffect(mapView, sections, segment) {
+    LaunchedEffect(mapView, sections, segment, startGate, finishGate) {
         mapView.getMapAsync { map ->
-            map.style?.let { style -> render(style, sections, segment) }
+            map.style?.let { style -> render(style, sections, segment, startGate, finishGate) }
         }
     }
 
@@ -224,6 +294,8 @@ private fun render(
     style: Style,
     sections: List<List<SegmentMapPoint>>,
     segment: List<SegmentMapPoint>,
+    startGate: SegmentMapPoint?,
+    finishGate: SegmentMapPoint?,
 ) {
     style.getSourceAs<GeoJsonSource>(CONTEXT_SOURCE_ID)?.let { source ->
         val drawable = sections.filter { it.size >= 2 }
@@ -245,10 +317,8 @@ private fun render(
     }
     style.getSourceAs<GeoJsonSource>(ENDPOINT_SOURCE_ID)?.let { source ->
         val endpoints = listOfNotNull(
-            segment.firstOrNull()?.let { endpointFeature(it, ROLE_START) },
-            segment.lastOrNull()?.takeIf { segment.size >= 2 }?.let {
-                endpointFeature(it, ROLE_FINISH)
-            },
+            startGate?.let { endpointFeature(it, ROLE_START) },
+            finishGate?.let { endpointFeature(it, ROLE_FINISH) },
         )
         source.setGeoJson(FeatureCollection.fromFeatures(endpoints))
     }

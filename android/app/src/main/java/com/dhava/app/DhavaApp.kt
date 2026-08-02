@@ -36,6 +36,7 @@ import com.dhava.feature.record.ActivitiesScreen
 import com.dhava.feature.record.SaveRecordingScreen
 import com.dhava.feature.segments.SegmentDetailScreen
 import com.dhava.feature.segments.SegmentEditorScreen
+import com.dhava.feature.segments.SegmentEditorSource
 import com.dhava.feature.segments.SegmentsScreen
 
 /** Top-level bottom-navigation destinations. */
@@ -134,6 +135,9 @@ fun DhavaApp(openRecorderRequest: Long = 0L) {
             composable(DhavaDestination.Segments.route) {
                 SegmentsScreen(
                     onOpenSegment = { id -> navController.navigate("segment/$id") },
+                    onEditImportedTrace = { id ->
+                        navController.navigate("segment-import-editor/$id")
+                    },
                 )
             }
             composable(DhavaDestination.Settings.route) { SettingsScreen() }
@@ -166,11 +170,29 @@ fun DhavaApp(openRecorderRequest: Long = 0L) {
                 arguments = listOf(navArgument("id") { type = NavType.StringType }),
             ) { entry ->
                 SegmentEditorScreen(
-                    recordingId = entry.arguments?.getString("id").orEmpty(),
+                    source = SegmentEditorSource.Ride(
+                        entry.arguments?.getString("id").orEmpty(),
+                    ),
                     onBack = { navController.popBackStack() },
                     onCreated = { segmentId ->
                         navController.navigate("segment/$segmentId") {
                             popUpTo("segment-editor/{id}") { inclusive = true }
+                        }
+                    },
+                )
+            }
+            composable(
+                route = "segment-import-editor/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            ) { entry ->
+                SegmentEditorScreen(
+                    source = SegmentEditorSource.ImportedGpx(
+                        entry.arguments?.getString("id").orEmpty(),
+                    ),
+                    onBack = { navController.popBackStack() },
+                    onCreated = { segmentId ->
+                        navController.navigate("segment/$segmentId") {
+                            popUpTo("segment-import-editor/{id}") { inclusive = true }
                         }
                     },
                 )

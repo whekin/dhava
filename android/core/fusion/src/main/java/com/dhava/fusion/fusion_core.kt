@@ -750,6 +750,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -772,6 +774,8 @@ fun uniffi_fusion_core_checksum_func_analyze_recording(
 fun uniffi_fusion_core_checksum_func_build_segment(
 ): Short
 fun uniffi_fusion_core_checksum_func_build_segment_continuous(
+): Short
+fun uniffi_fusion_core_checksum_func_build_segment_continuous_with_gates(
 ): Short
 fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
@@ -867,6 +871,8 @@ fun uniffi_fusion_core_fn_func_analyze_recording(`path`: RustBuffer.ByValue,unif
 fun uniffi_fusion_core_fn_func_build_segment(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startIndex`: Int,`endIndex`: Int,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_build_segment_continuous(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_build_segment_continuous_with_gates(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,`gateCenters`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1022,6 +1028,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_build_segment_continuous() != 38010.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_build_segment_continuous_with_gates() != 38240.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
@@ -2666,6 +2675,18 @@ data class SegmentDefinition (
     var `geometryVersion`: kotlin.Int,
     var `centerline`: List<LatLon>,
     /**
+     * Authored center of the directed start gate. It is deliberately
+     * independent from the first centerline point: later multi-pass
+     * refinement may improve the trail geometry without silently moving the
+     * timing boundary chosen by the author.
+     */
+    var `startGateCenter`: LatLon,
+    /**
+     * Authored center of the directed finish gate. See
+     * [`SegmentDefinition::start_gate_center`].
+     */
+    var `finishGateCenter`: LatLon,
+    /**
      * Half-width of both gate lines, meters.
      */
     var `gateHalfWidthM`: kotlin.Double,
@@ -2709,6 +2730,8 @@ public object FfiConverterTypeSegmentDefinition: FfiConverterRustBuffer<SegmentD
             FfiConverterString.read(buf),
             FfiConverterInt.read(buf),
             FfiConverterSequenceTypeLatLon.read(buf),
+            FfiConverterTypeLatLon.read(buf),
+            FfiConverterTypeLatLon.read(buf),
             FfiConverterDouble.read(buf),
             FfiConverterDouble.read(buf),
             FfiConverterDouble.read(buf),
@@ -2725,6 +2748,8 @@ public object FfiConverterTypeSegmentDefinition: FfiConverterRustBuffer<SegmentD
             FfiConverterString.allocationSize(value.`sourceRecordingId`) +
             FfiConverterInt.allocationSize(value.`geometryVersion`) +
             FfiConverterSequenceTypeLatLon.allocationSize(value.`centerline`) +
+            FfiConverterTypeLatLon.allocationSize(value.`startGateCenter`) +
+            FfiConverterTypeLatLon.allocationSize(value.`finishGateCenter`) +
             FfiConverterDouble.allocationSize(value.`gateHalfWidthM`) +
             FfiConverterDouble.allocationSize(value.`corridorM`) +
             FfiConverterDouble.allocationSize(value.`lengthM`) +
@@ -2740,6 +2765,8 @@ public object FfiConverterTypeSegmentDefinition: FfiConverterRustBuffer<SegmentD
             FfiConverterString.write(value.`sourceRecordingId`, buf)
             FfiConverterInt.write(value.`geometryVersion`, buf)
             FfiConverterSequenceTypeLatLon.write(value.`centerline`, buf)
+            FfiConverterTypeLatLon.write(value.`startGateCenter`, buf)
+            FfiConverterTypeLatLon.write(value.`finishGateCenter`, buf)
             FfiConverterDouble.write(value.`gateHalfWidthM`, buf)
             FfiConverterDouble.write(value.`corridorM`, buf)
             FfiConverterDouble.write(value.`lengthM`, buf)
@@ -2785,6 +2812,41 @@ public object FfiConverterTypeSegmentElevationPoint: FfiConverterRustBuffer<Segm
     override fun write(value: SegmentElevationPoint, buf: ByteBuffer) {
             FfiConverterDouble.write(value.`distanceM`, buf)
             FfiConverterDouble.write(value.`altitudeM`, buf)
+    }
+}
+
+
+
+/**
+ * Independently authored timing anchors for a geometry v3 segment.
+ */
+data class SegmentGateCenters (
+    var `start`: LatLon,
+    var `finish`: LatLon
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSegmentGateCenters: FfiConverterRustBuffer<SegmentGateCenters> {
+    override fun read(buf: ByteBuffer): SegmentGateCenters {
+        return SegmentGateCenters(
+            FfiConverterTypeLatLon.read(buf),
+            FfiConverterTypeLatLon.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SegmentGateCenters) = (
+            FfiConverterTypeLatLon.allocationSize(value.`start`) +
+            FfiConverterTypeLatLon.allocationSize(value.`finish`)
+    )
+
+    override fun write(value: SegmentGateCenters, buf: ByteBuffer) {
+            FfiConverterTypeLatLon.write(value.`start`, buf)
+            FfiConverterTypeLatLon.write(value.`finish`, buf)
     }
 }
 
@@ -4016,6 +4078,25 @@ public object FfiConverterSequenceTypeAttemptFlag: FfiConverterRustBuffer<List<A
     uniffiRustCallWithError(SegmentException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_build_segment_continuous(
         FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`sourceRecordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterDouble.lower(`startPosition`),FfiConverterDouble.lower(`endPosition`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Builds geometry v3 with continuous centerline positions and independently
+         * authored gate centers.
+         *
+         * The gate direction still comes from the nearby centerline tangent. Moving a
+         * center therefore changes where timing starts or finishes, but cannot rotate
+         * a gate into accepting travel along a crossing trail. Gate centers are not
+         * snapped: map editors may place them at any valid geographic coordinate.
+         */
+    @Throws(SegmentException::class) fun `buildSegmentContinuousWithGates`(`id`: kotlin.String, `name`: kotlin.String, `sourceRecordingId`: kotlin.String, `track`: List<CanonicalTrackPoint>, `startPosition`: kotlin.Double, `endPosition`: kotlin.Double, `gateCenters`: SegmentGateCenters): SegmentBuildResult {
+            return FfiConverterTypeSegmentBuildResult.lift(
+    uniffiRustCallWithError(SegmentException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_build_segment_continuous_with_gates(
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`sourceRecordingId`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterDouble.lower(`startPosition`),FfiConverterDouble.lower(`endPosition`),FfiConverterTypeSegmentGateCenters.lower(`gateCenters`),_status)
 }
     )
     }

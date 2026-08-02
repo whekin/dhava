@@ -1,6 +1,8 @@
 package com.dhava.feature.segments
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -14,12 +16,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
@@ -56,6 +60,7 @@ import com.dhava.core.map.SegmentLibraryLine
 import com.dhava.core.map.SegmentLibraryMap
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.map.currentLocationFix
+import com.dhava.core.recording.SegmentSourceKind
 import com.dhava.core.ui.DhavaDivider
 import com.dhava.core.ui.DhavaEmptyState
 import com.dhava.core.ui.DhavaPanel
@@ -84,10 +89,27 @@ private const val MY_LOCATION_ZOOM = 15.0
 @Composable
 fun SegmentsScreen(
     onOpenSegment: (String) -> Unit,
+    onEditImportedTrace: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SegmentsViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        viewModel.importGpx(
+            uri = uri,
+            onImported = onEditImportedTrace,
+            onError = { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() },
+        )
+    }
+    val launchImport = {
+        importLauncher.launch(
+            arrayOf("application/gpx+xml", "application/xml", "text/xml", "text/plain"),
+        )
+    }
 
     when (val current = state) {
         SegmentsState.Loading -> Box(
@@ -100,20 +122,29 @@ fun SegmentsScreen(
         is SegmentsState.Ready -> if (current.summaries.isEmpty()) {
             // With nothing authored there is nothing to place, and a map of
             // empty terrain would answer no question the rider has.
-            Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
                 DhavaEmptyState(
                     title = "No segments yet",
-                    description = "Open a saved ride, pick Create segment, and choose the " +
-                        "start and finish along its descent. Dhava then finds every run of it " +
-                        "in your other rides.",
+                    description = "Create one from a saved ride, or import an existing GPX " +
+                        "as draft trail geometry.",
                     icon = Icons.Filled.Timer,
                 )
+                FilledTonalButton(onClick = launchImport) {
+                    Icon(Icons.Filled.Add, contentDescription = null)
+                    Spacer(Modifier.width(DhavaSpacing.small))
+                    Text("Import GPX")
+                }
             }
         } else {
             SegmentLibrary(
                 state = current,
                 onSelect = viewModel::select,
                 onOpenSegment = onOpenSegment,
+                onImportGpx = launchImport,
                 retainedCamera = viewModel.retainedCamera,
                 onCameraSettled = viewModel::onCameraSettled,
                 modifier = modifier,
@@ -128,6 +159,7 @@ private fun SegmentLibrary(
     state: SegmentsState.Ready,
     onSelect: (String?) -> Unit,
     onOpenSegment: (String) -> Unit,
+    onImportGpx: () -> Unit,
     retainedCamera: SegmentLibraryCamera?,
     onCameraSettled: (SegmentLibraryCamera) -> Unit,
     modifier: Modifier = Modifier,
@@ -234,6 +266,12 @@ private fun SegmentLibrary(
                 shadowElevation = 8.dp,
             ) {
                 Column {
+                    IconButton(onClick = onImportGpx) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "Import GPX",
+                        )
+                    }
                     IconButton(
                         onClick = { requestCamera(SegmentLibraryCameraAction.FitAll) },
                     ) {
@@ -379,6 +417,9 @@ private fun SegmentCard(
             ) {
                 if (!segment.trusted) {
                     DhavaStatusPill(text = "Draft")
+                }
+                if (segment.sourceKind == SegmentSourceKind.IMPORTED_GPX) {
+                    DhavaStatusPill(text = "GPX seed")
                 }
                 Text(
                     text = listOfNotNull(

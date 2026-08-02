@@ -468,3 +468,17 @@ activity results are always recomputed canonically from the raw on-device file.
 - GitHub auto-deploy owns normal releases. Coolify MCP receives a team-scoped read
   token for resource state and redacted logs; any future manual deployment token is
   separate and limited to deployment permission. Secrets never enter Git or chat.
+
+## 2026-08-02 — Gate centers are authored intent, independent from seed geometry
+
+- A segment's reference centerline and its timing gates have different lifecycles.
+  New geometry v3 definitions store explicit start and finish gate centers; future
+  multi-pass refinement may move the centerline but never those anchors without an
+  explicit rider edit. See `docs/adr/0002-authored-gates-outlive-centerline-refinement.md`.
+- Gate centers may be dragged to any valid map coordinate rather than snapped to a
+  source sample. Rust still derives their direction from the adjacent centerline
+  tangent and owns all matching geometry.
+- An imported GPX trace is preserved locally as seed evidence, not represented as a
+  ride or attempt. It may create a local draft segment, and later real Dhava rides
+  may contribute to a more trusted centerline while the source file remains available
+  for recomputation.

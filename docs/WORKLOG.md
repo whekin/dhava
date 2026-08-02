@@ -1745,3 +1745,38 @@ Verified both the fast context check and the original root-project Docker build.
 same build command that failed before now builds the API image successfully. No debug
 instrumentation or throwaway containers remain. The deployment needs a new commit and
 Coolify redeploy; no environment-variable change is required for this failure.
+
+## 2026-08-02 — GPX-seeded segments and freely authored timing gates
+
+Segments can now be started from an existing GPX without pretending the file is a
+Dhava ride. The Segments screen opens Android's document picker, validates GPX with
+external entities disabled, preserves the original file under `imported-traces/`, and
+opens the normal editor over the most detailed continuous track section. Import is
+bounded to 25 MB. An imported trace never creates an activity, attempt, PR or KOM;
+saved segments are labelled `GPX seed` and remain untrusted drafts.
+
+The segment model is geometry v3. `SegmentDefinition` now stores explicit start and
+finish gate centers, matcher/search bounds use those centers, and `gates-0.3` forces
+derived result recomputation. Old authored JSON remains compatible by deriving absent
+anchors from the first and last centerline points. The `source_kind` persistence field
+distinguishes ride-authored drafts from imported GPX seeds without confusing the Rust
+defining-ride flag.
+
+In the editor, the profile continues to trim the reference centerline, while either
+gate marker can be grabbed directly on the map and moved to an arbitrary coordinate.
+The hit target is larger than the visible marker, acquisition gives haptic feedback,
+and the map retains its manually chosen zoom while tracking a marker only near the
+usable viewport edge. Rust validates and persists the exact coordinate and continues
+to derive gate direction from the local centerline tangent.
+
+Verified: 103 `fusion-core` unit tests plus two forest-fixture tests; full Android
+`test lintDebug`, including GPX namespace/elevation parsing and DOCTYPE rejection. A
+debug APK assembled successfully. Installation on the available emulator was blocked
+because an existing `com.dhava.app` has a different signing key; the connected device
+was not erased. OnePlus was not visible over ADB during this verification.
+
+Open items: exercise picker and map-gate dragging on the OnePlus; add explicit editing
+of gates for an already saved segment; define the quality-weighted multi-pass
+centerline refinement and the backend publication contract. Imported GPX currently
+selects the continuous section with the most points when a file contains several
+unrelated tracks.

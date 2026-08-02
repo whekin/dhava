@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dhava.core.map.SegmentMap
 import com.dhava.core.map.SegmentMapCameraRequest
 import com.dhava.core.map.SegmentMapCameraTarget
+import com.dhava.core.map.SegmentMapGate
 import com.dhava.core.map.SegmentMapPoint
 import com.dhava.core.recording.CanonicalPoint
 import com.dhava.core.ui.DhavaDivider
@@ -71,13 +72,13 @@ import kotlin.math.floor
  */
 @Composable
 fun SegmentEditorScreen(
-    recordingId: String,
+    source: SegmentEditorSource,
     onBack: () -> Unit,
     onCreated: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SegmentEditorViewModel = viewModel(
-        key = "segment-editor-$recordingId",
-        factory = SegmentEditorViewModel.factory(recordingId),
+        key = "segment-editor-${source.javaClass.simpleName}-${source.id}",
+        factory = SegmentEditorViewModel.factory(source),
     ),
 ) {
     val state by viewModel.state.collectAsState()
@@ -110,6 +111,7 @@ fun SegmentEditorScreen(
             state = current,
             onBack = onBack,
             onSelectionChange = viewModel::setSelection,
+            onGateCenterChange = viewModel::setGateCenter,
             onNameChange = viewModel::setName,
             onSave = {
                 viewModel.save(
@@ -149,6 +151,7 @@ private fun EditorBody(
     state: SegmentEditorState.Editing,
     onBack: () -> Unit,
     onSelectionChange: (Double, Double) -> Unit,
+    onGateCenterChange: (SelectionHandle, com.dhava.fusion.LatLon) -> Unit,
     onNameChange: (String) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
@@ -297,11 +300,30 @@ private fun EditorBody(
                 focusOnSegment = true,
                 cameraRequest = cameraRequest,
                 trackedPoint = when (activeHandle) {
-                    SelectionHandle.START -> selection.firstOrNull()
-                    SelectionHandle.FINISH -> selection.lastOrNull()
+                    SelectionHandle.START -> state.startGateCenter.toMapPoint()
+                    SelectionHandle.FINISH -> state.finishGateCenter.toMapPoint()
                     null -> null
                 },
                 trackingBottomInset = SegmentEditorSheetPeekHeight,
+                startGate = state.startGateCenter.toMapPoint(),
+                finishGate = state.finishGateCenter.toMapPoint(),
+                onGateDrag = { gate, point ->
+                    onGateCenterChange(
+                        if (gate == SegmentMapGate.START) {
+                            SelectionHandle.START
+                        } else {
+                            SelectionHandle.FINISH
+                        },
+                        com.dhava.fusion.LatLon(point.lat, point.lon),
+                    )
+                },
+                onGateDragStateChanged = { gate ->
+                    activeHandle = when (gate) {
+                        SegmentMapGate.START -> SelectionHandle.START
+                        SegmentMapGate.FINISH -> SelectionHandle.FINISH
+                        null -> null
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             Surface(
@@ -356,7 +378,7 @@ private fun TrimmerStatus(
             text = listOfNotNull(
                 SegmentFormat.length(valid.lengthM),
                 SegmentFormat.gradient(valid.gradientPercent),
-                SegmentFormat.elapsed(valid.durationMs),
+                SegmentFormat.elapsed(valid.durationMs).takeUnless { state.importedGpx },
             ).joinToString(" · ")
             MaterialTheme.colorScheme.onSurfaceVariant
         }
@@ -392,8 +414,12 @@ private fun SegmentEditorDetails(
                         modifier = Modifier.weight(1f),
                     )
                     DhavaMetric(
-                        value = SegmentFormat.elapsed(preview.durationMs),
-                        label = "This pass",
+                        value = if (state.importedGpx) {
+                            state.track.size.toString()
+                        } else {
+                            SegmentFormat.elapsed(preview.durationMs)
+                        },
+                        label = if (state.importedGpx) "GPX points" else "This pass",
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -416,8 +442,8 @@ private fun SegmentEditorDetails(
                         modifier = Modifier.weight(1f),
                     )
                     DhavaMetric(
-                        value = state.candidates.size.toString(),
-                        label = "Descents found",
+                        value = if (state.importedGpx) "GPX" else state.candidates.size.toString(),
+                        label = if (state.importedGpx) "Source" else "Descents found",
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -450,8 +476,15 @@ private fun SegmentEditorDetails(
             DhavaPanel(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "Gates ${preview.gateWidthM.toInt()} m wide, corridor " +
-                        "${preview.corridorM.toInt()} m — derived from this ride's own GPS " +
-                        "accuracy. The first segment stays a draft: it times runs but is " +
+                        "${preview.corridorM.toInt()} m — " +
+                        (if (state.importedGpx) {
+                            "a conservative initial margin because imported GPX has no " +
+                                "trustworthy accuracy. "
+                        } else {
+                            "derived from this ride's own GPS accuracy estimate. "
+                        }) +
+                        "Drag either gate directly on the map for exact " +
+                        "placement. The first segment stays a draft: it times runs but is " +
                         "not treated as ground truth.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -545,3 +578,5 @@ private fun List<CanonicalPoint>.interpolateMapPoint(position: Double): SegmentM
 }
 
 private fun CanonicalPoint.toMapPoint() = SegmentMapPoint(lat = lat, lon = lon)
+
+private fun com.dhava.fusion.LatLon.toMapPoint() = SegmentMapPoint(lat = lat, lon = lon)

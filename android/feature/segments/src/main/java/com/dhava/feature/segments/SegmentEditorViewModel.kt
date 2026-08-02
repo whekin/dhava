@@ -12,6 +12,7 @@ import com.dhava.core.recording.RecordingRepository
 import com.dhava.core.recording.toCanonicalTrack
 import com.dhava.core.recording.toDefinition
 import com.dhava.fusion.CanonicalTrackPoint
+import com.dhava.fusion.LatLon
 import com.dhava.fusion.SegmentDefinition
 import com.dhava.fusion.SegmentException
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +30,8 @@ sealed interface SegmentEditorState {
     data class Unavailable(val message: String) : SegmentEditorState
 
     data class Editing(
-        val rideTitle: String,
+        val sourceTitle: String,
+        val importedGpx: Boolean,
         /** Finalized track points backing the continuous selection. */
         val track: List<CanonicalPoint>,
         /** Elevation and gradient story of the whole ride, authored in Rust. */
@@ -38,6 +40,9 @@ sealed interface SegmentEditorState {
         val candidates: List<CandidateSpan>,
         val startPosition: Double,
         val endPosition: Double,
+        /** Timing gates are authored coordinates, not aliases for line ends. */
+        val startGateCenter: LatLon,
+        val finishGateCenter: LatLon,
         val name: String,
         /** Rust-derived preview of the current selection, or its rejection. */
         val preview: SelectionPreview,
@@ -77,18 +82,23 @@ sealed interface SelectionPreview {
 
 enum class SelectionHandle { START, FINISH }
 
+sealed interface SegmentEditorSource {
+    val id: String
+
+    data class Ride(override val id: String) : SegmentEditorSource
+    data class ImportedGpx(override val id: String) : SegmentEditorSource
+}
+
 /**
- * Authoring one segment from one ride.
+ * Authoring one segment from a ride or preserved GPX seed trace.
  *
- * A selection position may lie anywhere on an edge of the finalized track. It
- * is not a free map coordinate, so it cannot silently jump to a different pass.
- * Rust owns interpolation, the elevation profile, the candidate descents and
- * every geometry judgement, so what the editor draws is exactly what gets
- * persisted.
+ * Selection positions trim the reference centerline. Gate centers are separate
+ * authored coordinates and may be dragged freely on the map. Rust owns both
+ * interpolation and the final gate/matching geometry.
  */
 class SegmentEditorViewModel(
     application: Application,
-    private val recordingId: String,
+    private val source: SegmentEditorSource,
 ) : AndroidViewModel(application) {
 
     private val repository = RecordingRepository.getInstance(application)
@@ -108,14 +118,31 @@ class SegmentEditorViewModel(
 
     init {
         viewModelScope.launch {
-            val recording = repository.recording(recordingId)
-            val artifact = withContext(Dispatchers.IO) {
-                repository.canonicalActivity(recordingId)
+            val loadedSource = when (source) {
+                is SegmentEditorSource.Ride -> {
+                    val artifact = withContext(Dispatchers.IO) {
+                        repository.canonicalActivity(source.id)
+                    }
+                    val title = repository.recordings.value
+                        .firstOrNull { it.id == source.id }
+                        ?.title
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "Ride"
+                    LoadedEditorSource(title, artifact?.finalizedTrack.orEmpty())
+                }
+                is SegmentEditorSource.ImportedGpx -> {
+                    val trace = repository.importedTrace(source.id)
+                    LoadedEditorSource(trace?.displayName ?: "Imported GPX", trace?.points.orEmpty())
+                }
             }
-            val track = artifact?.finalizedTrack.orEmpty()
+            val track = loadedSource.track
             if (track.size < 2) {
                 _state.value = SegmentEditorState.Unavailable(
-                    "This ride has no finalized track yet, so a segment cannot be timed on it.",
+                    if (source is SegmentEditorSource.ImportedGpx) {
+                        "This GPX has no continuous track with at least two points."
+                    } else {
+                        "This ride has no finalized track yet, so a segment cannot be timed on it."
+                    },
                 )
                 return@launch
             }
@@ -137,29 +164,50 @@ class SegmentEditorViewModel(
             val end = candidates.firstOrNull()?.endPosition
                 ?: fallback?.endIndex?.toDouble()
                 ?: track.lastIndex.toDouble()
-            val title = repository.recordings.value
-                .firstOrNull { it.id == recordingId }
-                ?.title
-                ?.takeIf { it.isNotBlank() }
-                ?: "Ride"
+            val title = loadedSource.title
+            val initialResult = withContext(Dispatchers.Default) {
+                runCatching {
+                    FusionCore.buildSegmentContinuous(
+                        id = PREVIEW_ID,
+                        name = "preview",
+                        sourceRecordingId = sourceId(),
+                        track = fusionTrack,
+                        startPosition = start,
+                        endPosition = end,
+                    )
+                }
+            }
+            val initial = initialResult.getOrElse { error ->
+                _state.value = SegmentEditorState.Unavailable(
+                    (error as? SegmentException.InvalidSelection)?.msg
+                        ?.replaceFirstChar { it.uppercase() }
+                        ?: "This source cannot become a segment",
+                )
+                return@launch
+            }
             _state.value = SegmentEditorState.Editing(
-                rideTitle = title,
+                sourceTitle = title,
+                importedGpx = source is SegmentEditorSource.ImportedGpx,
                 track = track,
                 profile = profile,
                 candidates = candidates,
                 startPosition = start,
                 endPosition = end,
+                startGateCenter = initial.definition.startGateCenter,
+                finishGateCenter = initial.definition.finishGateCenter,
                 name = defaultName(title),
-                preview = withContext(Dispatchers.Default) { preview(start, end) },
+                preview = initial.toPreview(),
                 duplicateOf = withContext(Dispatchers.Default) { duplicateOf(start, end) },
             )
             // The ride entry may be renamed while the editor is open; the
             // selection itself does not depend on it, so nothing else re-runs.
-            recording.collect { entry ->
-                val editing = _state.value as? SegmentEditorState.Editing ?: return@collect
-                val updated = entry?.title?.takeIf { it.isNotBlank() } ?: editing.rideTitle
-                if (updated != editing.rideTitle) {
-                    _state.value = editing.copy(rideTitle = updated)
+            if (source is SegmentEditorSource.Ride) {
+                repository.recording(source.id).collect { entry ->
+                    val editing = _state.value as? SegmentEditorState.Editing ?: return@collect
+                    val updated = entry?.title?.takeIf { it.isNotBlank() } ?: editing.sourceTitle
+                    if (updated != editing.sourceTitle) {
+                        _state.value = editing.copy(sourceTitle = updated)
+                    }
                 }
             }
         }
@@ -171,17 +219,56 @@ class SegmentEditorViewModel(
         val start = startPosition.coerceIn(0.0, lastPosition)
         val end = endPosition.coerceIn(0.0, lastPosition)
         if (start == editing.startPosition && end == editing.endPosition) return
+        val startGate = if (start != editing.startPosition) gateAt(start) else editing.startGateCenter
+        val finishGate = if (end != editing.endPosition) gateAt(end) else editing.finishGateCenter
         // The gates follow the drag immediately; the Rust verdict on a
         // multi-thousand-point selection is recomputed off the main thread and
         // superseded by the next drag position.
-        _state.value = editing.copy(startPosition = start, endPosition = end)
+        _state.value = editing.copy(
+            startPosition = start,
+            endPosition = end,
+            startGateCenter = startGate,
+            finishGateCenter = finishGate,
+        )
         previewJob?.cancel()
         previewJob = viewModelScope.launch {
-            val computed = withContext(Dispatchers.Default) { preview(start, end) }
+            val computed = withContext(Dispatchers.Default) {
+                preview(start, end, startGate, finishGate)
+            }
             val duplicate = withContext(Dispatchers.Default) { duplicateOf(start, end) }
             val current = _state.value as? SegmentEditorState.Editing ?: return@launch
-            if (current.startPosition == start && current.endPosition == end) {
+            if (
+                current.startPosition == start && current.endPosition == end &&
+                current.startGateCenter == startGate && current.finishGateCenter == finishGate
+            ) {
                 _state.value = current.copy(preview = computed, duplicateOf = duplicate)
+            }
+        }
+    }
+
+    fun setGateCenter(handle: SelectionHandle, center: LatLon) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        val updated = when (handle) {
+            SelectionHandle.START -> editing.copy(startGateCenter = center)
+            SelectionHandle.FINISH -> editing.copy(finishGateCenter = center)
+        }
+        _state.value = updated
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            val computed = withContext(Dispatchers.Default) {
+                preview(
+                    updated.startPosition,
+                    updated.endPosition,
+                    updated.startGateCenter,
+                    updated.finishGateCenter,
+                )
+            }
+            val current = _state.value as? SegmentEditorState.Editing ?: return@launch
+            if (
+                current.startGateCenter == updated.startGateCenter &&
+                current.finishGateCenter == updated.finishGateCenter
+            ) {
+                _state.value = current.copy(preview = computed)
             }
         }
     }
@@ -198,12 +285,24 @@ class SegmentEditorViewModel(
         _state.value = editing.copy(saving = true)
         viewModelScope.launch {
             val result = runCatching {
-                repository.createSegment(
-                    recordingId = recordingId,
-                    name = editing.name,
-                    startPosition = editing.startPosition,
-                    endPosition = editing.endPosition,
-                )
+                when (source) {
+                    is SegmentEditorSource.Ride -> repository.createSegment(
+                        recordingId = source.id,
+                        name = editing.name,
+                        startPosition = editing.startPosition,
+                        endPosition = editing.endPosition,
+                        startGateCenter = editing.startGateCenter,
+                        finishGateCenter = editing.finishGateCenter,
+                    )
+                    is SegmentEditorSource.ImportedGpx -> repository.createSegmentFromImportedTrace(
+                        traceId = source.id,
+                        name = editing.name,
+                        startPosition = editing.startPosition,
+                        endPosition = editing.endPosition,
+                        startGateCenter = editing.startGateCenter,
+                        finishGateCenter = editing.finishGateCenter,
+                    )
+                }
             }
             val current = _state.value as? SegmentEditorState.Editing
             if (current != null) _state.value = current.copy(saving = false)
@@ -265,27 +364,21 @@ class SegmentEditorViewModel(
     private fun preview(
         startPosition: Double,
         endPosition: Double,
+        startGateCenter: LatLon,
+        finishGateCenter: LatLon,
     ): SelectionPreview = runCatching {
-        FusionCore.buildSegmentContinuous(
+        FusionCore.buildSegmentContinuousWithGates(
             id = PREVIEW_ID,
             name = "preview",
-            sourceRecordingId = recordingId,
+            sourceRecordingId = sourceId(),
             track = fusionTrack,
             startPosition = startPosition,
             endPosition = endPosition,
+            startGateCenter = startGateCenter,
+            finishGateCenter = finishGateCenter,
         )
     }.fold(
-        onSuccess = { result ->
-            val definition = result.definition
-            SelectionPreview.Valid(
-                lengthM = definition.lengthM,
-                ascentM = definition.ascentM,
-                descentM = definition.descentM,
-                gateWidthM = definition.gateHalfWidthM * 2.0,
-                corridorM = definition.corridorM,
-                durationMs = result.finishedAtMs - result.startedAtMs,
-            )
-        },
+        onSuccess = { result -> result.toPreview() },
         onFailure = { error ->
             // Read the typed reason rather than the exception's own text: UniFFI
             // renders that as `msg=…`, which is a binding detail and not
@@ -300,14 +393,48 @@ class SegmentEditorViewModel(
 
     private fun defaultName(rideTitle: String): String = "$rideTitle segment"
 
+    private fun sourceId(): String = when (source) {
+        is SegmentEditorSource.Ride -> source.id
+        is SegmentEditorSource.ImportedGpx -> "imported-gpx:${source.id}"
+    }
+
+    private fun gateAt(position: Double): LatLon {
+        val lower = position.toInt().coerceIn(fusionTrack.indices)
+        val upper = (lower + 1).coerceIn(fusionTrack.indices)
+        val fraction = position - lower
+        val from = fusionTrack[lower]
+        val to = fusionTrack[upper]
+        return LatLon(
+            lat = from.lat + (to.lat - from.lat) * fraction,
+            lon = from.lon + (to.lon - from.lon) * fraction,
+        )
+    }
+
+    private fun com.dhava.fusion.SegmentBuildResult.toPreview(): SelectionPreview.Valid {
+        val definition = definition
+        return SelectionPreview.Valid(
+            lengthM = definition.lengthM,
+            ascentM = definition.ascentM,
+            descentM = definition.descentM,
+            gateWidthM = definition.gateHalfWidthM * 2.0,
+            corridorM = definition.corridorM,
+            durationMs = finishedAtMs - startedAtMs,
+        )
+    }
+
+    private data class LoadedEditorSource(
+        val title: String,
+        val track: List<CanonicalPoint>,
+    )
+
     companion object {
         private const val PREVIEW_ID = "preview"
 
-        fun factory(recordingId: String): ViewModelProvider.Factory = viewModelFactory {
+        fun factory(source: SegmentEditorSource): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
                     ?: error("APPLICATION_KEY missing from ViewModel CreationExtras")
-                SegmentEditorViewModel(application as Application, recordingId)
+                SegmentEditorViewModel(application as Application, source)
             }
         }
     }

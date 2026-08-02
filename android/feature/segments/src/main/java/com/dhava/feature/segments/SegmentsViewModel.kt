@@ -1,6 +1,7 @@
 package com.dhava.feature.segments
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dhava.core.map.SegmentLibraryCamera
@@ -110,6 +111,17 @@ class SegmentsViewModel(application: Application) : AndroidViewModel(application
     /** Selecting is not opening: it only highlights one segment on the map. */
     fun select(segmentId: String?) {
         _selectedId.value = segmentId
+    }
+
+    fun importGpx(onImported: (String) -> Unit, onError: (String) -> Unit, uri: Uri) {
+        viewModelScope.launch {
+            runCatching { repository.importGpx(uri) }.fold(
+                onSuccess = { trace -> onImported(trace.id) },
+                onFailure = { error ->
+                    onError(error.message ?: "The selected file is not a readable GPX track")
+                },
+            )
+        }
     }
 
     val retainedCamera: SegmentLibraryCamera?
