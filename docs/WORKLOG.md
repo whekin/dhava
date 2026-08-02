@@ -1933,3 +1933,28 @@ database/user and `nakvali://strava/connected` redirect, choose the final API do
 and finish Firebase Google-provider/SHA setup before downloading a refreshed config
 and implementing sign-in. The first `google-services.json` already targets
 `com.nakvali.app` but contains no OAuth clients, so it is intentionally not committed.
+
+## 2026-08-02 — Firebase Android foundation configured
+
+After Google Authentication and both signing-certificate fingerprints were configured,
+the refreshed `android/app/google-services.json` was validated for
+`com.nakvali.app`. It contains both Android OAuth clients and one Web OAuth client, so
+the server client resource required by Credential Manager can be generated. The file
+is committed as public Firebase project configuration; no service-account credential
+or OAuth client secret is present.
+
+Added Google Services Gradle plugin 4.5.0, Firebase BoM 34.17.0, the main
+`firebase-auth` module, Credential Manager, its Play Services bridge and the Google ID
+library through the version catalog. Analytics was intentionally omitted: it is not
+required for authentication and deserves a separate product/privacy decision.
+
+Verified `processDebugGoogleServices` and `processReleaseGoogleServices`; each produced
+exactly one `google_app_id` and one `default_web_client_id` resource without logging
+their values. Full Android tests, debug lint, debug APK and signed release APK all
+passed. Actual sign-in UI/session handling and Firebase ID-token verification in the Go
+API remain the next implementation step.
+
+The resulting debug APK was installed as an in-place update to `com.nakvali.app` on
+OnePlus `49b5d08f`; the process launched and remained alive with no Firebase startup
+or Android fatal exception in the captured log. The retired prototype package and its
+data were not touched.

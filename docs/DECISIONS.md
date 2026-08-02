@@ -520,3 +520,18 @@ activity results are always recomputed canonically from the raw on-device file.
 - Firebase must register `com.nakvali.app`. Reuse the established release signing
   certificate; signing identity is independent of application ID and its key alias is
   not renamed merely for cosmetics.
+
+## 2026-08-02 — Firebase Auth uses Credential Manager without Analytics
+
+- Google sign-in uses Firebase Authentication as the identity provider and Android's
+  Credential Manager as the interaction surface. The app depends on the main
+  `firebase-auth` module rather than the retired Firebase KTX artifact.
+- `google-services.json` is committed under `android/app/`: it contains public project
+  configuration and OAuth client identifiers, never a service-account key or client
+  secret. The Google Services Gradle plugin generates `default_web_client_id` for both
+  debug and release builds.
+- Firebase Analytics is not enabled merely because it appears in the console's setup
+  example. Authentication does not require it, and telemetry remains a separate
+  product/privacy decision.
+- Android sign-in UI/session state and Go ID-token verification remain separate next
+  steps; adding SDK dependencies alone is not treated as completed authentication.

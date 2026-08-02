@@ -8,8 +8,8 @@ Database, and Firebase Storage are not required for authentication.
 
 - Public product name: **Nakvali**.
 - Android application ID registered with Firebase: **`com.nakvali.app`**.
-- Suggested Firebase project display name: **Nakvali**.
-- Suggested globally unique project ID: `nakvali-prod-<suffix>`.
+- Firebase project display name: **Nakvali**.
+- Firebase project ID: `nakvali-app`.
 
 `com.nakvali.app` is intentionally a new Android identity while the app is still in
 private development. It installs separately from the retired prototype. Restore the
@@ -45,10 +45,16 @@ are independent.
 
 ## Repository work after the console setup
 
-Android needs the Google services Gradle plugin, Firebase Android BoM,
-`firebase-auth`, Credential Manager, the Play Services credential bridge, and the
-Google ID library. Sign-in should use Credential Manager and the generated
-`default_web_client_id`; it must not embed a client secret.
+The Android foundation is configured: the Google services Gradle plugin, Firebase
+Android BoM, `firebase-auth`, Credential Manager, the Play Services credential bridge,
+the Google ID library and the refreshed `android/app/google-services.json` are present.
+Both debug and release builds generate `default_web_client_id` from that config; no
+client secret is embedded in source. Firebase Analytics is deliberately not included.
+
+The next Android step is the actual Credential Manager sign-in interaction and session
+state. The next backend step is Firebase ID-token verification and a local user keyed
+by verified Firebase `uid`; those are not implemented by the dependency/configuration
+setup alone.
 
 After Firebase sign-in, Android obtains a Firebase ID token and sends it to the API as
 `Authorization: Bearer <token>` over HTTPS. The Go API verifies that token with the

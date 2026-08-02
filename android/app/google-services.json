@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "440429704273",
+    "project_id": "nakvali-app",
+    "storage_bucket": "nakvali-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:440429704273:android:b8c10862c95b4e8356f470",
+        "android_client_info": {
+          "package_name": "com.nakvali.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "440429704273-hhh5dnhgdl033r0n67ilj9i5mmnup8kq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nakvali.app",
+            "certificate_hash": "d909623e4605d2c209b6f28f634eab607d8256ef"
+          }
+        },
+        {
+          "client_id": "440429704273-3nnonaocp4b36hc3ogl9ekhbbihme9iq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4suFcJqPsDvtGA6aRUtvkatMRRj3DzbQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "440429704273-3nnonaocp4b36hc3ogl9ekhbbihme9iq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
