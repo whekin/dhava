@@ -362,7 +362,7 @@ private fun IdleContent(
                         Text(
                             when {
                                 !locationGranted ->
-                                    "Location permission is needed — Dhava asks when you start."
+                                    "Location permission is needed — Nakvali asks when you start."
                                 gpsAccuracyM == null -> "GPS warming up while this screen is open."
                                 gpsAccuracyM <= 15f -> "GPS ready · ±${gpsAccuracyM.toInt()} m"
                                 else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
@@ -454,7 +454,7 @@ private fun InterruptedRecordingContent(
             if (recording.recoveryFailed) {
                 "The original bytes are still on this phone. Save the entry to keep it visible and export diagnostics."
             } else {
-                "Dhava stopped unexpectedly. Continue this ride or save everything recorded so far."
+                "Nakvali stopped unexpectedly. Continue this ride or save everything recorded so far."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -674,7 +674,7 @@ private fun BatteryExemptionDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Keep recording alive") },
         text = {
-            Text("Some battery managers stop long recordings. Allow Dhava to run unrestricted during rides.")
+            Text("Some battery managers stop long recordings. Allow Nakvali to run unrestricted during rides.")
         },
         confirmButton = {
             TextButton(
@@ -704,7 +704,7 @@ private fun BackgroundLocationDialog(
         title = { Text("Recover screen-off rides") },
         text = {
             Text(
-                "If Android kills Dhava after the screen turns off, background location lets the recorder restart. " +
+                "If Android kills Nakvali after the screen turns off, background location lets the recorder restart. " +
                     "Choose Location → $optionLabel. You can still record without it, but automatic recovery may stop.",
             )
         },

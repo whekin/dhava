@@ -116,7 +116,7 @@ internal class StravaApi(
                 gpx.asRequestBody("application/gpx+xml".toMediaType()),
             )
             .addFormDataPart("external_id", externalId)
-            .addFormDataPart("title", recording.title ?: "Dhava ride")
+            .addFormDataPart("title", recording.title ?: "Nakvali ride")
             .addFormDataPart("description", recording.description.orEmpty())
             .addFormDataPart("sport_type", sportType)
             .build()
@@ -153,7 +153,7 @@ internal class StravaApi(
 
     private fun apiError(body: String): String? = runCatching {
         when (val error = ApiJson.decodeFromString<ApiError>(body).error) {
-            "strava_not_configured" -> "Strava export needs the Dhava backend"
+            "strava_not_configured" -> "Strava export needs the Nakvali backend"
             "strava_not_connected" -> "Connect Strava again"
             "strava_write_scope_required" -> "Allow activity uploads in Strava"
             "strava_unavailable" -> "Strava is temporarily unavailable"

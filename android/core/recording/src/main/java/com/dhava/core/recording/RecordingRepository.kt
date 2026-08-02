@@ -882,7 +882,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     sectionId = point.sectionId,
                 )
             },
-            name = recording.title ?: "Dhava ride",
+            name = recording.title ?: "Nakvali ride",
             output = output,
         )
         val response = try {
@@ -933,7 +933,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         if (error is StravaApiException) {
             error.message ?: "Strava connection is unavailable"
         } else {
-            "Dhava backend is unreachable"
+            "Nakvali backend is unreachable"
         }
 
     /** Adds a bike to the local garage and returns it. */

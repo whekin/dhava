@@ -501,3 +501,17 @@ activity results are always recomputed canonically from the raw on-device file.
   before installation. Backup and restore are unavailable while recording, so an
   actively changing sensor stream never enters an archive.
 - The format contract is documented in `docs/local-backup-format.md`.
+
+## 2026-08-02 — Nakvali is the working public brand
+
+- Use **Nakvali** as the customer-facing name. Georgian `ნაკვალი` means a trace,
+  footprint, or track left behind, matching recorded lines, multi-ride refinement,
+  and ride history without constraining the product to one gravity sport.
+- The selection passed a preliminary exact web/store/domain check but still requires
+  native-speaker tone validation and formal trademark clearance before public launch.
+- Keep repository, package, API, database, backup-format, deep-link and deployment
+  identifiers using `dhava`. Android specifically retains `com.dhava.app`: it is the
+  signed installed identity holding irreplaceable private-alpha recordings, and a new
+  application ID would create a separate app rather than an update.
+- Firebase must register the existing `com.dhava.app` Android application. The
+  Firebase project display name and all user-visible identity should use Nakvali.

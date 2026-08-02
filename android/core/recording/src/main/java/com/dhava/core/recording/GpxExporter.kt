@@ -18,7 +18,7 @@ object GpxExporter {
         output.parentFile?.mkdirs()
         output.bufferedWriter().use { out ->
             out.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-            out.appendLine("<gpx version=\"1.1\" creator=\"Dhava\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
+            out.appendLine("<gpx version=\"1.1\" creator=\"Nakvali\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
             out.appendLine("  <trk>")
             out.appendLine("    <name>${escape(name)}</name>")
             var openSectionId: Int? = null

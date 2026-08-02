@@ -2,6 +2,11 @@
 
 Date: 2026-08-02
 
+**Working selection:** **Nakvali**, from Georgian `ნაკვალი` — a trace, footprint,
+or track left behind. Preliminary exact-name web and indexed store searches found no
+product collision, and `nakvali.com` returned no Verisign RDAP record on 2026-08-02.
+This remains subject to formal trademark and native-speaker review.
+
 ## Context
 
 `Dhava` is already used by an active GPS fitness-tracking app in the same category. Its public positioning includes walking, running, cycling, hiking, routes, social features, challenges, wearables, and a premium subscription. That makes an exact-name launch unnecessarily vulnerable to store-search confusion, word-of-mouth ambiguity, and a later forced rename, even though Android package names can remain technically distinct.
@@ -28,10 +33,16 @@ This is preliminary product research, not legal trademark clearance. Domain and 
 | **Daghma** | an invented shortening inspired by Georgian `დაღმართი` (*daghmarti*, downhill/slope) | Strong Georgian origin story, short, ownable, relevant to descent, and not limited to bikes. | `gh` pronunciation is not obvious abroad; the shortened form is a coined brand, not the Georgian word itself; the string also occurs as a surname/name elsewhere. | No exact app/store result found; `daghma.com` returned RDAP 404 at check time. |
 | **LoamSignal** | trail surface + sensor/data signal | Vivid MTB personality; connects forest riding with the app’s sensor work and changing GPS quality. Easy to understand and visually rich. | Narrows the brand toward dirt/MTB and is less natural for snow or urban stairs; longer than the others. | No exact app/store result found; `loamsignal.com` returned RDAP 404 at check time. |
 | **Gravra** | invented gravity-adjacent word | Short, pronounceable enough, flexible across gravity sports, and visually strong. | Meaning is not self-evident; likely needs a descriptor such as “gravity ride tracking” for early acquisition. | No exact app/store result found; `gravra.com` returned RDAP 404 at check time. |
+| **Nakvali** | Georgian trace / footprint | A real local word that maps directly to recorded lines, multi-ride refinement, memories, and the trace a rider leaves. Distinctive internationally without restricting the sport. | The `kv` cluster needs an English pronunciation test, and native speakers should confirm its brand tone. | No exact app/store result found; `nakvali.com` returned RDAP 404 at check time. |
 
 ## Recommendation
 
-**Gravtrace** is the strongest product name in this pass. It describes the unique value better than the category: not merely recording a ride, but recovering a trustworthy trace through gravity terrain. It also leaves room for snowboarding or other descent sports.
+**Nakvali** was selected after the initial shortlist as the working public name. Its
+literal trace/footprint meaning describes both a single recorded line and a reference
+line refined by several rides, while its Georgian origin gives the product a real
+identity rather than a generated gravity prefix.
+
+**Gravtrace** was the strongest product name in the initial pass. It describes the unique value better than the category: not merely recording a ride, but recovering a trustworthy trace through gravity terrain. It also leaves room for snowboarding or other descent sports.
 
 **Daghma** is the strongest brand story if Georgian identity is important. Before choosing it, test the spoken form with several English speakers and a native Georgian copywriter; the intended derivation should be described as inspiration, not translation.
 
@@ -75,3 +86,4 @@ Suggested public-name test:
 - [Semrush: SplitSignal](https://www.semrush.com/blog/user/148207585/)
 - [Business and Technology University: Biliki App](https://btu.edu.ge/biliki-app/)
 - [Verisign RDAP service](https://www.verisign.com/en_US/channel-resources/domain-registry-products/registration-data-lookup/index.xhtml)
+- [University of Georgia synonym dictionary: `ნაკვალი`](https://dlab.ug.edu.ge/synonym/detail/60754/%E1%83%9C%E1%83%90%E1%83%99%E1%83%95%E1%83%90%E1%83%9A%E1%83%98)

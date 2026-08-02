@@ -328,7 +328,7 @@ private fun DraftNotice(segment: StoredSegment) {
             Text(
                 text = (if (segment.sourceKind == SegmentSourceKind.IMPORTED_GPX) {
                     "The geometry is an imported GPX seed, not a recorded attempt. It can " +
-                        "be refined by later Dhava rides, while its authored gates stay fixed. "
+                        "be refined by later Nakvali rides, while its authored gates stay fixed. "
                 } else {
                     "The geometry comes from a single ride, so it is not treated as ground " +
                         "truth and does not correct GPS. "

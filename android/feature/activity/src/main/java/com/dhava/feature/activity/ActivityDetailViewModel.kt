@@ -159,7 +159,7 @@ class ActivityDetailViewModel(
             exportHealthLog(onResult)
             return
         }
-        val title = recording.value?.title ?: "Dhava ride"
+        val title = recording.value?.title ?: "Nakvali ride"
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
         val artifact = canonicalArtifact
         val points = when (kind) {

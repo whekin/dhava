@@ -1,6 +1,6 @@
-# Dhava — Vision
+# Nakvali — Vision
 
-Strava is route-first and does downhill badly. Dhava is **segment-first, downhill-first**.
+Strava is route-first and does downhill badly. Nakvali is **segment-first, downhill-first**.
 
 ## Core differentiators
 

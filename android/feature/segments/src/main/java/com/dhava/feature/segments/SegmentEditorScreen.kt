@@ -463,7 +463,7 @@ private fun SegmentEditorDetails(
             ) {
                 Text(
                     text = "This selection covers “${state.duplicateOf}”, which you already " +
-                        "have. Dhava never merges segments, so saving this creates a second " +
+                        "have. Nakvali never merges segments, so saving this creates a second " +
                         "one with its own results.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

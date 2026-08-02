@@ -1870,3 +1870,31 @@ Gravora was added to the rejected list and was not adopted as a project decision
 code or identifiers were renamed. Future broad ideation may remain unresearched, but
 any candidate must pass a quick exact store/web check before being recorded as the
 working brand.
+
+## 2026-08-02 — Nakvali selected as the working public brand
+
+Nakvali is now the working customer-facing name. Georgian `ნაკვალი` is a trace,
+footprint, or track left behind, directly matching a recorded ride line, a multi-ride
+reference line and the history a rider leaves on a trail. Preliminary exact web and
+indexed store searches found no product collision, and `nakvali.com` had no Verisign
+RDAP record at check time. Native-speaker tone and formal trademark clearance remain
+open before a public launch.
+
+The launcher label, visible Android copy, default exported ride names and GPX creator
+now say Nakvali. Internal source symbols, repository paths, backup filenames/schema,
+API headers, deep links and deployment identifiers remain `dhava` for compatibility.
+Most importantly, Android retains `com.dhava.app` and its existing release signing
+lineage so updates preserve the OnePlus recordings.
+
+`docs/firebase-auth-setup.md` records the console handoff for Google sign-in, including
+the exact debug/release SHA-1 and SHA-256 fingerprints verified by Gradle. Firebase
+will register `com.dhava.app`; the console display identity will use Nakvali. No
+Firebase dependency or secret was added yet. The next implementation step begins only
+after the project is created, Google is enabled, and the refreshed
+`google-services.json` plus securely stored backend service-account credentials are
+available.
+
+Verified the full Android `test lintDebug assembleDebug` run. The resulting APK still
+has package `com.dhava.app` and now reports application label `Nakvali` through `aapt`.
+The OnePlus was connected, but no production APK was installed for this naming/docs
+step and its local recordings were not touched.

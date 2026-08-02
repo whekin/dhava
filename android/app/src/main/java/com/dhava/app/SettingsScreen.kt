@@ -118,7 +118,7 @@ internal fun SettingsScreen() {
         }
         Spacer(Modifier.height(DhavaSpacing.large))
         Text(
-            "Dhava recorder · prototype 0.1",
+            "Nakvali recorder · prototype 0.1",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -204,7 +204,7 @@ private fun BackupSection() {
                 description = when (operation) {
                     BackupOperation.Inspecting -> "Reading the backup manifest…"
                     BackupOperation.Restoring -> "Verifying every file before restore…"
-                    else -> "Add missing rides and authored data from a Dhava backup."
+                    else -> "Add missing rides and authored data from a Nakvali backup."
                 },
                 enabled = operation == null,
                 loading = operation == BackupOperation.Inspecting || operation == BackupOperation.Restoring,
@@ -229,7 +229,7 @@ private fun BackupSection() {
             text = {
                 Text(
                     "${formatBackupContents(candidate.preview)} · ${formatBytes(candidate.preview.totalBytes)}. " +
-                        "Dhava verifies every file, keeps existing data and adds anything missing. " +
+                        "Nakvali verifies every file, keeps existing data and adds anything missing. " +
                         "A conflicting raw recording stops the restore without overwriting it.",
                 )
             },

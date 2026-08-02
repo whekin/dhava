@@ -1,5 +1,6 @@
-# Dhava — Agent Guide
+# Nakvali — Agent Guide
 
+Nakvali is the public brand; the repository and internal identifiers remain `dhava`.
 Downhill-first ride tracking app. Android (Kotlin/Compose) + Go API + Rust fusion core.
 Read `docs/VISION.md` for the product idea, `docs/ROADMAP.md` for phases,
 `docs/WORKLOG.md` for what has been done and why.
@@ -22,7 +23,7 @@ Use the five standard triage labels. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Dhava uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+Nakvali uses a single-context domain documentation layout. See `docs/agents/domain.md`.
 
 ## Layout
 

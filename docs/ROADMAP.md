@@ -1,6 +1,6 @@
 # Roadmap — recorder first
 
-Dhava is currently a high-quality, offline-first MTB recorder that will export
+Nakvali is currently a high-quality, offline-first MTB recorder that will export
 activities to Strava. Segments, leaderboards and social features are frozen until
 the recorder is trustworthy enough to replace a dedicated bike computer.
 

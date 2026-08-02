@@ -167,7 +167,7 @@ internal class DhavaBackupArchive(
         } catch (error: Throwable) {
             stagingDirectory.deleteRecursively()
             if (error is DhavaBackupException) throw error
-            throw DhavaBackupException("Could not read Dhava backup", error)
+            throw DhavaBackupException("Could not read Nakvali backup", error)
         }
     }
 
@@ -175,7 +175,7 @@ internal class DhavaBackupArchive(
         val first = zip.nextEntry
             ?: throw DhavaBackupException("Backup is empty")
         if (first.isDirectory || first.name != MANIFEST_PATH) {
-            throw DhavaBackupException("This is not a Dhava backup")
+            throw DhavaBackupException("This is not a Nakvali backup")
         }
         val buffer = ByteArrayOutputStream()
         val bytes = ByteArray(DEFAULT_BUFFER_SIZE)
