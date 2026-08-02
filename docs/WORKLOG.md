@@ -2032,3 +2032,14 @@ Coolify serialized the initially recommended multiline JSON into invalid raw `.e
 lines. Production guidance now uses `jq -c .` output as a locked literal runtime value
 with Multiline disabled; the mounted file remains valid JSON because private-key line
 breaks stay escaped as `\n`.
+
+## 2026-08-02 — Clean Postgres volume after the database identity rename
+
+The first Coolify volume retained a PostgreSQL cluster initialized before the final
+Nakvali database/user/password configuration. Updating `POSTGRES_*` in Compose could
+not mutate that existing cluster, so migration startup failed authentication. Because
+the backend still contained no authoritative ride data and the owner approved dropping
+the old database, the active Compose volume was advanced from `db-data` to
+`db-data-v2`. Coolify will create and migrate a clean `nakvali` cluster with the
+current URL-safe password; the old volume remains detached for explicit cleanup after
+the new deployment is healthy. Phone recordings are unaffected.

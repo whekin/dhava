@@ -48,7 +48,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: nakvali
     volumes:
-      - db-data:/var/lib/postgresql/data
+      # v2 deliberately starts a clean Nakvali cluster. The original db-data volume
+      # was initialized before the database/user/password rename and must not be
+      # silently reused with initialization-only POSTGRES_* values.
+      - db-data-v2:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nakvali -d nakvali"]
@@ -57,7 +60,7 @@ services:
       retries: 20
 
 volumes:
-  db-data:
+  db-data-v2:
 
 secrets:
   # Coolify provides compact JSON as a locked literal runtime variable.

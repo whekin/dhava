@@ -20,6 +20,12 @@ server has a real segment verification queue.
 The API container waits for PostGIS, applies every pending migration, and only
 then starts listening. Its readiness check includes a database ping.
 
+The active PostgreSQL volume is `db-data-v2`. It intentionally replaced the initial
+private-alpha `db-data` volume after the product/database rename: PostgreSQL applies
+`POSTGRES_USER`, `POSTGRES_DB` and `POSTGRES_PASSWORD` only to an empty data directory.
+Do not rename this volume for ordinary deployments or password rotation; change the
+database role password in-place once the backend contains real user data.
+
 For local development, use the second Compose file that binds the API to
 localhost while keeping the production file unchanged:
 
