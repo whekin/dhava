@@ -59,6 +59,8 @@ Suggested public-name test:
 - **SplitSignal** — active SEO experimentation platform.
 - **Tracefall / Linefall** — active or announced games and software use the strings.
 - **Gravlo / Gravta** — current app/company collisions.
+- **Gravora** — exact-name products already exist in Google Play and the App Store;
+  a 2026 Steam physics game additionally uses the same gravity association.
 - **Gatecraft / Splitmark / LineProof / DirtSignal** — existing software or active businesses.
 
 ## Sources
@@ -66,6 +68,9 @@ Suggested public-name test:
 - [Dhava on Google Play](https://play.google.com/store/apps/details?id=com.coherent.dhava_tracking)
 - [Dhava product site](https://dhava.life/)
 - [Google Play metadata policy](https://support.google.com/googleplay/android-developer/answer/9898842)
+- [Gravora physics game on Steam](https://store.steampowered.com/app/4653460/Gravora/)
+- [Gravora weight tracker on Google Play](https://play.google.com/store/apps/details?id=com.kgra.gravoora)
+- [Gravora finance app on the App Store](https://apps.apple.com/hk/app/gravora/id6753940449)
 - [Dropmark official site](https://www.dropmark.com/)
 - [Semrush: SplitSignal](https://www.semrush.com/blog/user/148207585/)
 - [Business and Technology University: Biliki App](https://btu.edu.ge/biliki-app/)

@@ -1857,3 +1857,16 @@ time checked. These are preliminary signals, not legal clearance or a reservatio
 No rename decision was made and no code identifiers changed. Next step: select one or
 two tonal directions, test spoken spelling with riders, then perform formal trademark
 and handle checks before buying identity work or configuring production auth.
+
+## 2026-08-02 — Gravora rejected after exact-name check
+
+Gravora initially felt like a strong gravity-adjacent public brand, but an exact-name
+check found three current products: a gravity-based Steam physics game, a Google Play
+weight tracker, and an App Store finance app. The game is especially problematic
+because it uses the same gravity meaning rather than merely sharing an unrelated
+string.
+
+Gravora was added to the rejected list and was not adopted as a project decision. No
+code or identifiers were renamed. Future broad ideation may remain unresearched, but
+any candidate must pass a quick exact store/web check before being recorded as the
+working brand.
