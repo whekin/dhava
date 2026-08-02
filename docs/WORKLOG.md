@@ -1811,3 +1811,30 @@ Open item: exercise the confirmation UI against a clean disposable install when 
 emulator with the current debug signing key is available. Restore extraction and
 checksum failure are unit-tested; the production data was not destructively restored
 over itself merely to test the button.
+
+## 2026-08-02 — Project quickstart and repeatable developer commands
+
+The repository root README is now an accurate entry point instead of describing the
+retired raw-upload/server-worker architecture. It explains the phone-as-source-of-truth
+model, current module boundaries, prerequisites, artifact locations, safe in-place ADB
+installation and the small set of commands needed for routine work. The backend and
+fusion READMEs were corrected at the same seam; notably, `fusion-core` is documented as
+the already-shipping on-device implementation rather than a future integration.
+
+A tracked root `justfile` now provides debug APK and signed production APK/AAB builds,
+explicit-device installs, Android/Go/Rust/Compose checks, the local API, and the full
+API/PostGIS stack. Release tasks continue to fail closed when the real signing key is
+absent. `docs/release-build.md` records API Gradle properties, both supported signing
+configuration sources, output paths, certificate comparison and the data-preserving
+`adb install -r` rule.
+
+Production Compose remains proxy-only. A separate local override publishes the API on
+`127.0.0.1:8080`; `just stack-up` includes it and supplies non-secret development
+defaults, while Coolify continues to read only the production file. This avoids making
+the hosted deployment more permissive merely to improve the local command.
+
+Verified: `just --list` and recipe dry runs; rendered local Compose configuration and
+Coolify build-context check; full `just check` (Android tests/lint/debug APK, Go
+vet/tests/build, 103 Rust unit tests plus two forest fixtures, Cargo clippy); signed
+release APK and signed release AAB through the documented `just` targets. Both release
+artifacts were produced successfully; no APK was installed and no app data was touched.

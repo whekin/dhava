@@ -1,6 +1,7 @@
 # Dhava Backend
 
-Go HTTP API for Dhava (downhill MTB ride recording: segments, leaderboards, GPS/IMU ingest).
+Go HTTP API for Dhava's private alpha: health/readiness, Strava OAuth and
+processed GPX export, plus explicitly opt-in legacy GPS/IMU ingest routes.
 
 ## Run
 

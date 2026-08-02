@@ -1,11 +1,41 @@
 # Dhava fusion
 
-Sensor-fusion core for the Dhava downhill MTB ride-recording app.
+Rust is the single implementation of Dhava's ride reconstruction and segment
+timing logic.
 
-- `crates/fusion-core` — library: GPS/IMU/baro types, segment gate-crossing
-  detection (implemented), and future Kalman filtering + airtime detection.
-- `crates/fusion-worker` — binary skeleton: server-side worker that will poll
-  Postgres for raw recordings, run them through `fusion-core`, and store results.
+- `crates/fusion-core` parses raw GPS/IMU/barometer recordings and implements
+  bounded fusion, canonical ride analysis, activity classification, airtime,
+  segment authoring, gate crossing and uncertainty.
+- `crates/uniffi-bindgen` generates the Kotlin interface used by Android.
+- `crates/fusion-worker` is a server-side verification skeleton. It is not part
+  of the production deployment and does not receive complete raw rides.
 
-Future plan: expose `fusion-core` to Android via UniFFI bindings so the phone
-and the server run the exact same fusion code.
+The Android app runs `fusion-core` on-device through UniFFI. Generated Kotlin
+bindings and native libraries are committed so a normal app build does not need
+Rust installed.
+
+## Commands
+
+From the repository root:
+
+```sh
+just fusion-check
+```
+
+Or directly:
+
+```sh
+cd fusion
+cargo test
+cargo clippy
+```
+
+After changing the UniFFI surface or Rust implementation used by Android,
+rebuild the bindings and native libraries with:
+
+```sh
+./fusion/scripts/build-android.sh
+```
+
+That script requires the configured Android NDK, `cargo-ndk`, and the Rust
+targets for the Android ABIs shipped by the app.

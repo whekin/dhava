@@ -1,6 +1,10 @@
 # OS
 .DS_Store
 
+# The project command runner is intentionally tracked even if a developer's
+# global Git ignore excludes justfiles.
+!justfile
+
 # IDE
 .idea/
 .vscode/

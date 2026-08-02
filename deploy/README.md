@@ -20,13 +20,19 @@ server has a real segment verification queue.
 The API container waits for PostGIS, applies every pending migration, and only
 then starts listening. Its readiness check includes a database ping.
 
-For local Compose commands, preserve the same repository-root project directory
-that Coolify uses:
+For local development, use the second Compose file that binds the API to
+localhost while keeping the production file unchanged:
 
 ```sh
-cd deploy
-docker compose --project-directory .. -f docker-compose.yml up
+just stack-up
+curl -H 'X-Dhava-Access-Key: dhava-local' http://127.0.0.1:8080/api/v1/me
+just stack-down
 ```
+
+The recipes use private local defaults and
+`deploy/docker-compose.local.yml`. Coolify uses only
+`deploy/docker-compose.yml`, where the API remains available exclusively through
+its proxy. Run `just deploy-check` to validate the shared build-context assumption.
 
 ## Environment
 

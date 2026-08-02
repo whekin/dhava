@@ -1,0 +1,7 @@
+# Development-only additions to the production-shaped Compose stack.
+# Coolify uses docker-compose.yml by itself and never publishes this port.
+
+services:
+  api:
+    ports:
+      - "127.0.0.1:${DHAVA_API_PORT:-8080}:8080"
