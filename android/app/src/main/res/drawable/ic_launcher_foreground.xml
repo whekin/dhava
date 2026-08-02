@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder launcher foreground: a downhill slope silhouette. -->
+<!-- A switchback dropping through the dirt-red Nakvali trail mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -7,8 +7,19 @@
     android:viewportHeight="108">
     <path
         android:fillColor="#D84315"
-        android:pathData="M24,38 L44,58 L52,52 L84,78 L24,78 Z" />
+        android:pathData="M54,20A34,34 0,1 1,54 88A34,34 0,1 1,54 20" />
     <path
-        android:fillColor="#FFB59C"
-        android:pathData="M58,42 m-5,0 a5,5 0 1,1 10,0 a5,5 0 1,1 -10,0" />
+        android:fillColor="@android:color/transparent"
+        android:pathData="M39,20C39,32 68,31 68,44C68,56 43,53 43,66C43,76 59,76 64,88"
+        android:strokeColor="#181210"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="10" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M39,20C39,32 68,31 68,44C68,56 43,53 43,66C43,76 59,76 64,88"
+        android:strokeColor="#FFE6DD"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3.5" />
 </vector>

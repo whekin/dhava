@@ -2043,3 +2043,16 @@ the old database, the active Compose volume was advanced from `db-data` to
 `db-data-v2`. Coolify will create and migrate a clean `nakvali` cluster with the
 current URL-safe password; the old volume remains detached for explicit cleanup after
 the new deployment is healthy. Phone recordings are unaffected.
+
+## 2026-08-02 — Launcher icon refreshed around a downhill switchback
+
+Replaced the placeholder mountain-and-dot launcher foreground with a compact trail
+mark: a light switchback drops through a dirt-red disc on Nakvali's dark background.
+The geometry stays inside the adaptive-icon safe zone and preserves its identity under
+the OnePlus circular mask. Added a dedicated Android 13+ monochrome trail layer so
+themed launchers no longer have to infer a silhouette from the full-color artwork.
+
+Verified Android resource processing and `:app:assembleDebug`, installed the APK as an
+in-place update on OnePlus `49b5d08f`, and inspected the icon in the app-drawer search
+result with the device's monochrome icon theming active. The mark remained centered
+and legible; existing app data was not removed.
