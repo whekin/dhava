@@ -6,6 +6,10 @@ import android.util.Log
 import com.dhava.core.fusion.FusionCore
 import com.dhava.fusion.LatLon
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 
 /**
@@ -48,6 +53,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         private const val SEGMENT_RESULTS_DIR = "segment-results"
         private const val IMPORTED_TRACES_DIR = "imported-traces"
         private const val LOG_TAG = "RecordingRepository"
+        private val SAFE_BACKUP_ID = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,199}")
 
         @Volatile
         private var instance: RecordingRepository? = null
@@ -83,6 +89,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         matchVersion = { FusionCore.segmentMatchVersion },
     )
     private val segmentsMutex = Mutex()
+    private val backupMutex = Mutex()
 
     /** Completed once the JSON files are read; [awaitRecording] gates on it. */
     private val loaded = CompletableDeferred<Unit>()
@@ -161,6 +168,204 @@ class RecordingRepository private constructor(private val appContext: Context) {
      * next time its activity is opened. Returns the number of files removed.
      */
     suspend fun clearProcessedArtifacts(): Int = canonicalStore.clearAll()
+
+    // --- complete local backup ---------------------------------------------
+
+    /**
+     * Writes one self-contained, versioned archive through Android's document
+     * provider. Only irreplaceable local inputs are included; derived tracks,
+     * map caches, upload work state and credentials are deliberately omitted.
+     */
+    suspend fun exportBackup(uri: Uri): BackupSummary {
+        loaded.await()
+        return backupMutex.withLock {
+            requireBackupIdle()
+            indexMutex.withLock {
+                segmentsMutex.withLock {
+                    val recordingsJson = IndexJson.encodeToString(_recordings.value).encodeToByteArray()
+                    val bikesJson = IndexJson.encodeToString(
+                        BikesFile(_bikes.value, _lastUsedBikeId.value),
+                    ).encodeToByteArray()
+                    withContext(Dispatchers.IO) {
+                        val output = appContext.contentResolver.openOutputStream(uri, "w")
+                            ?: throw DhavaBackupException("The selected backup file could not be opened")
+                        output.use {
+                            DhavaBackupArchive(appContext.filesDir).write(
+                                output = it,
+                                recordingsJson = recordingsJson,
+                                bikesJson = bikesJson,
+                                createdAtMs = System.currentTimeMillis(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Reads only the bounded first manifest entry; no files are restored. */
+    suspend fun inspectBackup(uri: Uri): BackupPreview = withContext(Dispatchers.IO) {
+        val input = appContext.contentResolver.openInputStream(uri)
+            ?: throw DhavaBackupException("The selected backup file could not be opened")
+        input.use { DhavaBackupArchive(appContext.filesDir).inspect(it) }
+    }
+
+    /**
+     * Verifies every checksum into a private staging directory before merging
+     * the backup. Existing rides always win; an immutable raw-file collision
+     * with different bytes aborts the restore instead of overwriting either
+     * version. New recordings, bikes, segments and GPX seeds are added.
+     */
+    suspend fun restoreBackup(uri: Uri): RestoreSummary {
+        loaded.await()
+        return backupMutex.withLock {
+            requireBackupIdle()
+            indexMutex.withLock {
+                segmentsMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        val staging = File(appContext.cacheDir, "backup-restore/${UUID.randomUUID()}")
+                        val staged = appContext.contentResolver.openInputStream(uri)?.use { input ->
+                            DhavaBackupArchive(appContext.filesDir).extract(input, staging)
+                        } ?: throw DhavaBackupException("The selected backup file could not be opened")
+                        try {
+                            applyBackup(staged)
+                        } finally {
+                            staging.deleteRecursively()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun applyBackup(staged: DhavaBackupArchive.StagedBackup): RestoreSummary {
+        val incomingRecordings = runCatching {
+            IndexJson.decodeFromString<List<LocalRecording>>(staged.file(INDEX_FILE).readText())
+        }.getOrElse { error ->
+            throw DhavaBackupException("Backup recording index is invalid", error)
+        }
+        val incomingBikes = runCatching {
+            IndexJson.decodeFromString<BikesFile>(staged.file(BIKES_FILE).readText())
+        }.getOrElse { error ->
+            throw DhavaBackupException("Backup bike index is invalid", error)
+        }
+        validateBackupIndex(incomingRecordings, incomingBikes)
+        incomingRecordings.forEach { recording ->
+            val raw = staged.file("$RECORDINGS_DIR/${recording.id}.jsonl.gz")
+            if (!raw.isFile) throw DhavaBackupException("Backup is missing raw data for ${recording.id}")
+        }
+
+        preflightRawConflicts(staged)
+        installBackupDirectory(staged, RECORDINGS_DIR)
+        installBackupDirectory(staged, SEGMENTS_DIR)
+        installBackupDirectory(staged, IMPORTED_TRACES_DIR)
+
+        val currentRecordingIds = _recordings.value.mapTo(mutableSetOf(), LocalRecording::id)
+        _recordings.value = (
+            _recordings.value + incomingRecordings.filter { currentRecordingIds.add(it.id) }
+            ).sortedByDescending(LocalRecording::startedAtMs)
+
+        val currentBikeIds = _bikes.value.mapTo(mutableSetOf(), Bike::id)
+        _bikes.value = _bikes.value + incomingBikes.bikes.filter { currentBikeIds.add(it.id) }
+        if (_lastUsedBikeId.value == null) _lastUsedBikeId.value = incomingBikes.lastUsedId
+        saveIndex()
+        saveBikes()
+        _segments.value = segmentStore.loadSegments()
+
+        return RestoreSummary(
+            recordingCount = staged.preview.recordingCount,
+            segmentCount = staged.preview.segmentCount,
+            importedTraceCount = staged.preview.importedTraceCount,
+        )
+    }
+
+    private fun validateBackupIndex(recordings: List<LocalRecording>, bikes: BikesFile) {
+        if (recordings.map(LocalRecording::id).toSet().size != recordings.size) {
+            throw DhavaBackupException("Backup recording index contains duplicate IDs")
+        }
+        if (bikes.bikes.map(Bike::id).toSet().size != bikes.bikes.size) {
+            throw DhavaBackupException("Backup bike index contains duplicate IDs")
+        }
+        recordings.forEach { recording ->
+            if (!SAFE_BACKUP_ID.matches(recording.id)) {
+                throw DhavaBackupException("Backup contains an invalid recording ID")
+            }
+            if (recording.status == RecordingStatus.RECORDING) {
+                throw DhavaBackupException("Backup contains an unfinished active recording")
+            }
+        }
+        bikes.bikes.forEach { bike ->
+            if (!SAFE_BACKUP_ID.matches(bike.id)) {
+                throw DhavaBackupException("Backup contains an invalid bike ID")
+            }
+        }
+    }
+
+    private fun preflightRawConflicts(staged: DhavaBackupArchive.StagedBackup) {
+        staged.directory.resolve(RECORDINGS_DIR)
+            .listFiles { file -> file.isFile && file.name.endsWith(".jsonl.gz") }
+            ?.forEach { source ->
+                val relative = "$RECORDINGS_DIR/${source.name}"
+                val target = appContext.filesDir.resolve(relative)
+                if (target.isFile && sha256(target) != staged.sha256(relative)) {
+                    throw DhavaBackupException("A different raw recording already uses ${source.name}")
+                }
+            }
+    }
+
+    private fun installBackupDirectory(staged: DhavaBackupArchive.StagedBackup, directoryName: String) {
+        val sourceDirectory = staged.directory.resolve(directoryName)
+        sourceDirectory.listFiles()?.filter(File::isFile)?.forEach { source ->
+            val relative = "$directoryName/${source.name}"
+            val target = appContext.filesDir.resolve(relative)
+            if (target.isFile) {
+                // Current authored metadata and diagnostic tails win on a
+                // merge. A fresh install has no target and restores normally.
+                return@forEach
+            }
+            copyAtomically(source, target)
+        }
+    }
+
+    private fun copyAtomically(source: File, target: File) {
+        target.parentFile?.mkdirs()
+        val temporary = File(target.parentFile, "${target.name}.restore.tmp")
+        source.inputStream().buffered().use { input ->
+            temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+        }
+        try {
+            Files.move(
+                temporary.toPath(),
+                target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun requireBackupIdle() {
+        if (_state.value is RecordingState.Preparing ||
+            _state.value is RecordingState.Recording ||
+            _recordings.value.any { it.status == RecordingStatus.RECORDING }
+        ) {
+            throw DhavaBackupException("Finish the active recording before using backup")
+        }
+    }
 
     /**
      * Loads a valid derived artifact or rebuilds it from immutable raw data.

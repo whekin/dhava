@@ -482,3 +482,22 @@ activity results are always recomputed canonically from the raw on-device file.
   ride or attempt. It may create a local draft segment, and later real Dhava rides
   may contribute to a more trusted centerline while the source file remains available
   for recomputation.
+
+## 2026-08-02 — Local backups are user-owned verified input archives
+
+- Backup is an offline Android Storage Access Framework operation, not a server sync
+  feature. The rider chooses where the ZIP lives and can copy it to any storage
+  provider without granting Dhava a broad filesystem permission.
+- Format v1 contains only irreplaceable or rider-authored input: the recording and
+  bike indexes, raw GPS/IMU/barometer streams, recording health logs, authored segment
+  definitions and preserved GPX seeds. Canonical tracks, segment results and maps are
+  excluded because they are derived/cache data; credentials, access keys and upload
+  process state are excluded because they are secrets or ephemeral state.
+- A first-entry manifest records schema version, item counts, byte sizes and SHA-256
+  for every payload. Restore has bounded entry/path/size rules, stages and verifies
+  the entire archive, and only then merges it.
+- Merge is intentionally loss-averse: current local metadata and authored files win,
+  missing items are added, and a same-name raw recording with different bytes aborts
+  before installation. Backup and restore are unavailable while recording, so an
+  actively changing sensor stream never enters an archive.
+- The format contract is documented in `docs/local-backup-format.md`.

@@ -1780,3 +1780,34 @@ of gates for an already saved segment; define the quality-weighted multi-pass
 centerline refinement and the backend publication contract. Imported GPX currently
 selects the continuous section with the most points when a file contains several
 unrelated tracks.
+
+## 2026-08-02 — Verified local backup and restore
+
+Settings now owns a normal Storage Access Framework backup flow instead of routing
+raw sensor data through Android's share targets. `Export backup` writes one versioned
+ZIP containing recording/bike indexes, every raw and health file, authored segment
+definitions and preserved GPX seeds. Recomputable canonical artifacts, segment-result
+caches, map tiles, upload state and secrets stay out. `Restore backup` first shows the
+bounded manifest, then verifies every payload in a private staging directory before a
+loss-averse merge. Existing local data wins, missing data is added, and different raw
+bytes under the same immutable recording name abort before installation.
+
+The archive implementation uses a first-entry manifest, ZIP CRC plus SHA-256 per
+payload, allowlisted flat paths, limits of 10,000 entries / 2 MB manifest / 50 GB data,
+and a free-space reserve. Export rechecks each source while writing, catching a file
+that changes between the manifest pass and archive pass. Unit coverage exercises a
+complete round trip, corrupted stored payload and rejection of an ordinary ZIP.
+
+Verified with the full Android `test lintDebug assembleDebug assembleRelease` run.
+The release certificate exactly matched the installed OnePlus production certificate
+(`f8dc85…bf45ca`), so the APK was installed in place with `adb install -r`; all three
+rides (`dirt`, `road to dirt`, `Evening ride`) remained visible. The Settings layout
+was inspected on the OnePlus and a real archive was created through `CreateDocument`:
+90,481,425 bytes, three rides and eight payload files. Independent `unzip -t` and
+manifest SHA-256 verification passed for every payload. The permanent copy is in
+`~/Documents/Dhava Backups/2026-08-02 OnePlus/`; the phone keeps its Download copy.
+
+Open item: exercise the confirmation UI against a clean disposable install when an
+emulator with the current debug signing key is available. Restore extraction and
+checksum failure are unit-tested; the production data was not destructively restored
+over itself merely to test the button.

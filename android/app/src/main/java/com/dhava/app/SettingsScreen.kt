@@ -1,7 +1,10 @@
 package com.dhava.app
 
+import android.net.Uri
 import android.os.StatFs
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.dhava.core.map.clearMapCache
 import com.dhava.core.map.initDhavaMap
 import com.dhava.core.map.mapCacheSizeBytes
+import com.dhava.core.recording.BackupPreview
 import com.dhava.core.recording.DirectoryUsage
 import com.dhava.core.recording.RecordingRepository
 import com.dhava.core.recording.directoryUsage
@@ -44,6 +48,8 @@ import com.dhava.core.ui.DhavaPanel
 import com.dhava.core.ui.DhavaScreenHeader
 import com.dhava.core.ui.DhavaSectionLabel
 import com.dhava.core.ui.DhavaSpacing
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -95,6 +101,8 @@ internal fun SettingsScreen() {
             }
         }
         Spacer(Modifier.height(DhavaSpacing.xxLarge))
+        BackupSection()
+        Spacer(Modifier.height(DhavaSpacing.xxLarge))
         StorageSection()
         Spacer(Modifier.height(40.dp))
         Surface(
@@ -103,7 +111,7 @@ internal fun SettingsScreen() {
             shape = MaterialTheme.shapes.medium,
         ) {
             Text(
-                "Raw recordings stay on this device.",
+                "Raw recordings stay under your control — on this device and in backups you create.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.fillMaxWidth().padding(DhavaSpacing.large),
             )
@@ -115,6 +123,178 @@ internal fun SettingsScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+// --- backup ------------------------------------------------------------------
+
+private enum class BackupOperation {
+    Exporting,
+    Inspecting,
+    Restoring,
+}
+
+private data class PendingRestore(
+    val uri: Uri,
+    val preview: BackupPreview,
+)
+
+@Composable
+private fun BackupSection() {
+    val context = LocalContext.current
+    val repository = remember { RecordingRepository.getInstance(context) }
+    val scope = rememberCoroutineScope()
+    var operation by remember { mutableStateOf<BackupOperation?>(null) }
+    var pendingRestore by remember { mutableStateOf<PendingRestore?>(null) }
+
+    fun showFailure(prefix: String, error: Throwable) {
+        val detail = error.message?.takeIf(String::isNotBlank) ?: "Unknown error"
+        Toast.makeText(context, "$prefix: $detail", Toast.LENGTH_LONG).show()
+    }
+
+    val createBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) {
+            operation = BackupOperation.Exporting
+            scope.launch {
+                runCatching { repository.exportBackup(uri) }
+                    .onSuccess { summary ->
+                        Toast.makeText(
+                            context,
+                            "Backup saved · ${formatBackupContents(summary.preview)}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    .onFailure { error -> showFailure("Backup failed", error) }
+                operation = null
+            }
+        }
+    }
+    val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            operation = BackupOperation.Inspecting
+            scope.launch {
+                runCatching { repository.inspectBackup(uri) }
+                    .onSuccess { preview -> pendingRestore = PendingRestore(uri, preview) }
+                    .onFailure { error -> showFailure("Could not open backup", error) }
+                operation = null
+            }
+        }
+    }
+
+    DhavaSectionLabel("Backup")
+    Spacer(Modifier.height(DhavaSpacing.medium))
+    DhavaPanel(Modifier.fillMaxWidth()) {
+        Column {
+            BackupActionRow(
+                title = "Export backup",
+                description = when (operation) {
+                    BackupOperation.Exporting -> "Building and verifying the archive…"
+                    else -> "Raw rides, health logs, metadata, bikes, segments and GPX seeds."
+                },
+                enabled = operation == null,
+                loading = operation == BackupOperation.Exporting,
+            ) {
+                val timestamp = SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date())
+                createBackup.launch("dhava-backup-$timestamp.zip")
+            }
+            DhavaDivider(Modifier.padding(horizontal = DhavaSpacing.large))
+            BackupActionRow(
+                title = "Restore backup",
+                description = when (operation) {
+                    BackupOperation.Inspecting -> "Reading the backup manifest…"
+                    BackupOperation.Restoring -> "Verifying every file before restore…"
+                    else -> "Add missing rides and authored data from a Dhava backup."
+                },
+                enabled = operation == null,
+                loading = operation == BackupOperation.Inspecting || operation == BackupOperation.Restoring,
+            ) {
+                openBackup.launch(
+                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+                )
+            }
+        }
+    }
+    Spacer(Modifier.height(DhavaSpacing.medium))
+    Text(
+        "Processed tracks are rebuilt when needed. Account tokens and other secrets are never exported.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    pendingRestore?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Restore this backup?") },
+            text = {
+                Text(
+                    "${formatBackupContents(candidate.preview)} · ${formatBytes(candidate.preview.totalBytes)}. " +
+                        "Dhava verifies every file, keeps existing data and adds anything missing. " +
+                        "A conflicting raw recording stops the restore without overwriting it.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    operation = BackupOperation.Restoring
+                    scope.launch {
+                        runCatching { repository.restoreBackup(candidate.uri) }
+                            .onSuccess { restored ->
+                                Toast.makeText(
+                                    context,
+                                    "Restore complete · ${restored.recordingCount} rides available",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                            .onFailure { error -> showFailure("Restore failed", error) }
+                        operation = null
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun BackupActionRow(
+    title: String,
+    description: String,
+    enabled: Boolean,
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(DhavaSpacing.large),
+        horizontalArrangement = Arrangement.spacedBy(DhavaSpacing.large),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+    }
+}
+
+private fun formatBackupContents(preview: BackupPreview): String = buildString {
+    append(preview.recordingCount)
+    append(if (preview.recordingCount == 1) " ride" else " rides")
+    if (preview.segmentCount > 0) append(" · ${preview.segmentCount} segments")
+    if (preview.importedTraceCount > 0) append(" · ${preview.importedTraceCount} GPX seeds")
 }
 
 // --- storage -----------------------------------------------------------------

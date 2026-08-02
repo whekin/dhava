@@ -27,6 +27,7 @@ skeleton and deployment scaffolding.
 - Surface elevation quality, GPS quality and uncertainty indicators ✅
 - Reliable activity detail, rename/edit/delete and raw diagnostics export ✅
 - Local storage management and offline map/cache behavior ✅
+- Versioned local backup/restore for raw rides and authored data ✅
 
 ## Phase 3 — Export
 
