@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    The monochrome layer lives here rather than in a separate mipmap-anydpi-v33
+    variant: the release resource optimisation drops that variant entirely, so a
+    themed-icon launcher on Android 13+ fell back to its own generic rendering.
+    Launchers below API 33 simply ignore the element.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>
