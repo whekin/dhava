@@ -62,6 +62,13 @@ internal fun descentMetricLabel(quality: CanonicalQuality?): String =
         "Descent"
     }
 
+internal fun ascentMetricLabel(quality: CanonicalQuality?): String =
+    if (quality?.elevationSource == CanonicalElevationSource.GPS_INTERPOLATED) {
+        "Net climb"
+    } else {
+        "Ascent"
+    }
+
 /** Null when the recording carries no accuracy estimates to bucket. */
 internal fun gpsChipText(quality: CanonicalQuality): String? {
     val bucket = gpsQualityBucket(quality.medianAccuracyM) ?: return null

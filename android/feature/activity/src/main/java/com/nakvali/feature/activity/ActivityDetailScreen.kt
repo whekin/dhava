@@ -75,16 +75,20 @@ import com.nakvali.core.recording.StravaExportStatus
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliEmptyState
 import com.nakvali.core.ui.NakvaliMetric
+import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.rememberSheetFlingBoundary
 import com.nakvali.core.ui.NakvaliStatusPill
 import com.nakvali.core.ui.NakvaliTheme
 import com.nakvali.fusion.ActivityState
 import com.nakvali.fusion.RideAnalysis
+import com.nakvali.fusion.RideProfilePoint
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Map-led local activity detail; canonical numbers still come from Rust. */
 @Composable
@@ -103,6 +107,7 @@ fun ActivityDetailScreen(
     val analysis by viewModel.analysis.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
     val quality by viewModel.quality.collectAsState()
+    val rideInsights by viewModel.rideInsights.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val stravaConnection by viewModel.stravaConnection.collectAsState()
@@ -126,6 +131,7 @@ fun ActivityDetailScreen(
         analysis = analysis,
         diagnostics = diagnostics,
         quality = quality,
+        rideInsights = rideInsights,
         bikes = bikes,
         healthLogAvailable = healthLogAvailable,
         stravaConnection = stravaConnection,
@@ -196,6 +202,7 @@ private fun ActivityDetailContent(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
+    rideInsights: ActivityRideInsights?,
     bikes: List<Bike>,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
@@ -213,6 +220,9 @@ private fun ActivityDetailContent(
 ) {
     var trackMode by remember { mutableStateOf(TrackMode.Compare) }
     var showMapLegend by rememberSaveable { mutableStateOf(false) }
+    var inspectedProfilePosition by rememberSaveable(recording?.id) {
+        mutableStateOf<Double?>(null)
+    }
     var showEdit by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
@@ -230,7 +240,18 @@ private fun ActivityDetailContent(
             // fix isolated rather than drawing a potentially false bridge.
             MapTrackPoint(point.lat, point.lon, index, point.accuracyM)
         }.orEmpty()
-    val fusedPoints = replay?.finalizedTrack
+    val fusedPoints = rideInsights?.track?.map { point ->
+        MapTrackPoint(
+            lat = point.lat,
+            lon = point.lon,
+            sectionId = point.sectionId,
+            timestampMs = point.timestampMs,
+            activityState = point.activityState,
+            activityConfidence = point.activityConfidence,
+            altitudeM = point.altitudeM,
+            speedMps = point.speedMps,
+        )
+    } ?: replay?.finalizedTrack
         ?.ifEmpty { replay.fusedTrack }
         ?.map { point ->
             MapTrackPoint(
@@ -244,6 +265,12 @@ private fun ActivityDetailContent(
             )
         }
         .orEmpty()
+    val inspectedProfilePoint = inspectedProfilePosition?.let { position ->
+        rideInsights?.profile?.points?.minByOrNull { point -> abs(point.position - position) }
+    }
+    val inspectedMapPoint = inspectedProfilePoint?.position
+        ?.roundToInt()
+        ?.let(fusedPoints::getOrNull)
     val accuracyColors = rememberGpsAccuracyColors()
     val activityStateColors = rememberActivityStateColors()
     val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
@@ -270,6 +297,12 @@ private fun ActivityDetailContent(
                 analysis = analysis,
                 diagnostics = diagnostics,
                 quality = quality,
+                rideInsights = rideInsights,
+                inspectedProfilePoint = inspectedProfilePoint,
+                inspectedMapPoint = inspectedMapPoint,
+                onProfilePointSelected = { point ->
+                    inspectedProfilePosition = point.position
+                },
                 processedExportAvailable = processedExportAvailable,
                 healthLogAvailable = healthLogAvailable,
                 stravaConnection = stravaConnection,
@@ -321,6 +354,7 @@ private fun ActivityDetailContent(
                     mode = effectiveTrackMode,
                     rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     fusedColor = MaterialTheme.colorScheme.primary,
+                    inspectedPoint = inspectedMapPoint,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -397,6 +431,10 @@ private fun ActivityDetailsSheet(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
+    rideInsights: ActivityRideInsights?,
+    inspectedProfilePoint: RideProfilePoint?,
+    inspectedMapPoint: MapTrackPoint?,
+    onProfilePointSelected: (RideProfilePoint) -> Unit,
     processedExportAvailable: Boolean,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
@@ -480,7 +518,26 @@ private fun ActivityDetailsSheet(
                     .padding(horizontal = NakvaliSpacing.xLarge),
             ) {
                 NakvaliDivider(Modifier.padding(vertical = NakvaliSpacing.large))
-                ActivityMetrics(recording, analysis, quality)
+                ActivityMetrics(recording, analysis, quality, rideInsights)
+                rideInsights?.profile
+                    ?.takeIf { it.points.size >= 2 }
+                    ?.let { profile ->
+                        ActivityElevationProfile(
+                            profile = profile,
+                            selected = inspectedProfilePoint,
+                            selectedTrackPoint = inspectedMapPoint,
+                            onSelected = onProfilePointSelected,
+                            modifier = Modifier.padding(top = NakvaliSpacing.xLarge),
+                        )
+                    }
+                analysis
+                    ?.takeIf { it.airtimeWindows.isNotEmpty() }
+                    ?.let { rideAnalysis ->
+                        AirtimeMetrics(
+                            analysis = rideAnalysis,
+                            modifier = Modifier.padding(top = NakvaliSpacing.xLarge),
+                        )
+                    }
                 // Hidden until the canonical artifact provides real numbers,
                 // so a computing or legacy artifact never flashes wrong data.
                 quality?.let {
@@ -953,6 +1010,7 @@ private fun ActivityMetrics(
     recording: LocalRecording?,
     analysis: RideAnalysis?,
     quality: CanonicalQuality?,
+    rideInsights: ActivityRideInsights?,
 ) {
     val durationMs = recording
         ?.takeIf { it.endedAtMs > it.startedAtMs }
@@ -960,12 +1018,20 @@ private fun ActivityMetrics(
         ?: analysis?.let { it.endedAtMs - it.startedAtMs }
     val metrics = listOf(
         "Duration" to (durationMs?.let(::formatElapsed) ?: Placeholder),
+        "Moving" to (analysis?.movingTimeS
+            ?.let { formatElapsed((it * 1_000.0).toLong()) }
+            ?: Placeholder),
         "Distance" to (analysis?.let { formatDistance(it.distanceM) } ?: Placeholder),
         "Avg speed" to (analysis?.avgMovingSpeedMps?.let(::formatSpeed) ?: Placeholder),
         "Max speed" to (analysis?.maxSpeedMps?.let(::formatSpeed) ?: Placeholder),
         descentMetricLabel(quality) to
             (analysis?.let { formatDistance(it.descentM) } ?: Placeholder),
-        "Airtime" to (analysis?.let(::formatAirtime) ?: Placeholder),
+        ascentMetricLabel(quality) to
+            (analysis?.let { formatDistance(it.ascentM) } ?: Placeholder),
+        "Low point" to
+            (rideInsights?.profile?.minAltitudeM?.let(::formatAltitude) ?: Placeholder),
+        "High point" to
+            (rideInsights?.profile?.maxAltitudeM?.let(::formatAltitude) ?: Placeholder),
     )
     Column(verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large)) {
         metrics.chunked(3).forEach { row ->
@@ -977,6 +1043,37 @@ private fun ActivityMetrics(
                     NakvaliMetric(value = value, label = label, modifier = Modifier.weight(1f))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AirtimeMetrics(analysis: RideAnalysis, modifier: Modifier = Modifier) {
+    val longestMs = analysis.airtimeWindows.maxOfOrNull { it.durationMs } ?: 0L
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+    ) {
+        NakvaliSectionLabel("Jumps")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+        ) {
+            NakvaliMetric(
+                value = analysis.airtimeWindows.size.toString(),
+                label = "Detected",
+                modifier = Modifier.weight(1f),
+            )
+            NakvaliMetric(
+                value = formatAirDuration(analysis.airtimeTotalMs),
+                label = "Total air",
+                modifier = Modifier.weight(1f),
+            )
+            NakvaliMetric(
+                value = formatAirDuration(longestMs),
+                label = "Longest",
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
@@ -1012,11 +1109,10 @@ private fun formatDistance(meters: Double): String = when {
 
 private fun formatSpeed(mps: Double): String = String.format(Locale.US, "%.1f km/h", mps * 3.6)
 
-private fun formatAirtime(analysis: RideAnalysis): String {
-    val jumps = analysis.airtimeWindows.size
-    if (jumps == 0) return "0"
-    return String.format(Locale.US, "%.1f s × %d", analysis.airtimeTotalMs / 1000.0, jumps)
-}
+private fun formatAltitude(meters: Double): String = String.format(Locale.US, "%.0f m", meters)
+
+private fun formatAirDuration(milliseconds: Long): String =
+    String.format(Locale.US, "%.1f s", milliseconds.coerceAtLeast(0L) / 1_000.0)
 
 @Preview(name = "Activity detail · no track", widthDp = 412, heightDp = 760)
 @Composable
@@ -1035,6 +1131,7 @@ private fun ActivityDetailContentPreview() {
             analysis = null,
             diagnostics = DiagnosticTrackState.Unavailable,
             quality = null,
+            rideInsights = null,
             bikes = emptyList(),
             healthLogAvailable = true,
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),

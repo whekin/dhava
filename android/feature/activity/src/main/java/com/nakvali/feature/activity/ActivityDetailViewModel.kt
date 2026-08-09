@@ -20,9 +20,12 @@ import com.nakvali.core.recording.RecordLine
 import com.nakvali.core.recording.RecordingRepository
 import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.rawGpsPoints
+import com.nakvali.core.recording.toCanonicalTrack
 import com.nakvali.core.recording.toRecordingReplay
 import com.nakvali.core.recording.toRideAnalysis
+import com.nakvali.fusion.CanonicalTrackPoint
 import com.nakvali.fusion.RideAnalysis
+import com.nakvali.fusion.RideProfile
 import com.nakvali.fusion.RecordingReplay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +62,12 @@ sealed interface DiagnosticTrackState {
     data object Unavailable : DiagnosticTrackState
     data class Loaded(val replay: RecordingReplay) : DiagnosticTrackState
 }
+
+/** Rust-authored elevation story and the exact finalized track behind it. */
+data class ActivityRideInsights(
+    val profile: RideProfile,
+    val track: List<CanonicalTrackPoint>,
+)
 
 /** What the share menu can produce; the mime type drives the share intent. */
 enum class ActivityExportKind(val mimeType: String) {
@@ -106,6 +115,14 @@ class ActivityDetailViewModel(
      */
     private val _quality = MutableStateFlow<CanonicalQuality?>(null)
     val quality: StateFlow<CanonicalQuality?> = _quality.asStateFlow()
+
+    /**
+     * Pause-aware elevation/gradient profile for the detail sheet. Null means
+     * that no canonical finalized track exists; the UI never invents a profile
+     * from raw GPS points.
+     */
+    private val _rideInsights = MutableStateFlow<ActivityRideInsights?>(null)
+    val rideInsights: StateFlow<ActivityRideInsights?> = _rideInsights.asStateFlow()
 
     @Volatile
     private var canonicalArtifact: CanonicalActivityArtifact? = null
@@ -264,6 +281,25 @@ class ActivityDetailViewModel(
             if (artifact != null) {
                 canonicalArtifact = artifact
                 _quality.value = artifact.quality
+                val finalizedTrack = artifact.finalizedTrack.toCanonicalTrack()
+                _rideInsights.value = finalizedTrack
+                    .takeIf { it.size >= 2 }
+                    ?.let { track ->
+                        runCatching {
+                            ActivityRideInsights(
+                                profile = FusionCore.rideProfile(track),
+                                track = track,
+                            )
+                        }
+                            .onFailure {
+                                Log.w(
+                                    "ActivityDetail",
+                                    "ride profile failed for $recordingId",
+                                    it,
+                                )
+                            }
+                            .getOrNull()
+                    }
                 val points = artifact.rawGpsPoints()
                 _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
                 _analysis.value = artifact.toRideAnalysis()

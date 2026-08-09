@@ -60,6 +60,9 @@ private const val START_IMAGE_ID = "track-start-image"
 private const val FINISH_SOURCE_ID = "track-finish-source"
 private const val FINISH_LAYER_ID = "track-finish-layer"
 private const val FINISH_IMAGE_ID = "track-finish-image"
+private const val INSPECT_SOURCE_ID = "track-inspect-source"
+private const val INSPECT_CASING_LAYER_ID = "track-inspect-casing-layer"
+private const val INSPECT_LAYER_ID = "track-inspect-layer"
 private const val MARKER_SIZE_PX = 48
 private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 15.0
@@ -89,6 +92,8 @@ internal data class MapTrackPoint(
     val timestampMs: Long = 0L,
     val activityState: ActivityState? = null,
     val activityConfidence: Double? = null,
+    val altitudeM: Double? = null,
+    val speedMps: Double? = null,
 )
 
 internal data class SemanticLineRun(
@@ -110,6 +115,7 @@ internal fun TrackMap(
     mode: TrackMode,
     rawColor: Color,
     fusedColor: Color,
+    inspectedPoint: MapTrackPoint? = null,
     modifier: Modifier = Modifier,
 ) {
     val mapView = rememberNakvaliMapView()
@@ -119,6 +125,7 @@ internal fun TrackMap(
     val overlayBottomPx = with(LocalDensity.current) { 240.dp.roundToPx() }
     val mapChromeMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     val currentMode = rememberUpdatedState(mode)
+    val currentInspectedPoint = rememberUpdatedState(inspectedPoint)
     AndroidView(factory = { mapView }, modifier = modifier)
 
     LaunchedEffect(
@@ -262,6 +269,24 @@ internal fun TrackMap(
                         PropertyFactory.circleStrokeWidth(2.5f),
                     ),
                 )
+                style.addSource(GeoJsonSource(INSPECT_SOURCE_ID).also { source ->
+                    source.setPointOrEmpty(currentInspectedPoint.value)
+                })
+                style.addLayer(
+                    CircleLayer(INSPECT_CASING_LAYER_ID, INSPECT_SOURCE_ID).withProperties(
+                        PropertyFactory.circleColor(palette.roadCasing),
+                        PropertyFactory.circleRadius(10f),
+                        PropertyFactory.circleOpacity(0.96f),
+                    ),
+                )
+                style.addLayer(
+                    CircleLayer(INSPECT_LAYER_ID, INSPECT_SOURCE_ID).withProperties(
+                        PropertyFactory.circleColor(palette.label),
+                        PropertyFactory.circleRadius(6f),
+                        PropertyFactory.circleStrokeColor(fusedColor.toArgb()),
+                        PropertyFactory.circleStrokeWidth(2.5f),
+                    ),
+                )
                 style.addImage(START_IMAGE_ID, createStartMarker(palette))
                 style.addImage(FINISH_IMAGE_ID, createFinishMarker(palette))
                 style.addSource(GeoJsonSource(START_SOURCE_ID))
@@ -292,6 +317,14 @@ internal fun TrackMap(
                 applyMode(style, mode, rawPoints, fusedPoints)
                 fitCamera(map, cameraBoundsPoints(mode, rawPoints, fusedPoints))
             }
+        }
+    }
+
+    LaunchedEffect(mapView, inspectedPoint) {
+        mapView.getMapAsync { map ->
+            map.style
+                ?.getSourceAs<GeoJsonSource>(INSPECT_SOURCE_ID)
+                ?.setPointOrEmpty(inspectedPoint)
         }
     }
 }

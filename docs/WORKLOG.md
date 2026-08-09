@@ -2056,3 +2056,30 @@ Verified Android resource processing and `:app:assembleDebug`, installed the APK
 in-place update on OnePlus `49b5d08f`, and inspected the icon in the app-drawer search
 result with the device's monochrome icon theming active. The mark remained centered
 and legible; existing app data was not removed.
+
+## 2026-08-09 — Post-ride elevation instrument and richer ride data
+
+Brought up the new Galaxy S25 (`SM-S931B`, Android 16) and confirmed its Bosch BMP5
+continuous pressure sensor advertises 1–12.5 Hz with a 10,000-event FIFO. Nakvali's
+existing 10 Hz barometer request is therefore appropriate; no device-specific sampling
+override was added.
+
+Activity Detail now reuses Rust's canonical, pause-aware `ride_profile` instead of
+leaving that data visible only in the segment editor. The expanded sheet shows elapsed
+and moving time separately, ascent as well as descent, low/high elevation, and a
+dedicated detected-jumps row with total and longest airtime. GPS-only elevation keeps
+the honest `Net climb` / `Net drop` terminology.
+
+Added a compact interactive elevation/gradient profile. Horizontal scrubbing reports
+distance, elevation, gradient, speed and classified activity state, while highlighting
+the exact corresponding finalized-track sample on the map. The chart preserves manual
+pause and recording-gap breaks and performs no ride geometry or fusion calculations in
+Kotlin. Empty/legacy activities simply omit the profile instead of fabricating data.
+
+Verified focused Activity tests, full debug lint and APK assembly, and a signed release
+build. The release APK was installed in place on the Galaxy S25 without clearing app
+data and launched without a fatal exception. The phone is intentionally still awaiting
+the rider's foreground/background location and notification grants. Full visual
+calibration of the graph and pressure-derived elevation awaits the first two real S25
+shuttle recordings; state-duration/downhill-only summaries and live barometric fields
+remain separate Rust work.

@@ -72,6 +72,18 @@ class ActivityQualityTest {
         assertEquals("Descent", descentMetricLabel(null))
     }
 
+    @Test fun `GPS elevation labels ascent as net climb`() {
+        assertEquals(
+            "Net climb",
+            ascentMetricLabel(quality(source = CanonicalElevationSource.GPS_INTERPOLATED)),
+        )
+        assertEquals(
+            "Ascent",
+            ascentMetricLabel(quality(source = CanonicalElevationSource.BAROMETRIC)),
+        )
+        assertEquals("Ascent", ascentMetricLabel(null))
+    }
+
     private fun quality(
         source: CanonicalElevationSource = CanonicalElevationSource.GPS_INTERPOLATED,
         medianAccuracyM: Double? = 4.0,
