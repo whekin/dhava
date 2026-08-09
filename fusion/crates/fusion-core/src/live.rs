@@ -63,6 +63,7 @@ struct State {
     gps_motion_hold_until_ms: i64,
     last_gps_fix: Option<HorizontalFix>,
     still_gps_anchor: Option<HorizontalFix>,
+    gps_motion_candidate: Option<HorizontalFix>,
     gps_stop_anchor: Option<HorizontalFix>,
     gps_stop_rearm_anchor: Option<HorizontalFix>,
     horizontal_reseat_pending: bool,
@@ -90,6 +91,7 @@ impl LiveFusion {
                 gps_motion_hold_until_ms: i64::MIN,
                 last_gps_fix: None,
                 still_gps_anchor: None,
+                gps_motion_candidate: None,
                 gps_stop_anchor: None,
                 gps_stop_rearm_anchor: None,
                 horizontal_reseat_pending: false,
@@ -117,6 +119,7 @@ impl LiveFusion {
             s.calm_since_ms = None;
             s.motion_since_ms = None;
             s.stationary = false;
+            s.gps_motion_candidate = None;
             s.gps_stop_anchor = None;
             s.gps_stop_rearm_anchor = None;
             if let Some(ekf) = &mut s.ekf {
@@ -164,6 +167,7 @@ impl LiveFusion {
                 if gps_reports_motion || timestamp_ms - since >= EXIT_STILL_MS {
                     s.stationary = false;
                     s.still_gps_anchor = None;
+                    s.gps_motion_candidate = None;
                 }
             }
         } else {
@@ -263,12 +267,49 @@ impl LiveFusion {
         // stationary OnePlus reported up to 2.8 m/s. Earth-relative position
         // displacement beyond the accuracy radius is the corroboration that
         // distinguishes a smooth bus from a drifting chair.
-        let gps_reports_motion = !gps_stop_active
+        let gps_motion_evidence = !gps_stop_active
             && (stop_anchor_moved
                 || rearm_anchor_moved
                 || derived_velocity.is_some_and(|velocity| {
                     velocity[0].hypot(velocity[1]) >= GPS_DERIVED_MOVING_SPEED_MPS
                 }));
+        // A calm phone plus one displaced fix is still ambiguous: in field
+        // tests that exact combination drew 10–20 m flowers while the phone
+        // moved only centimetres. Require a second fix that continues away
+        // from the STILL anchor before earth-relative GPS may release ZUPT.
+        // Real motion is delayed by at most one GPS interval, and the bounded
+        // post-pass restores the causally hidden departure anchors.
+        let gps_motion_confirmed = if s.stationary && gps_motion_evidence {
+            match (
+                s.still_gps_anchor.or(s.last_gps_fix),
+                s.gps_motion_candidate,
+            ) {
+                (Some(anchor), Some(candidate)) => {
+                    confirms_continuing_gps_motion(anchor, candidate, current_fix)
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        let gps_reports_motion = gps_motion_evidence && (!s.stationary || gps_motion_confirmed);
+        if s.stationary {
+            if gps_reports_motion || !gps_motion_evidence {
+                s.gps_motion_candidate = None;
+            } else {
+                s.gps_motion_candidate = match s.gps_motion_candidate {
+                    Some(candidate)
+                        if gps_fix_distance(candidate, current_fix)
+                            < candidate.accuracy_m.min(current_fix.accuracy_m).max(3.0) =>
+                    {
+                        Some(candidate)
+                    }
+                    _ => Some(current_fix),
+                };
+            }
+        } else {
+            s.gps_motion_candidate = None;
+        }
         let gps_released_stationary = gps_reports_motion && s.stationary;
         if gps_stop_started {
             s.gps_stop_anchor = Some(current_fix);
@@ -449,6 +490,7 @@ impl LiveFusion {
         state.gps_motion_hold_until_ms = i64::MIN;
         state.last_gps_fix = None;
         state.still_gps_anchor = None;
+        state.gps_motion_candidate = None;
         state.gps_stop_anchor = None;
         state.gps_stop_rearm_anchor = None;
         state.horizontal_reseat_pending = state.ekf.is_some();
@@ -460,6 +502,39 @@ impl LiveFusion {
 
 fn norm(v: [f64; 3]) -> f64 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+fn gps_fix_distance(from: HorizontalFix, to: HorizontalFix) -> f64 {
+    let en = project(to.lat, to.lon, from.lat, from.lon);
+    en[0].hypot(en[1])
+}
+
+fn confirms_continuing_gps_motion(
+    anchor: HorizontalFix,
+    candidate: HorizontalFix,
+    current: HorizontalFix,
+) -> bool {
+    let dt_s = (current.timestamp_ms - candidate.timestamp_ms) as f64 / 1_000.0;
+    if !(0.2..=5.0).contains(&dt_s) {
+        return false;
+    }
+    let candidate_en = project(candidate.lat, candidate.lon, anchor.lat, anchor.lon);
+    let current_en = project(current.lat, current.lon, anchor.lat, anchor.lon);
+    let continuation = [
+        current_en[0] - candidate_en[0],
+        current_en[1] - candidate_en[1],
+    ];
+    let continuation_m = continuation[0].hypot(continuation[1]);
+    let minimum_progress_m = candidate
+        .accuracy_m
+        .min(current.accuracy_m)
+        .mul_add(0.25, 1.0)
+        .clamp(2.0, 4.0);
+    let forward_progress = candidate_en[0] * continuation[0] + candidate_en[1] * continuation[1];
+    continuation_m >= minimum_progress_m
+        && forward_progress > 0.0
+        && current_en[0].hypot(current_en[1])
+            >= candidate_en[0].hypot(candidate_en[1]) + minimum_progress_m * 0.5
 }
 
 fn velocity_en(speed: Option<f64>, bearing: Option<f64>) -> Option<[f64; 2]> {
@@ -635,21 +710,40 @@ mod tests {
         for i in 0..100 {
             fusion.push_imu(i * 10, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
         }
-        // One fix with a high reported speed is not enough: stationary GPS
-        // speed was proven false on this device. The second displaced fix is.
+        // Reported speed and one displaced fix are both insufficient because
+        // stationary phones have produced each. Two consecutive displaced
+        // fixes in the same direction prove earth-relative motion.
         assert!(
             fusion
                 .push_gps(1_000, 41.7, 44.8, None, Some(4.0), Some(10.0), Some(90.0))
                 .is_some_and(|snapshot| snapshot.stationary)
         );
-        for i in 101..300 {
+        for i in 101..200 {
+            fusion.push_imu(i * 10, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+        }
+        let longitude_at = |east_m: f64| {
+            44.8 + (east_m / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees()
+        };
+        let candidate = fusion
+            .push_gps(
+                2_000,
+                41.7,
+                longitude_at(12.0),
+                None,
+                Some(4.0),
+                Some(10.0),
+                Some(90.0),
+            )
+            .unwrap();
+        assert!(candidate.stationary);
+        for i in 201..300 {
             fusion.push_imu(i * 10, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
         }
         let moving = fusion
             .push_gps(
                 3_000,
                 41.7,
-                44.80024,
+                longitude_at(24.0),
                 None,
                 Some(4.0),
                 Some(10.0),
@@ -686,6 +780,75 @@ mod tests {
         assert!(jittered.stationary);
         assert_eq!(jittered.lat, first.lat);
         assert_eq!(jittered.lon, first.lon);
+    }
+
+    #[test]
+    fn one_displaced_fix_cannot_release_a_calm_stationary_phone() {
+        let fusion = LiveFusion::new();
+        for timestamp_ms in (0..=1_500).step_by(20) {
+            fusion.push_imu(timestamp_ms, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+        }
+        let first = fusion
+            .push_gps(1_500, 41.7, 44.8, None, Some(8.0), Some(2.8), Some(90.0))
+            .unwrap();
+
+        for timestamp_ms in (1_520..=2_500).step_by(20) {
+            fusion.push_imu(timestamp_ms, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+        }
+        let jumped_lon =
+            44.8 + (12.0 / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees();
+        let jumped = fusion
+            .push_gps(
+                2_500,
+                41.7,
+                jumped_lon,
+                None,
+                Some(8.0),
+                Some(2.8),
+                Some(90.0),
+            )
+            .unwrap();
+
+        assert!(jumped.stationary);
+        assert_eq!(jumped.speed_mps, 0.0);
+        assert_eq!(jumped.lat, first.lat);
+        assert_eq!(jumped.lon, first.lon);
+    }
+
+    #[test]
+    fn alternating_large_gps_jumps_remain_at_the_still_anchor() {
+        let fusion = LiveFusion::new();
+        for timestamp_ms in (0..=1_500).step_by(20) {
+            fusion.push_imu(timestamp_ms, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+        }
+        let first = fusion
+            .push_gps(1_500, 41.7, 44.8, None, Some(8.0), Some(2.8), Some(90.0))
+            .unwrap();
+        let longitude_at = |east_m: f64| {
+            44.8 + (east_m / (EARTH_RADIUS_M * 41.7_f64.to_radians().cos())).to_degrees()
+        };
+
+        for (index, east_m) in [12.0, 0.0, -12.0, 0.0, 12.0, 0.0].into_iter().enumerate() {
+            let timestamp_ms = 2_500 + index as i64 * 1_000;
+            let imu_start = timestamp_ms - 980;
+            for imu_timestamp_ms in (imu_start..=timestamp_ms).step_by(20) {
+                fusion.push_imu(imu_timestamp_ms, vec![0.0, 0.0, GRAVITY], vec![0.0; 3]);
+            }
+            let snapshot = fusion
+                .push_gps(
+                    timestamp_ms,
+                    41.7,
+                    longitude_at(east_m),
+                    None,
+                    Some(8.0),
+                    Some(2.8),
+                    Some(if east_m < 0.0 { 270.0 } else { 90.0 }),
+                )
+                .unwrap();
+            assert!(snapshot.stationary, "jump {index} released STILL");
+            assert_eq!(snapshot.lat, first.lat);
+            assert_eq!(snapshot.lon, first.lon);
+        }
     }
 
     #[test]

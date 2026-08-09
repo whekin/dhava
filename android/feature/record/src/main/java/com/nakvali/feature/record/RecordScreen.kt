@@ -203,17 +203,18 @@ fun RecordScreen(
     DisposableEffect(Unit) { onDispose { onImmersiveChanged(false) } }
 
     Box(modifier = modifier.fillMaxSize()) {
+        val mapOverlayBottomPadding = when (state) {
+            is RecordingState.Recording -> 300.dp
+            is RecordingState.Preparing -> 260.dp
+            else -> if (interruptedRecording != null) 320.dp else 190.dp
+        }
         if (mapVisible && saveTarget == null) {
             val recordingState = state as? RecordingState.Recording
             LiveTrackMap(
                 points = recordingState?.liveTrack.orEmpty(),
                 positionAccuracyM = recordingState?.lastAccuracyM,
                 previewLocationEnabled = state is RecordingState.Idle,
-                cameraBottomPadding = when (state) {
-                    is RecordingState.Recording -> 300.dp
-                    is RecordingState.Preparing -> 260.dp
-                    else -> if (interruptedRecording != null) 320.dp else 190.dp
-                },
+                cameraBottomPadding = mapOverlayBottomPadding,
                 following = mapFollowing,
                 recenterRequest = recenterRequest,
                 onUserMovedMap = { mapFollowing = false },
@@ -234,8 +235,11 @@ fun RecordScreen(
                     recenterRequest++
                 },
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = NakvaliSpacing.large),
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = NakvaliSpacing.large,
+                        bottom = mapOverlayBottomPadding + NakvaliSpacing.medium,
+                    ),
             )
         }
 

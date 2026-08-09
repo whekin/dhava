@@ -2083,3 +2083,29 @@ the rider's foreground/background location and notification grants. Full visual
 calibration of the graph and pressure-derived elevation awaits the first two real S25
 shuttle recordings; state-duration/downhill-only summaries and live barometric fields
 remain separate Rust work.
+
+## 2026-08-09 — Recorder camera focus and stationary GPS-spike rejection
+
+Reproduced the Record map opening at world scale even after its current-position marker
+appeared. MapLibre could report an API gesture before Nakvali had applied the first
+location camera update, which disabled follow mode prematurely. The listener now ignores
+gesture cancellation until the first location has actually been focused. A focused unit
+test covers both sides of that boundary. The recenter control also moved from the visual
+middle of the map to the bottom-right working edge immediately above the state-dependent
+recording panel; it no longer floats disconnected from either the rider or the controls.
+
+Added a Rust regression matching the S25 stationary report: calm IMU, ±8 m accuracy,
+false 2.8 m/s speed and one 12 m coordinate jump. Previously that single fix released
+ZUPT and started a 2.5-second GPS-motion hold. Live fusion now keeps the stop anchor until
+a second accepted fix makes minimum forward progress away from the same anchor. Alternating
+±12 m jumps stay pinned, while a smooth sequence of two displaced fixes still releases
+motion; the delayed bounded pass retains responsibility for restoring the real departure.
+Raw inputs are unchanged and the canonical algorithm advances to `gps-bounded-0.6` so
+existing rides can be safely recomputed.
+
+Regenerated both committed Android native libraries. Verified 105 `fusion-core` unit
+tests, both forest fixtures, strict Rust clippy, all Android unit tests, debug lint and a
+signed release build. Installed the release in place on Galaxy S25 `RFCY904ZXQY` without
+clearing its rides. On the emulator, a supplied Tbilisi fix opened directly at street
+scale (`±5 m`); after a manual pan the recenter control appeared above the idle card in
+the intended lower-right position.

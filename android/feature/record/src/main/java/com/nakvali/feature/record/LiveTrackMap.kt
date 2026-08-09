@@ -160,7 +160,12 @@ internal fun LiveTrackMap(
     LaunchedEffect(mapView) {
         mapView.getMapAsync { map ->
             map.addOnCameraMoveStartedListener { reason ->
-                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                if (
+                    shouldStopFollowingForCameraGesture(
+                        isApiGesture = reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE,
+                        initialLocationApplied = initialLocationApplied.value,
+                    )
+                ) {
                     currentOnUserMovedMap.value()
                 }
             }
@@ -279,6 +284,11 @@ internal fun LiveTrackMap(
         }
     }
 }
+
+internal fun shouldStopFollowingForCameraGesture(
+    isApiGesture: Boolean,
+    initialLocationApplied: Boolean,
+): Boolean = isApiGesture && initialLocationApplied
 
 private fun MapLibreMap.applyContentPadding(
     bottomPaddingPx: Int,

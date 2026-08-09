@@ -558,3 +558,16 @@ activity results are always recomputed canonically from the raw on-device file.
   raw JSON lines to Docker Compose. The backend passes only the read-only mount path
   directly to the Admin SDK; the credential is neither a build argument nor a normal
   process environment variable and never belongs in Git.
+
+## 2026-08-09 — Calm-IMU stops require sequential GPS motion evidence
+
+- While Rust has established `STILL`, one coordinate displacement outside the stated
+  accuracy radius is not enough to release the stationary anchor. Field behavior on
+  the Galaxy S25 showed that a motionless phone can produce that exact combination,
+  including a false non-zero Android ground speed.
+- Release requires a second accepted fix that continues away from the same stationary
+  anchor. This delays live motion by at most one GPS interval; the existing bounded
+  post-pass restores the causally hidden departure anchors after motion is confirmed.
+- Raw GPS/IMU/barometer samples remain immutable. The rule affects only derived live
+  and canonical geometry and is versioned as `gps-bounded-0.6`, so old artifacts are
+  recomputed without destroying source evidence.
