@@ -628,6 +628,37 @@ class RecordingRepository private constructor(private val appContext: Context) {
     }
 
     /**
+     * Every run one ride made at any authored segment, ranked against the
+     * rider's own history and ordered as they were ridden.
+     *
+     * Each segment is matched in full rather than against this ride alone.
+     * That looks wasteful and is not: the place and the gap to a personal best
+     * are unknowable without the other rides, so the narrow pass would have to
+     * compute them anyway — and doing it this way warms the very cache the
+     * segment screen reads. The bounds prefilter keeps a segment on the far
+     * side of the country from ever touching a canonical artifact.
+     */
+    suspend fun rideSegments(recordingId: String): List<RideSegmentRun> {
+        loaded.await()
+        val segments = _segments.value
+        if (segments.isEmpty()) return emptyList()
+        val candidates = _recordings.value.filter { it.status != RecordingStatus.RECORDING }
+        if (candidates.none { it.id == recordingId }) return emptyList()
+
+        return withContext(Dispatchers.Default) {
+            segments.flatMap { segment ->
+                runCatching { segmentMatcher.results(segment, candidates) }
+                    .onFailure { error ->
+                        Log.w(LOG_TAG, "segment matching failed for ${segment.id}", error)
+                    }
+                    .getOrNull()
+                    ?.let { results -> rideRuns(segment, results, recordingId) }
+                    .orEmpty()
+            }.sortedBy { run -> run.attempt.startedAtMs }
+        }
+    }
+
+    /**
      * The lowered segment floor while developer mode is on, else null.
      *
      * Authoring a 40 m segment is not a product feature: at that length two

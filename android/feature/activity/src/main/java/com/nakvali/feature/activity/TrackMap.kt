@@ -43,6 +43,8 @@ private const val RAW_SOURCE_ID = "raw-track-source"
 private const val RAW_LAYER_ID = "raw-track-layer"
 private const val RAW_POINTS_SOURCE_ID = "raw-track-points-source"
 private const val RAW_POINTS_LAYER_ID = "raw-track-points-layer"
+private const val SEGMENT_SOURCE_ID = "segment-runs-source"
+private const val SEGMENT_LAYER_ID = "segment-runs-layer"
 private const val FUSED_SOURCE_ID = "fused-track-source"
 private const val FUSED_CASING_LAYER_ID = "fused-track-casing-layer"
 private const val FUSED_LAYER_ID = "fused-track-layer"
@@ -118,6 +120,8 @@ internal fun TrackMap(
     mode: TrackMode,
     rawColor: Color,
     fusedColor: Color,
+    segmentRuns: List<List<MapTrackPoint>> = emptyList(),
+    segmentColor: Color = Color.Unspecified,
     inspectedPoint: MapTrackPoint? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -137,6 +141,8 @@ internal fun TrackMap(
         fusedPoints,
         rawColor,
         fusedColor,
+        segmentRuns,
+        segmentColor,
         palette,
         accuracyColors,
         activityStateColors,
@@ -169,6 +175,22 @@ internal fun TrackMap(
                     GeoJsonSource(FUSED_SOURCE_ID, diagnosticLineOptions()).also { source ->
                         fusedPoints.toSemanticLineFeatureCollectionOrNull()?.let(source::setGeoJson)
                     },
+                )
+                // Segments are a highlight, not a category. The wide soft
+                // stroke goes *under* the track so the stretch reads as marked
+                // while whatever the rider was doing there still shows through
+                // in its own colour on top.
+                style.addSource(GeoJsonSource(SEGMENT_SOURCE_ID).also { source ->
+                    segmentRuns.toRunsMultiLineStringOrNull()?.let(source::setGeoJson)
+                })
+                style.addLayer(
+                    LineLayer(SEGMENT_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
+                        PropertyFactory.lineColor(segmentColor.toArgb()),
+                        PropertyFactory.lineWidth(16f),
+                        PropertyFactory.lineOpacity(0.34f),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    ),
                 )
                 style.addLayer(
                     LineLayer(FUSED_CASING_LAYER_ID, FUSED_SOURCE_ID).withProperties(
@@ -341,6 +363,17 @@ internal fun TrackMap(
                 ?.setPointOrEmpty(inspectedPoint)
         }
     }
+}
+
+/**
+ * One line per segment run. Each run is already a contiguous slice of the
+ * finalized track, so unlike the track itself it needs no pause splitting —
+ * a run that spanned a manual pause would never have been timed at all.
+ */
+private fun List<List<MapTrackPoint>>.toRunsMultiLineStringOrNull(): MultiLineString? {
+    val lines = filter { it.size >= 2 }
+        .map { run -> run.map { Point.fromLngLat(it.lon, it.lat) } }
+    return lines.takeIf { it.isNotEmpty() }?.let(MultiLineString::fromLngLats)
 }
 
 private fun List<MapTrackPoint>.toMultiLineStringOrNull(): MultiLineString? {
@@ -669,6 +702,11 @@ private fun applyMode(
             ),
         )
     }
+    style.getLayer(SEGMENT_LAYER_ID)?.setProperties(
+        PropertyFactory.visibility(
+            if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
+        ),
+    )
     style.getLayer(FUSED_CASING_LAYER_ID)?.setProperties(
         PropertyFactory.visibility(
             if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,

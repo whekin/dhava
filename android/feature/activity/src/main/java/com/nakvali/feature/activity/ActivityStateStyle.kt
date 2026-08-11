@@ -48,6 +48,19 @@ internal data class ActivityStateColors(
     val unknown: Color,
 )
 
+/**
+ * The highlight laid under a stretch that is an authored segment.
+ *
+ * Deliberately not one of the activity-state colours: a segment is not a
+ * *kind* of riding, it is a claim on a piece of trail, and it has to be
+ * readable underneath whichever state colour sits on top of it.
+ */
+@Composable
+internal fun rememberSegmentHighlightColor(): Color {
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return remember(dark) { if (dark) Color(0xFFF2B457) else Color(0xFFB2751A) }
+}
+
 @Composable
 internal fun rememberActivityStateColors(): ActivityStateColors {
     val colors = MaterialTheme.colorScheme
@@ -91,6 +104,8 @@ internal fun ActivityStateLegend(
 internal fun ActivityStateLegendContent(
     colors: ActivityStateColors,
     modifier: Modifier = Modifier,
+    /** Null when this ride crossed no authored segment, so the row is absent. */
+    segmentColor: Color? = null,
 ) {
     Column(
         modifier = modifier
@@ -146,10 +161,18 @@ internal fun ActivityStateLegendContent(
             kind = StateSampleKind.Dotted,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (segmentColor != null) {
+            StateLegendItem(
+                label = "Segment",
+                color = segmentColor,
+                kind = StateSampleKind.Highlight,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
-private enum class StateSampleKind { Solid, SolidThin, Dashed, Dotted, Stop }
+private enum class StateSampleKind { Solid, SolidThin, Dashed, Dotted, Stop, Highlight }
 
 @Composable
 private fun StateLegendItem(
@@ -165,6 +188,13 @@ private fun StateLegendItem(
         Canvas(modifier = Modifier.size(width = 24.dp, height = 16.dp)) {
             val centerY = size.height / 2f
             when (kind) {
+                StateSampleKind.Highlight -> drawLine(
+                    color = color.copy(alpha = 0.34f),
+                    start = Offset(0f, centerY),
+                    end = Offset(size.width, centerY),
+                    strokeWidth = 12.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
                 StateSampleKind.Stop -> {
                     drawCircle(
                         color = color,

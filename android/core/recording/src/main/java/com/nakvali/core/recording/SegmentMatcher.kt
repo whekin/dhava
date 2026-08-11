@@ -167,3 +167,69 @@ fun SegmentResults.attempts(): List<StoredAttempt> = rides.flatMap { it.attempts
 
 /** Every rejected gate pair of a segment across all matched rides. */
 fun SegmentResults.rejections(): List<StoredRejection> = rides.flatMap { it.rejected }
+
+/**
+ * One run at one segment, as it appears on the ride that produced it.
+ *
+ * This is the ride's point of view rather than the segment's: a lap counts
+ * once per pass, so a ride that rode the same trail three times contributes
+ * three of these.
+ */
+data class RideSegmentRun(
+    val segmentId: String,
+    val segmentName: String,
+    val attempt: StoredAttempt,
+    /**
+     * Place among every confirmed attempt the rider has on this segment, best
+     * first. Null for an uncertain attempt, which is deliberately left out of
+     * the ranking: a run the matcher is unsure about must not be able to claim
+     * a personal best.
+     */
+    val place: Int?,
+    /** How many confirmed attempts the place is out of. */
+    val confirmedAttempts: Int,
+    /**
+     * Time behind the rider's fastest confirmed attempt. Zero when this run is
+     * that attempt, null when it is not ranked.
+     */
+    val behindBestMs: Long?,
+)
+
+/**
+ * Ranks one ride's attempts at [segment] against the rider's own history.
+ *
+ * Ranking needs every attempt, not just this ride's, which is why the caller
+ * computes full segment results rather than matching this ride alone: the
+ * narrower pass would save nothing, because the place and the gap to a
+ * personal best cannot be known without the rest.
+ */
+internal fun rideRuns(
+    segment: StoredSegment,
+    results: SegmentResults,
+    recordingId: String,
+): List<RideSegmentRun> {
+    val confirmed = results.attempts()
+        .filter { it.quality == StoredAttemptQuality.GOOD }
+        .sortedBy { it.elapsedMs }
+    val best = confirmed.firstOrNull()?.elapsedMs
+
+    return results.rides
+        .asSequence()
+        .filter { it.recordingId == recordingId }
+        .flatMap { it.attempts.asSequence() }
+        .sortedBy { it.startedAtMs }
+        .map { attempt ->
+            val ranked = attempt.quality == StoredAttemptQuality.GOOD
+            RideSegmentRun(
+                segmentId = segment.id,
+                segmentName = segment.name,
+                attempt = attempt,
+                // Ties share the better place: two identical times are both
+                // "2nd", never an arbitrary winner decided by list order.
+                place = if (ranked) confirmed.count { it.elapsedMs < attempt.elapsedMs } + 1 else null,
+                confirmedAttempts = confirmed.size,
+                behindBestMs = if (ranked && best != null) attempt.elapsedMs - best else null,
+            )
+        }
+        .toList()
+}

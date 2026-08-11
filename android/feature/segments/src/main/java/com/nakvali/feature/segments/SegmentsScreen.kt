@@ -1,5 +1,6 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.SegmentFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts

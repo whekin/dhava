@@ -75,6 +75,7 @@ import com.nakvali.core.recording.CanonicalQuality
 import com.nakvali.core.recording.CanonicalRideTotals
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordingStatus
+import com.nakvali.core.recording.RideSegmentRun
 import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.StravaExportStatus
@@ -101,6 +102,7 @@ fun ActivityDetailScreen(
     recordingId: String,
     onBack: () -> Unit,
     onCreateSegment: () -> Unit = {},
+    onOpenSegment: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ActivityDetailViewModel = viewModel(
         key = "activity-detail-$recordingId",
@@ -114,6 +116,7 @@ fun ActivityDetailScreen(
     val quality by viewModel.quality.collectAsState()
     val ride by viewModel.ride.collectAsState()
     val rideInsights by viewModel.rideInsights.collectAsState()
+    val segmentRuns by viewModel.segmentRuns.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val stravaConnection by viewModel.stravaConnection.collectAsState()
@@ -142,6 +145,7 @@ fun ActivityDetailScreen(
         quality = quality,
         ride = ride,
         rideInsights = rideInsights,
+        segmentRuns = segmentRuns,
         bikes = bikes,
         healthLogAvailable = healthLogAvailable,
         stravaConnection = stravaConnection,
@@ -175,6 +179,7 @@ fun ActivityDetailScreen(
             }
         },
         onCreateSegment = onCreateSegment,
+        onOpenSegment = onOpenSegment,
         onAddBike = viewModel::addBike,
         onEditSave = viewModel::updateMetadata,
         onDelete = viewModel::deleteActivity,
@@ -215,6 +220,7 @@ private fun ActivityDetailContent(
     quality: CanonicalQuality?,
     ride: CanonicalRideTotals?,
     rideInsights: ActivityRideInsights?,
+    segmentRuns: List<RideSegmentRun>?,
     bikes: List<Bike>,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
@@ -222,6 +228,7 @@ private fun ActivityDetailContent(
     onBack: () -> Unit,
     onExport: (ActivityExportKind) -> Unit,
     onCreateSegment: () -> Unit,
+    onOpenSegment: (String) -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
     onEditSave: (title: String, description: String, bike: Bike?) -> Unit,
     onDelete: () -> Unit,
@@ -278,6 +285,23 @@ private fun ActivityDetailContent(
             )
         }
         .orEmpty()
+    // The attempt indices address the finalized track the matcher was given,
+    // which is exactly the list behind fusedPoints on this path. On the replay
+    // fallback that correspondence is not guaranteed, so nothing is drawn
+    // rather than a stretch of trail in the wrong place.
+    val segmentRunLines = if (rideInsights != null) {
+        segmentRuns.orEmpty().mapNotNull { run ->
+            val from = run.attempt.startIndex
+            val to = run.attempt.endIndex
+            if (from < 0 || to < from || to >= fusedPoints.size) {
+                null
+            } else {
+                fusedPoints.subList(from, to + 1)
+            }
+        }
+    } else {
+        emptyList()
+    }
     val inspectedProfilePoint = inspectedProfilePosition?.let { position ->
         rideInsights?.profile?.points?.minByOrNull { point -> abs(point.position - position) }
     }
@@ -286,6 +310,7 @@ private fun ActivityDetailContent(
         ?.let(fusedPoints::getOrNull)
     val accuracyColors = rememberGpsAccuracyColors()
     val activityStateColors = rememberActivityStateColors()
+    val segmentHighlightColor = rememberSegmentHighlightColor()
     val hasAccuracy = rawPoints.any { it.accuracyM?.isFinite() == true && it.accuracyM >= 0.0 }
     val hasActivityStates = fusedPoints.any { it.activityState != null }
     val effectiveTrackMode = if (fusedPoints.isEmpty()) TrackMode.Gps else trackMode
@@ -312,6 +337,7 @@ private fun ActivityDetailContent(
                 quality = quality,
                 ride = ride,
                 rideInsights = rideInsights,
+                segmentRuns = segmentRuns,
                 inspectedProfilePoint = inspectedProfilePoint,
                 inspectedMapPoint = inspectedMapPoint,
                 onProfilePointSelected = { point ->
@@ -322,6 +348,7 @@ private fun ActivityDetailContent(
                 stravaConnection = stravaConnection,
                 onExport = onExport,
                 onCreateSegment = onCreateSegment,
+                onOpenSegment = onOpenSegment,
                 onConnectStrava = onConnectStrava,
                 onExportStrava = onExportStrava,
                 onRetryStrava = onRetryStrava,
@@ -365,6 +392,8 @@ private fun ActivityDetailContent(
                 is TrackState.Loaded -> TrackMap(
                     rawPoints = rawPoints,
                     fusedPoints = fusedPoints,
+                    segmentRuns = segmentRunLines,
+                    segmentColor = segmentHighlightColor,
                     mode = effectiveTrackMode,
                     rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     fusedColor = MaterialTheme.colorScheme.primary,
@@ -400,6 +429,7 @@ private fun ActivityDetailContent(
                     onExpandedChange = { showMapLegend = it },
                     activityStateColors = activityStateColors,
                     accuracyColors = accuracyColors,
+                    segmentColor = segmentHighlightColor.takeIf { segmentRunLines.isNotEmpty() },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(
@@ -451,6 +481,7 @@ private fun ActivityDetailsSheet(
     quality: CanonicalQuality?,
     ride: CanonicalRideTotals?,
     rideInsights: ActivityRideInsights?,
+    segmentRuns: List<RideSegmentRun>?,
     inspectedProfilePoint: RideProfilePoint?,
     inspectedMapPoint: MapTrackPoint?,
     onProfilePointSelected: (RideProfilePoint) -> Unit,
@@ -459,6 +490,7 @@ private fun ActivityDetailsSheet(
     stravaConnection: StravaConnectionState,
     onExport: (ActivityExportKind) -> Unit,
     onCreateSegment: () -> Unit,
+    onOpenSegment: (String) -> Unit,
     onConnectStrava: () -> Unit,
     onExportStrava: () -> Unit,
     onRetryStrava: () -> Unit,
@@ -537,6 +569,13 @@ private fun ActivityDetailsSheet(
             ) {
                 NakvaliDivider(Modifier.padding(vertical = NakvaliSpacing.large))
                 ActivityMetrics(recording, analysis, ride, quality, rideInsights)
+                segmentRuns?.takeIf { it.isNotEmpty() }?.let { runs ->
+                    ActivitySegmentRuns(
+                        runs = runs,
+                        onOpenSegment = onOpenSegment,
+                        modifier = Modifier.padding(top = NakvaliSpacing.xLarge),
+                    )
+                }
                 rideInsights?.profile
                     ?.takeIf { it.points.size >= 2 }
                     ?.let { profile ->
@@ -872,6 +911,7 @@ private fun MapLegendControl(
     onExpandedChange: (Boolean) -> Unit,
     activityStateColors: ActivityStateColors,
     accuracyColors: GpsAccuracyColors,
+    segmentColor: Color?,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -923,6 +963,7 @@ private fun MapLegendControl(
                     MapLegendSection.ActivityState -> ActivityStateLegendContent(
                         colors = activityStateColors,
                         modifier = Modifier.fillMaxWidth(),
+                        segmentColor = segmentColor,
                     )
                     MapLegendSection.GpsAccuracy -> GpsAccuracyLegendContent(
                         colors = accuracyColors,
@@ -1266,6 +1307,7 @@ private fun ActivityDetailContentPreview() {
             quality = null,
             ride = null,
             rideInsights = null,
+            segmentRuns = emptyList(),
             bikes = emptyList(),
             healthLogAvailable = true,
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),
@@ -1273,6 +1315,7 @@ private fun ActivityDetailContentPreview() {
             onBack = {},
             onExport = { _ -> },
             onCreateSegment = {},
+            onOpenSegment = {},
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
             onEditSave = { _, _, _ -> },
             onDelete = {},

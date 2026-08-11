@@ -1,5 +1,6 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.SegmentFormat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown

@@ -1,4 +1,4 @@
-package com.nakvali.feature.segments
+package com.nakvali.core.ui
 
 import java.util.Locale
 import kotlin.math.abs

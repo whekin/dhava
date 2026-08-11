@@ -1,5 +1,6 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.SegmentFormat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement

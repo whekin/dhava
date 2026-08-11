@@ -1,4 +1,4 @@
-package com.nakvali.feature.segments
+package com.nakvali.core.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

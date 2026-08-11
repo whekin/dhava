@@ -186,6 +186,7 @@ fun NakvaliApp(
                     recordingId = recordingId,
                     onBack = { navController.popBackStack() },
                     onCreateSegment = { navController.navigate("segment-editor/$recordingId") },
+                    onOpenSegment = { id -> navController.navigate("segment/$id") },
                 )
             }
             composable(

@@ -19,6 +19,7 @@ import com.nakvali.core.recording.GpxTrackPoint
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordLine
 import com.nakvali.core.recording.RecordingRepository
+import com.nakvali.core.recording.RideSegmentRun
 import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.rawGpsPoints
 import com.nakvali.core.recording.toCanonicalTrack
@@ -132,6 +133,14 @@ class ActivityDetailViewModel(
      */
     private val _rideInsights = MutableStateFlow<ActivityRideInsights?>(null)
     val rideInsights: StateFlow<ActivityRideInsights?> = _rideInsights.asStateFlow()
+
+    /**
+     * Segment runs this ride produced, ordered as they were ridden. Null while
+     * matching is still going: the section renders nothing rather than an empty
+     * one, so "no segments here" is never claimed before it is known.
+     */
+    private val _segmentRuns = MutableStateFlow<List<RideSegmentRun>?>(null)
+    val segmentRuns: StateFlow<List<RideSegmentRun>?> = _segmentRuns.asStateFlow()
 
     @Volatile
     private var canonicalArtifact: CanonicalActivityArtifact? = null
@@ -283,6 +292,13 @@ class ActivityDetailViewModel(
     }
 
     init {
+        // Matching runs on its own coroutine: it can touch several canonical
+        // artifacts, and the map and the numbers must not wait behind it.
+        viewModelScope.launch(Dispatchers.IO) {
+            _segmentRuns.value = runCatching { repository.rideSegments(recordingId) }
+                .onFailure { Log.w("ActivityDetail", "segment runs failed for $recordingId", it) }
+                .getOrDefault(emptyList())
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val rawFile = repository.recordingFile(recordingId)
             val path = rawFile.absolutePath
