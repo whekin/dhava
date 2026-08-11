@@ -15,11 +15,11 @@ targetSdk = "36"
 minSdk = "26"
 
 # AndroidX
-androidxAnnotation = "1.8.2"
-coreKtx = "1.16.0"
-lifecycleRuntimeKtx = "2.9.2"
-activityCompose = "1.10.1"
-composeBom = "2025.10.01"
+androidxAnnotation = "1.10.0"
+coreKtx = "1.19.0"
+lifecycleRuntimeKtx = "2.11.0"
+activityCompose = "1.13.0"
+composeBom = "2026.06.01"
 # 1.4.0 stable made MaterialExpressiveTheme internal; the 1.5 alphas expose it
 # again behind @ExperimentalMaterial3ExpressiveApi.
 # Carries the BottomSheet motion fix (b/452071842), which landed in alpha16: sheets now
@@ -28,23 +28,23 @@ composeBom = "2025.10.01"
 # Pinned at alpha18 rather than newer: alpha21 deprecates the sheet state APIs this app
 # uses in favour of a unified rememberBottomSheetState, which is its own migration.
 material3 = "1.5.0-alpha18"
-navigationCompose = "2.9.0"
+navigationCompose = "2.9.8"
 
 # Recording stack
-kotlinxSerialization = "1.9.0"
-kotlinxCoroutines = "1.10.2"
-playServicesLocation = "21.3.0"
+kotlinxSerialization = "1.11.0"
+kotlinxCoroutines = "1.11.0"
+playServicesLocation = "21.4.0"
 okhttp = "4.12.0"
-workManager = "2.10.1"
+workManager = "2.11.2"
 
 # Identity
 googleServices = "4.5.0"
 firebaseBom = "34.17.0"
-credentials = "1.3.0"
+credentials = "1.6.0"
 googleId = "1.1.1"
 
 # Fusion core FFI (UniFFI-generated bindings load libfusion_core.so via JNA)
-jna = "5.17.0"
+jna = "5.19.1"
 junit = "4.13.2"
 
 # Map rendering (activity detail)
