@@ -49,6 +49,10 @@ _Avoid_: Duplicate segment, same segment
 The riding difficulty of a segment on the colour scale riders already read off trail signage, and the only meaning a segment's colour carries.
 _Avoid_: Segment colour, rating, quality
 
+**External trail reference**:
+An attributed provider and web link from a segment to a separate trail catalog or community resource. It adds context but is never authoritative segment geometry or timing evidence.
+_Avoid_: Imported trail, segment source, canonical trail page
+
 **Segment library**:
 The rider-facing collection of locally authored and downloaded segments currently available for offline browsing and timing.
 _Avoid_: Segment feed, global catalog

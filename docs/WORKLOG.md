@@ -2109,3 +2109,785 @@ signed release build. Installed the release in place on Galaxy S25 `RFCY904ZXQY`
 clearing its rides. On the emulator, a supplied Tbilisi fix opened directly at street
 scale (`±5 m`); after a manual pan the recenter control appeared above the idle card in
 the intended lower-right position.
+
+## 2026-08-09 — Saved-activity affordance and account-card polish
+
+Fixed an offline-state mismatch in Activities. Saving metadata in the default offline
+mode deliberately leaves the lifecycle status as `RECORDED`, so the list must use
+`savedAtMs == null`—not the status alone—to decide whether the unfinished `Save` action
+is needed. Saved offline rides now show the existing `LOCAL` status; finalized but
+genuinely unsaved/recovered recordings still retain `Save`. Added focused unit coverage
+for unsaved, saved-local, queued and uploaded states.
+
+Reworked the signed-in account card after inspecting it on the Galaxy S25. The trailing
+`VERIFIED` pill had reduced the identity column enough to wrap both a normal two-word
+name and `stanislavkalishin@gmail.com`. The card now groups the avatar, single-line name
+and textual `Google account · Verified` state, then gives the email its own full-width,
+single-line row with ellipsis as a last-resort boundary. The real account renders without
+wrapping and with substantially clearer hierarchy.
+
+Verified all Android unit tests and debug lint, produced a signed release APK, installed
+it in place on S25 `RFCY904ZXQY`, and inspected both Activities and Profile against the
+device's real local rides and signed-in account. No application data was cleared.
+
+Settings is no longer a fifth top-level destination. Profile now owns a compact,
+always-available Settings entry, while the recorder/backup/storage screen is pushed as
+a nested destination with an explicit accessible back action and no bottom navigation.
+This leaves the primary bar focused on Record, Activities, Segments and Profile and
+gives each label more room. Verified the complete Profile → Settings → Profile flow and
+screen hierarchy on the emulator; the same signed release was installed in place on the
+S25, which was locked during the final interaction check.
+
+## 2026-08-09 — First cross-screen visual consistency pass
+
+Audited the four top-level destinations plus nested Settings as one product on the
+427 dp emulator. The highest-impact rough edges were inconsistent empty states,
+missing hierarchy on the empty segment library, duplicated Settings headings and an
+oversized signed-out account pitch.
+
+`NakvaliEmptyState` now owns a quiet primary-container icon treatment and an optional
+action slot. Empty Activities and Segments place that state in the same strong panel
+directly below a standard screen header. Activities can jump straight to Record;
+Segments can choose a saved ride through Activities or import GPX as a secondary
+action. Both top-level navigation transitions retain the existing tab state rules.
+
+The signed-out Profile card now uses the same compact identity hierarchy as the
+signed-in account instead of a centered onboarding poster, and avoids repeating its
+offline guarantee below the Settings entry. Nested Settings uses one concise back
+header and description rather than presenting both `Settings` and `Field kit` as
+competing titles.
+
+Verified the rendered dark-theme states, Profile → Settings → Profile, empty
+Activities → Record and empty Segments → Activities on the emulator. Full Android
+unit tests and `lintDebug` pass. Installed the signed release in place on Galaxy S25
+`RFCY904ZXQY` without clearing local rides.
+
+## 2026-08-09 — Rider profile and local bike garage
+
+Reframed Profile from an authentication utility into the rider's durable home. Account
+identity and backend sync now share one compact card, long real-world email addresses
+stay on one line, and Sign out is a quiet footer action below Settings with an explicit
+reminder that local rides and bikes remain on the phone. Signed-out riders keep the same
+screen structure instead of losing access to local features.
+
+Added the existing offline bike store to Profile as a first garage UI. Riders can add a
+bike, see its type, and select the active bike for the next save; the active state is
+both colored and labelled. The repository now persists explicit bike selection through
+the existing `last_used_id`, makes a newly added Profile bike active atomically, and
+repairs missing or stale legacy selections by choosing the first stored bike. No server
+model, fake profile data or migration was introduced.
+
+Verified empty and populated garage states plus the add-bike dialog on the emulator.
+Inspected the signed-in account, real Capra bike, Settings and Sign out placement on
+Galaxy S25 `RFCY904ZXQY`. Full Android unit tests and `lintDebug` pass; the signed release
+APK was installed in place on both devices without clearing local rides.
+
+Continued the consistency pass through the real populated Activities state. Bare rows
+and dividers became bounded ride cards; internal raw-file sizes were removed from the
+primary scan path. A finalized recording without metadata is now named `Unfinished ride`
+with a direct `Finish` action, while date, duration and bike are separated into readable
+metadata lines. Both recovered and ordinarily unfinished recordings contribute to the
+header's attention count. Rechecked the two real S25 entries and installed the final
+signed release in place without clearing data.
+
+## 2026-08-09 — Activity summary hierarchy and hidden developer tools
+
+Reworked the saved Activity sheet around progressive disclosure. Distance is now the
+dominant result, moving time and descent form the secondary summary, and average/max
+speed share one bounded comparison surface. Total duration, ascent and elevation range
+remain available under `More ride details` instead of competing in the old nine-cell
+grid. Jumps, elevation profile and recording quality keep their existing dedicated
+sections. The expanded details use two columns plus a full-width elevation row so real
+four-digit mountain elevations remain legible on a phone.
+
+Made the canonical fused track the normal Activity presentation and moved raw track
+comparison behind an app-wide developer mode. Seven taps on the real build number in
+Settings unlock Developer tools; GPS/Fusion/Compare, live sensor diagnostics and the
+keep-awake field option are only exposed while it is enabled. Fusion remains the
+default even in developer mode. Recorder preferences now use one shared key contract
+instead of duplicating string constants across app and feature modules.
+
+Verified both modes on Galaxy S25 `RFCY904ZXQY`: the normal Activity has no diagnostic
+selector, the unlocked mode restores all three choices with Fusion selected, and the
+new collapsed and expanded metric layouts render without truncation. Full Android unit
+tests and `lintDebug` pass. Built and installed the signed release in place without
+clearing the two local rides or account data.
+
+## 2026-08-09 — Trail-green product palette
+
+Replaced the dirt-orange brand accent with a vivid fern/trail green across the shared
+Material scheme, canonical tracks, controls, charts, navigation state and adaptive
+launcher foreground. The warm carbon/soil surfaces remain, preserving Nakvali's field
+instrument character while removing the strongest visual overlap with Strava. Both
+dark and light primary/on-primary pairs meet strong text contrast; dynamic color stays
+disabled by default.
+
+Kept the base map deliberately neutral and earthy instead of deriving major-road color
+from the new green primary container, so the canonical track stays visible over city
+and forest geometry. Accurate GPS points now use a cool mint before transitioning
+through yellow, gold and rejected red; this preserves clear point/line separation in
+Compare after Fusion became green. Updated the durable design and map-presentation
+decisions to match the new identity.
+
+Built a signed release, installed it in place on Galaxy S25 `RFCY904ZXQY`, and inspected
+the Activity summary plus developer Compare with real local data. Green actions remain
+high-contrast, mint GPS fixes remain readable above the track, and no app data was
+cleared. Developer mode was disabled again after verification.
+
+## 2026-08-09 — Cross-ride downhill candidate map
+
+Moved the first step of segment authoring out of an individual Activity and into the
+segment library. `Find descents` now scans every finalized local ride, asks Rust for all
+downhill spans, filters weak GPS seeds and already-covered selections, groups repeated
+same-direction passes, and presents the remaining places as selectable lines over one
+map with a persistent details sheet. A selected proposal opens the existing editor at
+its exact continuous start and finish positions, so the rider still reviews and can
+fine-tune both gates before anything is saved. GPX import remains available beside the
+new discovery entry point.
+
+Changed Rust descent proposal continuity so a real stationary trail stop can remain
+inside one candidate when canonical displacement stays within 12 m. Manual pause,
+recording gaps, motorized evidence and a `STILL` interval that actually travels still
+split candidates. Added regression coverage for both a held stop and a moving interval
+mislabelled as still, then regenerated the committed Android UniFFI libraries.
+
+Validated the complete flow on Galaxy S25 using the app's real backup/restore path. A
+verified 90 MB format-v1 archive from OnePlus merged three raw rides without replacing
+the S25's existing local data. The first discovery pass produced 20 candidates across
+four usable finished rides; leading seeds reported GPS accuracy p90 of 3 m and rendered
+as separate selectable trails on the map. Opening a 1.19 km / −11.0% candidate retained
+that exact continuous range in the editor instead of falling back to the source ride's
+longest descent. Android unit/lint/assemble, all 106 Rust unit tests, forest fixtures and
+Clippy pass; the signed release with regenerated arm64/x86_64 libraries is installed on
+the S25.
+
+Field review made the original 200 m proposal floor too permissive: the restored rides
+produced 20 separate candidates, including 200–250 m fragments whose timing would be
+dominated by gate placement. Raised the Rust-owned discovery minimum to 300 m; this is
+only a proposal filter and does not mutate raw rides or previously authored segments.
+
+## 2026-08-09 — Planned GoPro telemetry enrichment
+
+Added a future roadmap item for enriching a phone-recorded ride from overlapping GoPro
+video metadata. The intended first experiment is GPS-only: match video by time, extract
+GPMF locally, measure clock offset/drift and combine it as a separately quality-scored
+observation rather than averaging two tracks blindly. Camera IMU is a later experiment,
+conditional on demonstrating an actual improvement.
+
+The likely implementation seam is a shared Rust parser/enrichment module. Android can
+read a user-selected GoPro folder from an attached SD card; a later Chromium/PWA tool
+can reuse the parser through WebAssembly on macOS, Windows and Linux. Browser folder
+access remains explicit and cannot silently discover an inserted card, so a native
+desktop shell is deferred unless automatic import becomes important. Videos remain
+local, while imported telemetry retains source and algorithm provenance alongside the
+immutable phone recording for reversible recomputation.
+
+## 2026-08-09 — Trail references and alternate-line hypothesis
+
+Recorded a future product hypothesis without committing it to the current segment
+domain model. A segment may expose attributed links to Trailforks or another trail
+resource through provider/id/URL references, giving riders richer context without
+turning Nakvali into a duplicate trail catalog.
+
+Main and chicken lines may eventually appear as one rider-facing family while remaining
+separate timed variants with their own leaderboards. This is not a combo: combo segments
+join sequential trails, whereas line variants are mutually exclusive paths between a
+shared entry and exit. Rust could classify the line from trusted branch geometry, but
+only when the recording and its uncertainty distinguish the corridors; otherwise the
+attempt must remain explicitly ambiguous rather than being assigned to the faster or
+more prestigious line. Difficulty and feature annotations remain optional,
+source-attributed ideas pending real use cases and a durable trail-versus-segment model.
+
+## 2026-08-09 — Minimal segment trail context
+
+Implemented the smallest useful part of the trail-context idea without expanding the
+Rust timing model. `StoredSegment` now carries an optional difficulty grade and a
+backward-compatible list of attributed external web links. Creation and `Edit details`
+support unrated/green/blue/red/black/double-black plus one Trailforks or other public
+trail URL. URLs are normalized to HTTPS when the scheme is omitted, restricted to web
+schemes and labelled from their provider; metadata edits preserve geometry and cached
+results.
+
+The segment library draws graded lines in their trail colour and pairs every card colour
+with a text label. A saved segment detail repeats that colour on the map and in a compact
+Trail details panel, where the attributed source opens externally. Unrated and legacy
+segments retain the primary Nakvali green and deserialize with empty metadata. Main and
+chicken line families remain deliberately deferred rather than being flattened into a
+boolean feature flag.
+
+Added persistence compatibility, round-trip and URL-normalization tests. All Android
+unit tests, segment/app debug lint and debug assembly pass. The signed release was
+installed over the existing Galaxy S25 app without clearing its restored rides; a real
+2.39 km candidate was temporarily saved as a blue segment with a Trailforks link for
+visual validation. Removing that temporary segment through the normal flow is pending
+the phone being unlocked after the final release installation.
+
+## 2026-08-09 — Live ride totals on the recorder
+
+The recording screen showed speed, ride time and the pause control, so the rider had no
+way to read the ride itself before Finish. Rust now accumulates distance and descent
+inside live fusion and reports both on every `LiveSnapshot`; Kotlin only carries the
+numbers. Descent deliberately accumulates from the accepted GPS altitude series rather
+than the EKF vertical state — the vertical channel is slow by design and reported barely
+a third of a synthetic 290 m drop while the rider would still be on the trail. The
+accumulators are the canonical ones (1 m anchor filter, 2 m hysteresis over a 5-sample
+median), so the live number and the finalized activity measure the same quantity; live
+stays provisional because its filter is causal and canonical runs the bounded post-pass.
+
+Totals survive a manual pause without counting the transit across it: the anchors and
+the median window are cleared on a section restart while the totals themselves are kept.
+Continuing an interrupted ride restores them from the raw file through a new
+`live_totals_from_recording`, which reuses the analysis accumulators without the IMU
+airtime pass; seeding is additive so metres ridden while the file is being read are not
+discarded. Ride time already survived a process restart, so the totals beside it had to.
+
+The recording panel now shows distance and descent under speed and ride time, and the
+foreground notification replaces its reassurance line with `8.2 km · −612 m` as soon as
+the ride has moved — a rider who stops can read the ride from the shade without
+unlocking. All 112 Rust tests, Clippy, Android unit tests, `lintDebug` and debug assembly
+pass; the committed arm64/x86_64 libraries were regenerated. Field verification on the
+Galaxy S25 is pending.
+
+Live segment timings — the run you just rode, its delta and whether it was a PR, on the
+screen and in the notification — remain open. `VISION.md` already carries the idea and
+the local PR half needs no server, but `match_segment` consumes a finalized canonical
+track, so live feedback needs a streaming gate matcher in Rust that reuses the same gate
+geometry rather than a second timing implementation.
+
+## 2026-08-10 — Live segment timing on the trail
+
+Segment feedback now happens where it matters: on the trail, not at upload time.
+`fusion-core` gained `live_segment.rs`, a streaming tracker that arms every local
+segment and times gate crossings against the live fused track. It is the live half of
+canonical matching rather than a parallel one — gates, direction tolerance, corridor,
+backtrack allowance and coverage binning are imported from `segment.rs`, and the shared
+coverage bin rule was factored out so neither side can drift. A run ends on the same
+evidence canonical rejects an attempt for: leaving the corridor, turning back, a manual
+pause or a recording gap between the gates, or reaching the finish without covering the
+segment.
+
+Live results are provisional and say so. Live fusion is causal, canonical runs the
+bounded post-pass, so nothing live is persisted as an attempt; the segment screens
+re-match the finished ride and that result stands. The tracker consumes fused positions
+rather than raw fixes, so the live clock, the live map and the canonical result describe
+the same track.
+
+Segments are armed at Start from their cached results, with no re-match — the rider does
+not wait for one — and a cache written by an older algorithm, match or geometry version
+arms with no record rather than a stale best. A run finished during the ride becomes the
+time to beat for the next lap in the same ride, so a second run down the same trail is
+compared against the first.
+
+The recording panel shows the segment being ridden with a running clock, then the run
+just finished with its delta and a record highlight, with the ride's earlier runs behind
+a tap. The foreground notification puts the newest run on its collapsed line and moves
+distance/descent to the expanded one, so a rider who stops reads the run from the shade.
+Gate feedback is a direct vibration — one tick entering, two leaving, three for a record
+— never an extra notification, and `Segment vibration` in Settings turns it off.
+
+118 Rust tests including five new live-matching cases, Clippy, `cargo fmt`, Android unit
+tests, `lintDebug` and debug assembly pass; the committed arm64/x86_64 libraries were
+regenerated. Field verification on the Galaxy S25 is pending — in particular whether the
+gate haptics are distinguishable through a jacket and whether provisional times match
+the canonical ones on real repeated runs.
+
+## 2026-08-10 — Battery: attention-scaled live work and transport power save
+
+Audited what the recorder actually computes with the screen off. Three findings, all
+fixed. The live track was rebuilt as a whole list on every GPS fix — up to 10 800
+elements once per second, for a phone locked in a pocket — and is now a ring that is
+only copied into an immutable snapshot while a screen is up. The state flow was pushed
+four times a second to nobody; with no UI it now ticks once a second, which is what the
+notification needs anyway. Live segment matching walked every armed segment's whole
+centerline on every fix; a padded box per segment now dismisses the ones the rider is
+nowhere near, and the padding covers the corridor and both gates so the fast path
+cannot skip a possible crossing. A run in progress is never skipped.
+
+Transport detection was failing in the middle of exactly the legs it exists for. The
+post-ride classifier only accepted vehicle evidence above 25 km/h with a climb or
+36 km/h with smooth IMU, and a shuttle on a switchback fire road reaches neither, so
+laps came back as fragments of `LikelyMotorized` in a sea of `Transit`. Rate of climb is
+now evidence by itself: 0.6 m/s sustained is beyond any rider — elite road climbing tops
+out near 0.5 m/s and a mountain bike is well below — while a shuttle climbs at 1.5–4 m/s.
+Motorized runs are also bridged across non-descending interruptions up to 90 s with
+vehicle evidence required on both sides, so a traffic light or a flat kilometre no longer
+splits one bus ride, while a descent between two lifts still ends the span.
+
+Live fusion gained the same rule as a causal hint, and Android follows it into reduced
+sampling: GPS to a 5 s balanced fix, IMU to 25 Hz, both by re-registering rather than by
+gating writes — the accelerometer waking the CPU 200 times a second is the cost that
+matters. Entering needs 45 s of vehicle-rate climb with smooth motion; a descent, trail
+roughness, a 45 s stop or a manual pause leaves immediately. The state is shown as a
+`Transport · saving power` pill on the recording panel and in the notification, never
+silently. `Save power in transport` in Settings disables it for field tests.
+
+126 Rust tests including eight new classifier and hint cases, Clippy, `cargo fmt`,
+Android unit tests, `lintDebug` and debug assembly pass; committed arm64/x86_64
+libraries regenerated.
+
+Open: the thresholds are argued from physiology and synthetic tracks, not yet from this
+rider's own data. The last ride has two climbs — a shuttle and a bus — and validating
+0.6 m/s, the 90 s bridge and the live hint's enter/exit latency against that raw file is
+the next step. The release build is not debuggable, so the file has to come out through
+Settings → Backup rather than `run-as`.
+
+## 2026-08-10 — Congestion, Android activity recognition, and map hierarchy
+
+Extended the transport work after field feedback. The fixed 90-second bridge could not
+cover congestion: a bus crawling and stopping for several minutes produces neither the
+speed nor the rate of climb that identifies a vehicle, so a city leg still arrived as
+fragments. A vehicle span now absorbs up to 15 minutes of interruption when the motion
+stays vehicle-smooth and the gap is stop-and-go rather than one long stop. Waiting at the
+bottom for the next shuttle remains STILL, and pushing the bike between two lifts is
+never absorbed — both are covered by tests.
+
+Added Android's own activity recognition as an input to the live power decision. It
+answers the one question the ride cannot on flat ground, and it costs almost nothing
+because it runs on the sensor hub. Rust owns the meaning: Android forwards the
+transition, `LiveFusion` decides. Writing the first version exposed a real bug — after a
+descent ended power saving, the platform's stale vehicle hint switched it straight back
+on for the whole run. Our own evidence now vetoes entry as well as forcing exit. The
+permission is optional; declining it leaves the recorder exactly as it was. Transitions
+are also written as `activity:*` event lines for later analysis, and `proto/` documents
+that classification must stay reproducible without them.
+
+Reworked the activity map after a screenshot of a shuttle day: filled cream stop disks
+larger than the trail, drawn at every traffic light, with transit and transport competing
+with the descents for attention. Descents are now the loudest thing on the map, transit
+is thin and dimmed, a likely vehicle is barely visible, and stops are small hollow rings
+sized over a much narrower range. Stillness shorter than 15 s is no longer marked at all,
+and stillness with vehicle evidence on both sides is treated as part of the transport
+line rather than as a rider's stop.
+
+132 Rust tests, Clippy, `cargo fmt`, Android unit tests, `lintDebug` and debug assembly
+pass; committed arm64/x86_64 libraries regenerated.
+
+Not done yet: ridden segments are not drawn on the activity map. The map has no data path
+for "which segments were ridden in this recording" — `segmentResults` is per segment and
+would have to be inverted per activity — and tapping a highlighted segment needs a
+navigation route from Activity into Segment detail.
+
+## 2026-08-10 — Ride statistics exclude transport
+
+The activity summary counted the shuttle. Rust now computes `RideTotals` from the
+finalized classified track with `LikelyMotorized` spans removed — distance, moving time,
+ascent, descent, max and average speed — reusing the same accumulators as the
+whole-recording analysis, with separate distance anchors for the ride and transport
+streams so a lap and the shuttle after it never share one. A pair counts as transport
+when either end is motorized, so boundaries are never credited to the rider; `STILL` and
+`UNKNOWN` stay with the ride because a stop mid-lap is part of that lap.
+
+The excluded part is reported rather than dropped: the activity screen shows
+`Not counted · 12.4 km · 00:31:02 by transport` under the summary. `RideAnalysis` keeps
+its whole-recording meaning for export and diagnostics. Canonical artifact schema is v4;
+older artifacts rebuild, and until they do the screen falls back to the old numbers
+instead of showing blanks.
+
+133 Rust tests, Clippy, `cargo fmt`, Android unit tests, `lintDebug` and debug assembly
+pass; committed arm64/x86_64 libraries regenerated.
+
+## 2026-08-10 — A shuttle leg is one leg
+
+Field feedback: a serpentine has dips and flat shelves, and every one of them was
+splitting the transport span — worse, the dip was then credited to the rider as a
+descent. The rule that a descent always breaks a vehicle span was wrong.
+
+The bridge no longer asks whether a gap looks like a vehicle; it asks whether the gap
+contains riding. Vehicle-smooth motion never does. Rough motion counts as riding only
+when it also does something a walk cannot: give up 30 m of height, or hold a speed above
+2.5 m/s for a meaningful share of the gap. The height test carries the weight, because a
+slow technical descent is ridden at walking pace and must never be folded into a lift.
+
+This follows the rider's own model: a shuttle leg is one leg. Nobody gets out mid-
+transfer, rides down, and gets back in — at most they walk, to a gate or between vans.
+Walking between two vehicle spans is therefore part of the transfer now, and the test
+that used to assert the opposite was inverted deliberately. A new test guards the case
+that actually matters: a 60 m descent ridden at 2 m/s between two lifts stays a ride.
+
+The live hint learned the same distinction. A descent used to end power saving outright,
+which made it flap all the way up a switchback road. Now a rough descent ends it at once
+— that is a rider — while a smooth one has to give up 40 m from the highest point
+recently reached before it counts as leaving the mountain.
+
+136 Rust tests, Clippy, `cargo fmt`, Android unit tests and debug assembly pass;
+committed arm64/x86_64 libraries regenerated. The signed release from before these two
+fixes is on the Galaxy S25; it needs reinstalling to carry them.
+
+## 2026-08-10 — Segment length floor raised to 300 m
+
+Manual authoring accepted 50 m while discovery required 300 m — two floors for the same
+question. Authoring now uses 300 m as well, and `propose_segment` with it, so the editor
+cannot open on a default selection it would refuse to save.
+
+The limit stays owned by Rust: the three build entry points take an optional minimum and
+clamp it into `[40 m, 300 m]`. Developer mode passes the lower bound so gate behaviour —
+entry and finish haptics, the live clock — can be validated on a stretch next to the
+house rather than on a mountain; nothing else can lower it, and nothing can raise it.
+
+Geometry fixtures in the tests are a couple of hundred metres and now pass an explicit
+test floor, which is honest: they exercise gates and corridors, not the length rule. The
+floor itself gained its own test, including that 200 m is rejected in production and
+accepted with a developer floor.
+
+137 Rust tests, Clippy, `cargo fmt`, Android unit tests, `lintDebug` and debug assembly
+pass; committed arm64/x86_64 libraries regenerated.
+
+## 2026-08-10 — Segment editor: dragged gates, precision, undo, stale candidates
+
+Field feedback on the editor produced one real defect and three gaps.
+
+Dragging a gate marker on the map moved the marker and left the segment behind. The map
+line, the trimmer handles and the preview all key off positions along the track, while
+`setGateCenter` only moved the authored gate centre, so nothing that keys off positions
+recomputed. A dragged gate now projects onto the track through a new Rust
+`nearest_track_position`, and the position follows the finger while the authored centre
+still stays exactly where it was dropped — the two are deliberately independent, but they
+are no longer allowed to disagree about which part of the ride is selected.
+
+Precision was not lost by accident: the two-thumb range slider was replaced by the
+profile trimmer, and both the map-zoom sensitivity and the long-press fine mode went with
+it, with the domain pinch left as the only precision. All three are back and they
+compose. The chart domain is the coarse control; the map's zoom now refines finger
+travel again, because a rider zoomed in on a gate is working at that scale; grabbing a
+handle while looking at the whole ride narrows the axis around it; and holding a handle
+still before moving drops into a fifth-speed fine mode with a haptic. Scaling the finger
+is safe in this instrument — the slider's habit of re-anchoring to the value fed back to
+it, which squared any scaling, is exactly what the direct trimmer does not do.
+
+Added an undo stack for gate placement, pushed when a handle is grabbed rather than when
+it is released: the state at the start of a gesture is what the rider wants back, and a
+drag emits hundreds of intermediate positions that must never each become a step. Bounded
+to 20; the button only appears once there is something to take back.
+
+Fixed the discovery screen offering a segment that had just been authored. `scan()` ran
+only in `init`, so the covered-by-existing filter compared against a snapshot of the
+segments taken before the new one existed. The scan now repeats whenever the local
+segment list changes.
+
+138 Rust tests, Clippy, `cargo fmt`, Android unit tests, `lintDebug` and assembly pass;
+the signed release is installed on the S25 (pid 25393, clean logcat, data preserved).
+
+## 2026-08-10 — Field feedback: developer floor, gate haptics, dismissable run card
+
+First real segment authored and timed on a 300 m stretch. Three things came back.
+
+The developer-mode floor was unreachable. `createSegment` passed the lowered 40 m limit,
+but the editor's preview asked Rust with the production floor, so a short selection was
+rejected before the save path could ever apply the lower one. The preview now uses the
+same floor the save will — a preview that answers a different question than the action it
+previews is worse than no preview.
+
+Gate haptics read as notifications. They are now shaped rather than merely timed: paired
+timings and amplitudes, with entry left as a single light tick so it cannot distract
+mid-run, a firm double beat for a finish, and a rising three-beat ending in a long swell
+for a record. Devices without amplitude control still get the rhythm.
+
+The finished-run card could not be dismissed and sat on the map. A finished run is news,
+not furniture: it can now be dismissed per run, leaving a one-line `N runs this ride`
+button, and the next run announces itself again. A run in progress is never dismissable —
+that card is a live clock.
+
+Noted but not changed: an asphalt ride classified as transport. The rider called it fair.
+It is the smooth-motion rule doing what it is designed to do, and tightening it needs
+real data on both sides rather than a threshold nudge.
+
+138 Rust tests, Android unit tests, `lintDebug` and assembly pass; signed release
+installed on the S25.
+
+## 2026-08-11 — Gate haptics with a rhythm, and a metal detector for the finish
+
+Reworked the segment haptics from durations into shapes the rider can name. A run starts
+with two revs — each hit at full amplitude and allowed to fall away — and ends with a
+"ta-dam": a short upbeat, the long beat, and a fade. A record is the same shape earned
+twice over. Devices without amplitude control still get the rhythm.
+
+Added an approach countdown. Inside the last 150 m of a run the recorder ticks, and the
+ticks crowd together as the gate comes up, so a sprint can be timed without looking at
+the phone. Rust reports the distance left along the centreline on every accepted fix —
+the same arclength the corridor test already computes, and what the rider actually still
+has to ride rather than a straight line to the gate. Android carries that forward at the
+current speed between fixes so the rhythm tightens smoothly instead of stepping once a
+second, and the interval shortens with the square of closeness so the last metres tighten
+sharply. The countdown stops the moment the run finishes or ends, and obeys the same
+`Segment vibration` setting.
+
+139 Rust tests, Clippy, `cargo fmt`, Android unit tests, `lintDebug` and assembly pass;
+signed release installed on the S25 (pid 11879, clean logcat).
+
+## 2026-08-11 — Editor gestures, honest profile scaling, and a recording sheet
+
+Four things from using the editor for real.
+
+Grabbing a gate collapsed the axis instantly. Auto-focus was firing on the grab, which
+yanked the chart out from under a finger that had asked for nothing yet; it now belongs
+to the deliberate hold, alongside the fine sensitivity. A plain grab leaves the view
+exactly where the rider put it.
+
+Handles sat on the screen edge, where the system's back gesture owns the strip, so
+reaching for a gate left the editor. The chart is inset from both edges and claims the
+remaining strip back with `systemGestureExclusion`. Dragging into the edge zone now pans
+the axis instead of stopping: the handle rides along with it at just over half a visible
+span per second, fast enough to cross a ride and slow enough to release on the metre the
+rider wanted.
+
+A smooth asphalt road with a gentle grade drew as a pump track. Both profile charts
+scaled to whatever range the data contained, with a floor of one metre, so a few metres
+of GPS and barometer noise were magnified to full height. The range is now held to a
+25 m floor with the data centred inside it — gentle ground reads as gentle, and real
+relief still fills the chart because it exceeds the floor.
+
+The recorder moved from a fixed panel to a bottom sheet. The map is the instrument the
+rider is actually reading and must never be traded away for the run list: the peek keeps
+status, both metric rows and the controls, and pulling up reveals this ride's segment
+runs over a map that stays visible. Camera padding follows the resting height.
+
+Android unit tests, `lintDebug` and assembly pass; signed release installed on the S25
+(pid 24071, clean logcat).
+
+## 2026-08-11 — Precision is scale, not a slowed finger
+
+Removed the fine-mode finger scaling added a day earlier. It contradicted the trimmer's
+own design note — "precision is a property of the axis, never of a scaled finger delta" —
+and the field showed exactly why: with the delta cut to a fifth and the axis narrowed at
+the same moment, the gate felt stuck, and a large movement against a shrunken delta
+arrived as a jump.
+
+Holding a handle now closes in instead. The axis narrows to 60 m of trail around the
+gate, and the map animates down to a gate close-up where a metre is a visible distance;
+letting go returns the rider to the framing they had chosen, which the editor tracks
+separately so its own close-up can never become the view it restores to. The finger stays
+one to one with the axis throughout.
+
+Gate dragging on the map is now a nudge tool: the marker follows only within 10 m of
+where the drag began. Beyond that the rider means a different part of the ride, and that
+belongs to the trimmer where the whole track is visible.
+
+Android unit tests, `lintDebug` and assembly pass; signed release installed on the S25
+(pid 26719, clean logcat).
+
+## 2026-08-11 — Editor polish: held zooms, names with a shape, signage difficulty
+
+A hold is one action with a beginning and an end, so releasing it now returns both zooms
+— the chart axis and the map camera — to what the rider had. The zoom toggle button was
+kept despite being a candidate for removal: it is the only way to frame the whole ride on
+the map, which pinching the chart cannot do.
+
+Segment names are held to a shape rather than accepted as free text, and the rule is
+explained while typing rather than saved up for the moment Save is pressed. A name needs
+at least one letter, keeps digits as separate words ("Ridge 2", never "Ridge2"), uses one
+alphabet, and allows only letters, digits, spaces and hyphens. Spaces are collapsed and
+the first letter capitalized as the rider types, so what they see is what is stored. The
+default name is gone: "<ride> segment" was a name that always had to be deleted first.
+
+Difficulty is now trail signage — one row of marks with circles for green, blue and red,
+a diamond for black and two for double black, and only the chosen one spends a word.
+
+Fixed the editor sheet not scrolling when fully expanded. The body was split into a fixed
+header and a weighted scroll column, which left the details with a viewport the size of
+their own content — nothing to scroll anywhere except inside the name field. The whole
+body is one scroll container now; the trimmer only claims horizontal drags, so vertical
+ones belong to the scroll everywhere.
+
+Rust and Android unit tests, `lintDebug` and assembly pass; signed release installed on
+the S25 (pid 32407, clean logcat).
+
+## 2026-08-11 — Elevation: one impulse, not roughness
+
+A flat asphalt road was charting as a pumptrack — a 2 m road reading 13 m of relief with a
+spurious 11 m dip. The working hypothesis, the rider's and mine, was that the IMU could
+arbitrate: calm accelerometer means smooth ground, so the barometer must be misbehaving.
+That design was built and then dropped, because the rider's exported recordings say it is
+wrong. Flat asphalt reads 1.4–7.9 m/s² of typical accelerometer error; real forest
+singletrack reads 2.1–7.6. The accelerometer is measuring the phone shaking in its mount,
+not the ground, and it cannot separate the two surfaces at all.
+
+Reading the asphalt trace directly showed what was really there. For sixty seconds the
+barometer and the GPS altitude agree to within a metre on a gentle descent — the road the
+rider described. Then, in the last two seconds, the pressure drops twelve metres and comes
+back: the phone leaving its mount at the end of the run. One impulse, not roughness.
+
+So the filter is narrow. A pressure sample is compared with the median of the ±2 s around
+it and replaced only when it disagrees by more than 3 m — the most a rider can gain or
+lose against where they were two seconds ago, drops included. Everything else passes
+through exactly as measured, which matters: a plain running median cost 1.3 m off the
+crest of a synthetic 10 m roller, and that would have been paid at every real feature.
+Airtime suspends the test, since being airborne is the one honest way to outrun it.
+
+Separately, the baro-vs-GPS offset now gets a ±30 s median measured in time rather than in
+fixes. It is a weather field and belongs on a weather timescale, and this also stops the
+fix rate — which the power-saving profiles change — from changing the filter's strength.
+
+Measured against the rider's three exported recordings, before and after:
+
+| recording | relief before | after | ascent before | after |
+|---|---|---|---|---|
+| Road near home, 61 s asphalt | 13.3 m | 4.6 m | 13.0 m | 2.9 m |
+| Test, 50 min | 29.6 m | 25.3 m | 835 m | 537 m |
+| Kojoring with Misho, 6.4 h | 1028 m | 1024 m | 5893 m | 5026 m |
+
+`motion_samples` still moved out of `activity.rs` into a shared `motion` module; the
+vehicle classifier is now its only caller.
+
+Field check on the S25 showed the impulse was gone and the road was still drawn as a hairy
+line, so a second pass was added ahead of the first: a ±0.5 s mean over the pressure. The
+jitter it removes is a few tenths of a metre with a period under a second, which no ground
+produces — the smallest real feature a rider rides, a roller or a compression, takes a
+couple of seconds and passes a window this narrow essentially untouched. Airtime exempts
+both passes.
+
+Totals across the rider's three recordings, unfiltered → impulses rejected → hash removed:
+
+| recording | ascent | | | descent | | |
+|---|---|---|---|---|---|---|
+| Road near home, 61 s asphalt | 13.0 | 2.9 | **0.0** | 15.3 | 4.4 | **2.0** |
+| Test, 50 min | 835 | 537 | **138** | 825 | 528 | **129** |
+| Kojoring with Misho, 6.4 h | 5893 | 5026 | **2865** | 5897 | 5032 | **2869** |
+
+The asphalt road now reports no climb at all and two metres of descent, which is the ride
+the rider described. `Test` still carries 138 m across a 24 m range — better by a factor of
+six, and what is left is the barometer wandering by a metre or two, the same size as a real
+roller. Separating those needs a second opinion on absolute height, which is the honest
+case for a DEM.
+
+144 Rust tests, clippy and the Android build pass; bindings regenerated. Algorithm version
+`gps-bounded-0.7`.
+
+## 2026-08-11 — Uploads switched off, shuttle legs joined
+
+Uploads are off behind one constant. The server has raw uploads disabled, so every save
+queued a job that could only fail, and the UPLOAD FAILED badge on every activity described
+the deployment rather than anything the rider did. `UploadWorker` and `ActivityUploader`
+are left whole and unreferenced — turning the constant back on is the whole change when the
+endpoint is live. Activities already carrying a queued or failed status are settled to
+RECORDED on load, since both meant the same thing once uploads stopped: saved on the device
+and nowhere else.
+
+A shuttle leg was still arriving broken. Between two confirmed vehicle spans, the flat
+shelves of a serpentine were being handed back to the rider, and the reason was the speed
+test inside `contains_riding`: it asks whether motion is faster than walking, which was
+built to separate riding from pushing a bike, and a van holding 20 km/h through a switchback
+answers yes. So an interruption that gains height is no longer readable as riding. A rider
+who gets out gets out to ride, and riding goes down — which the existing drop test already
+catches. On the Kojori recording two climbs that arrived as 516 s + 576 s and 450 s now come
+through as single spans of 1259 s / 786 m and 813 s / 302 m.
+
+144 Rust tests, clippy, Android unit tests and the release build pass; installed on the S25.
+
+Still open: the bottom sheet's invisible scroll inertia, which deleting `SheetScroll.kt`
+did not fix, so that diagnosis was incomplete.
+
+## 2026-08-12 — Version bump the previous two changes needed, and net-loss riding
+
+The road at the rider's house still charted as a hairy line after the smoothing landed,
+and the reason was mine: `ALGORITHM_VERSION` was bumped for the first elevation change and
+then left alone through two more — the mean pass and the shuttle rule. The store checks
+that string to decide whether a cached artifact is stale, so it kept serving the old one
+and neither change reached a single existing activity. Now `gps-bounded-0.8`.
+
+The remaining green on the shuttle road was real descent: a serpentine gives up height
+between switchbacks, and `contains_riding` was reading the gross figure, so every dip past
+30 m became a run. It now takes the net. A rider who gets out to ride does not come back up
+to the same height to continue the transfer — they leave, and the interruption ends
+hundreds of metres lower; a road that dips forty and takes them straight back ends level.
+Anything ending level or higher is the shuttle continuing and no longer reaches the speed
+test at all.
+
+On the Kojori recording the two shuttle legs now arrive as single spans of 1575 s / +833 m
+and 2094 s / +981 m, and the descents left are the real runs (−146 to −167 m each).
+
+144 Rust tests, clippy and the release build pass; installed on the S25.
+
+## 2026-08-12 — Pressure mean widened to ±1.5 s, measured against the cost
+
+The road at the house was smoother but still moving, so the mean was swept over the rider's
+own recordings rather than guessed at again:
+
+| half-window | tarmac jitter, m/sample | tarmac ascent | 6.4 h shuttle day, ascent |
+|---|---|---|---|
+| ±0.5 s | 0.0222 | 2.0 m | 2574 m |
+| ±1.0 s | 0.0148 | 0.0 m | 2452 m |
+| **±1.5 s** | **0.0114** | **0.0 m** | **2364 m** |
+| ±2.0 s | 0.0102 | 0.0 m | 2335 m |
+| ±3.0 s | 0.0094 | 0.0 m | 2312 m |
+
+±1.5 s halves the residual jitter for 8% of the long day's accumulated total, and past it
+the jitter barely moves while the totals keep falling — so that is where the width sits.
+The 8% is mostly the same wander seen from the other side, but it is a real cost and is
+recorded here rather than claimed away. `gps-bounded-0.9`.
+
+## 2026-08-12 — Shuttle legs stop being cut into pieces
+
+Closing the tail left from yesterday: a descent inside the Kojori shuttle climb that kept
+being read as a run.
+
+**First, the debugging tool was lying.** Yesterday's rule was reverted as "does not fire"
+on the evidence that its `eprintln` produced nothing. It did fire — `rtk` filters `cargo
+test` output down to a summary, so every diagnostic print was being swallowed. Running the
+probe through `rtk proxy cargo test` showed the whole picture immediately. Worth
+remembering: **any instrumentation of a Rust test must go through `rtk proxy`.**
+
+With that, the shuttle leg read out clearly:
+
+```
+t+5711  LikelyMotorized 1574s +833m
+t+7285  Transit          29s   -2m
+t+7315  Downhill         36s  -35m   <- road dip
+t+7357  LikelyMotorized 373s +121m
+t+7741  Downhill        108s  -80m   <- road dip
+t+7852  LikelyMotorized 220s  +64m
+t+8114  Still           373s         <- waiting for the pickup
+t+8629  Downhill        148s -166m   <- a real run
+```
+
+Two dips, not one. The discriminator is time, not shape — see DECISIONS. A gap between two
+vehicle spans shorter than 240 s cannot contain a ride. Across the whole 6.4 h recording
+this changed exactly one leg and nothing else:
+
+| | before | after |
+|---|---|---|
+| shuttle leg | 3 spans, 1574+373+220 s | one span, 2362 s / +904 m |
+| ride descent | 2413 m | 2296 m |
+| ride max speed | 20.9 m/s (the van) | 16.9 m/s |
+
+**A bigger bug fell out of checking the arithmetic.** The distance did not add up: 193 s of
+reclassified points cannot move 9 km. `ride_totals` never cleared a stream's 1 m anchor
+when the other stream took over, so every shuttle handed the ride a phantom straight line
+across its own climb. Ride distance for that day was 54 km; it is 30 km. Verified on all
+five backed-up recordings.
+
+Both changes are behind `gps-bounded-0.10`, installed on the S25 as a release build (the
+phone already carried a release-signed `0.1.0-test1`, so a debug APK cannot replace it —
+use `:app:assembleRelease`).
+
+Still open: the bottom sheet needs a moment to "cool down" before it scrolls. Could not be
+reproduced this session — the phone was locked and the screen is where the bug lives. The
+deleted `SheetScroll.kt` (a fling-velocity boundary) is confirmed gone with no references
+left, and the elevation chart only consumes *horizontal* drags, so neither is the cause.
+
+## 2026-08-12 — Bottom-sheet nested-scroll regression updated out
+
+The sheet's two-to-three-second "cool down" after a fast expansion matches AndroidX
+`b/452071842`: Material 3's hardcoded bottom-sheet motion made nested-scroll/fling
+handoffs overly stiff. Nakvali was pinned to `material3 1.5.0-alpha09`; AndroidX shipped
+the fix in **`1.5.0-alpha16`** — "BottomSheet components now respect
+`MaterialTheme.motionScheme` during nested scroll and drag gestures". The pin is
+`alpha18` because alpha21 replaces the sheet state APIs this app uses with a unified
+`rememberBottomSheetState`, which is a separate migration. No feature-level gesture
+interceptor or delay was added. `BottomSheetScaffold` remains the correct persistent
+sheet for the map-led screens, and both `verticalScroll` and lazy lists already
+participate in Compose nested scrolling.
+
+All Android debug unit tests and `assembleDebug` pass. A subsequent `assembleRelease`
+also passed lint-vital and was installed in place on Galaxy S25 `RFCY904ZXQY` without
+clearing app data. The remaining check is the original fast expand followed immediately
+by a content scroll on Activity and one segment sheet.
+
+**The causal claim is not proven, and one measurement argues it is only half the story.**
+Driven from adb, the same scripted gesture — expand, then scroll the content with no
+pause — scrolled fine on the 50-minute `Test` activity and did nothing on the 6.4 h
+Kojori one. A pure gesture-handoff bug would fail on both. What reconciles them is that
+the settle is an animation: on a screen heavy enough to drop frames it takes far longer
+in wall-clock time, widening the window in which the sheet holds the gesture. So the
+version bump can be right and still leave the real cost in place — the elevation profile
+redraws its whole path inside the scrolling column every frame, 72 km of points on that
+recording. Worth measuring with `gfxinfo` before calling the sheet done.

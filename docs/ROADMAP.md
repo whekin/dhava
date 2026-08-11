@@ -56,6 +56,34 @@ skeleton and deployment scaffolding.
 - Adaptive stationary IMU disk persistence with two-second full-rate pre-roll —
   implemented locally; long physical-device validation pending
 
+## Future — External ride enrichment
+
+- Match GoPro videos to local activities by capture time and extract embedded GPMF
+  telemetry without uploading the video
+- Start with GoPro GPS as an independent, quality-scored observation; evaluate clock
+  offset/drift and measurable track improvement before adding camera IMU to fusion
+- Keep the parser and enrichment math in a shared Rust module so Android can import
+  from a user-selected SD-card folder and a later desktop Chromium/PWA tool can reuse
+  the same implementation through WebAssembly
+- Preserve phone raw data and imported telemetry with source/provenance and algorithm
+  versions so enrichment is reversible and activities can be recomputed
+- Treat browser access as explicitly user-granted folder access, not automatic SD-card
+  discovery; consider a native desktop shell only if background/card-insertion import
+  proves valuable
+
+## Future hypothesis — Alternate line variants
+
+- Explore grouping mutually exclusive lines under one rider-facing trail/segment family:
+  for example a main gap line and its chicken line share an entry and exit but remain
+  separately timed variants with separate leaderboards
+- Keep line variants distinct from combo segments: a combo joins sequential trails,
+  while a rider chooses exactly one variant through a branched section
+- Classify the ridden variant from trusted geometry only when the recorded evidence can
+  distinguish the branches; preserve an ambiguous result instead of guessing when GPS
+  uncertainty overlaps both corridors
+- Keep difficulty and feature annotations optional and source-attributed so a local
+  segment remains useful without becoming a second Trailforks-style trail database
+
 ## Phase 5 — Local segments (in progress)
 
 - Rust gate model: directed start/finish gates, corridor, coverage and progress
@@ -76,6 +104,11 @@ skeleton and deployment scaffolding.
 - Map-led segment library: one muted map of every local segment, tap to select,
   opening a segment a separate action, list in a persistent sheet, camera and
   selection retained, explicit `Fit area` and `My location` ✅
+- Cross-ride downhill discovery: one offline map/list scans every finalized
+  local ride through Rust, groups repeated passes, hides existing coverage and
+  weak-GPS seeds, then opens the normal precision editor at that exact span ✅
+- Optional trail context: difficulty-colored segment lines plus attributed links to
+  Trailforks or another web resource, editable without changing timing geometry ✅
 - Countable-only personal records: an uncertain run is never presented as a PR,
   and a faster uncountable run is shown with why it does not count ✅
 - Draft-only geometry: no GPS correction, no centerline averaging yet ✅

@@ -72,7 +72,7 @@ activity results are always recomputed canonically from the raw on-device file.
   controls, but ride controls, panels, metrics, headers, status pills, spacing, shapes
   and palette must remain coherent through the shared layer.
 - The visual direction is a dark-first downhill field instrument: map-led recording,
-  vivid dirt-orange action/state accent, tabular live numerals, glove-sized controls,
+  vivid trail-green action/state accent, tabular live numerals, glove-sized controls,
   restrained flat activity surfaces and complete explicit recording states.
 - Hide top-level navigation during preparation, active recording, pause/save workspaces
   and pushed detail screens so chrome never competes with the ride or data-loss actions.
@@ -124,7 +124,7 @@ activity results are always recomputed canonically from the raw on-device file.
   feature overlays so OpenStreetMap and map-style credits remain accessible.
 - In Activity Detail, render raw GPS as a thin neutral line with one visible point per
   fix in `GPS` and `Compare`. In Compare, layer the raw line below the continuous
-  primary-orange fusion path, then layer raw GPS points above fusion so each actual
+  primary-green fusion path, then layer raw GPS points above fusion so each actual
   measurement remains inspectable. Apply shared high-contrast text and halo colors to
   every base-map symbol layer because upstream style layer names are not a reliable
   label classifier.
@@ -133,7 +133,7 @@ activity results are always recomputed canonically from the raw on-device file.
   that identifier but must never infer pause timing from timestamp gaps. Every section
   is a separate line, while GPS points remain visible; if replay is unavailable, prefer
   isolated fixes over a false bridge.
-- Completed tracks mark start with a green play glyph and finish with a primary-orange
+- Completed tracks mark start with a sage play glyph and finish with a vivid primary-green
   checkered flag, both inside dark-cased circular badges. Use raw endpoints in GPS mode
   and fused endpoints in Fusion/Compare when available.
 
@@ -155,11 +155,11 @@ activity results are always recomputed canonically from the raw on-device file.
   that is invented geometry. Fusion may still hold stationary position, reject bad
   fixes and maintain velocity/vertical/dynamics state.
 - In post-ride GPS/Compare diagnostics, keep the raw line neutral and color individual
-  GPS fixes continuously by their stored horizontal accuracy: good/leaf-green at 5 m
+  GPS fixes continuously by their stored horizontal accuracy: good/cool-mint at 5 m
   or better, yellow around 10 m, gold through the accepted 20 m boundary and error-red
   only above 20 m. Always show a numeric
   legend and preserve point casing/layer order so quality is not communicated by color
-  alone and GPS remains distinguishable from the primary-orange fusion line.
+  alone and GPS remains distinguishable from the primary-green fusion line.
 
 ## 2026-07-14 — Finalized horizontal fusion is delayed and GPS-bounded
 
@@ -571,3 +571,223 @@ activity results are always recomputed canonically from the raw on-device file.
 - Raw GPS/IMU/barometer samples remain immutable. The rule affects only derived live
   and canonical geometry and is versioned as `gps-bounded-0.6`, so old artifacts are
   recomputed without destroying source evidence.
+
+## 2026-08-09 — Segment authoring starts from a derived cross-ride downhill index
+
+- Discovering a segment is a library operation, not a property of whichever Activity
+  screen happened to be open. Android derives one offline candidate map from every
+  finalized local ride; selecting a candidate still opens the ordinary precision
+  editor, and discovery itself never persists or publishes a segment.
+- Rust remains the sole owner of descent boundaries and directional overlap. A manual
+  pause, recording gap or likely-motorized evidence ends a candidate. A held stationary
+  wait may bridge two downhill spans only while its canonical displacement stays within
+  12 m; a short non-descending trail link keeps the existing 8 s / 40 m bound.
+- Discovery hides seeds with GPS accuracy p90 above 25 m and selections already covered
+  at least 80% by an existing segment. Repeated passes are grouped only when directional
+  overlap reaches 80% both ways, so a short trail and its future combo/extended variant
+  remain distinct. Every pass counts as support even when several laps share one raw
+  recording.
+- A proposed downhill must be at least 300 m long. Shorter efforts are too dominated by
+  gate placement and GPS uncertainty to deserve a permanent trail-segment identity;
+  they remain visible inside their source Activity but do not enter discovery.
+- The first version uses the best seed in each group: lowest GPS p90, then greatest
+  descent/length and newest recording. This is ranking, not geometry averaging. Trusted
+  multi-pass centerlines remain a separate future step and immutable raw rides stay the
+  source for recalculation.
+
+## 2026-08-09 — Segment trail context is authored metadata, not fusion geometry
+
+- Difficulty and external trail references live in Android's durable `StoredSegment`,
+  not Rust's `SegmentDefinition`. Changing either does not move gates, change a corridor,
+  invalidate results or make an external catalog authoritative timing evidence.
+- Difficulty is optional and uses the signage-shaped green, blue, red, black and double
+  black grades. The segment library and saved detail map derive their line colour from
+  that grade; an unrated segment retains Nakvali's primary green. Text labels accompany
+  every colour.
+- External references store provider attribution with an `http` or `https` URL. The
+  first UI authors one link and recognizes common providers, while persistence is a
+  list so later sources can coexist. Old segment JSON defaults to no grade and no links.
+- Main/chicken line families and automatic branch classification remain a hypothesis.
+  They are not encoded as metadata flags in this first trail-context version.
+
+## 2026-08-10 — Live segment timing is provisional and shares canonical's rules
+
+- Live matching is a streaming half of `segment::match_segment`, not a second timing
+  implementation. `live_segment.rs` imports the gates, the direction tolerance, the
+  corridor, the backtrack allowance and the coverage bins from `segment.rs`; the shared
+  coverage binning was factored out rather than restated. A run that counts on the trail
+  therefore counts after Finish for the same reasons, and stops counting for the same
+  reasons too.
+- A live time is provisional by construction and is labelled that way. Canonical
+  matching runs the bounded post-pass over the whole ride before deciding anything;
+  live fusion is causal and cannot see the fixes that follow a gate crossing. Live
+  results are never persisted as attempts: the segment screens re-match the finished
+  ride and that result is the one that lands in the leaderboard.
+- The tracker consumes fused positions, never raw fixes, so the live map, the live clock
+  and the canonical result all describe the same track. A run may not bridge a manual
+  pause or a recording gap, matching canonical rejection of the same attempts.
+- Every local segment is armed at Start with the personal record read from its cached
+  results. Arming never triggers a re-match — the rider would wait for it — and a cache
+  from an older algorithm, match or geometry version arms with no record instead of a
+  time the current rules never produced. A run completed during the ride immediately
+  becomes the record to beat for the next lap in the same ride.
+- Gate feedback is a direct vibration, not a notification. The recording notification
+  stays the only one the recorder posts; its collapsed line carries the newest run and
+  the totals move to the expanded line. Riders can turn segment vibration off.
+
+## 2026-08-10 — Live work follows attention; transport is a power decision only
+
+- Nothing that exists to be looked at runs while no screen is up. The live track is a
+  ring appended on the sensor thread and copied into an immutable snapshot only while
+  the app is visible; the state cadence drops from ~4/s to 1/s in the background, where
+  the notification is the only reader. Recording itself is untouched by all of this.
+- Live segment matching prefilters on a padded box per segment before the corridor test
+  walks a centerline. The padding covers the corridor and both gates, so the fast path
+  can only skip fixes that could not have crossed a gate; a run already in progress is
+  never skipped, because the fix that leaves the corridor has to be measured.
+- Rate of climb is vehicle evidence on its own, at any road speed. The previous rules
+  only recognized a vehicle above 25 km/h (with a climb) or 36 km/h (with smooth IMU),
+  which a switchback fire road never reaches, so the middle of every shuttle lap fell
+  back to plain transit. No rider sustains 0.6 m/s of climb; a shuttle does 1.5–4 m/s.
+- Motorized runs are bridged across non-descending interruptions up to 90 s, and only
+  when vehicle evidence exists on both sides. A traffic light, a flat kilometre or a
+  GPS dropout under trees belongs to the same ride in the same vehicle; a descent
+  between two lifts ends the span, so a lap is never swallowed.
+- The live transport hint is a power decision and never a recorded result. It lowers
+  GPS to a 5 s balanced fix and the IMU to 25 Hz by re-registering both — gating writes
+  alone would leave the accelerometer waking the CPU 200 times a second — and it is
+  stated on the recording panel and in the notification rather than silently coarsening
+  the track. Entering needs 45 s of vehicle-rate climb with smooth motion; a descent,
+  trail roughness, a 45 s stop or a manual pause leaves immediately. The ride's real
+  transport spans still come from the post-ride classifier reading the raw file.
+- Reduced sampling during a suspected transit is an accepted, bounded loss of raw
+  fidelity: transits are secondary data in this product, and every exit condition is
+  fast enough that a real run is never recorded coarsely for more than a few seconds.
+  `Save power in transport` turns the whole behavior off for field tests.
+
+## 2026-08-10 — Congestion, the platform hint, and map hierarchy
+
+- A vehicle span absorbs congestion up to 15 minutes when the motion stays vehicle-smooth
+  throughout and the interruption is stop-*and-go* rather than one long stop. Crawling in
+  traffic produces neither the speed nor the rate of climb that identifies a vehicle, so
+  duration alone could not separate it from the rider getting off. Waiting at the bottom
+  for the next shuttle stays STILL, and rough motion between two lifts is never absorbed.
+  Without IMU evidence the long bridge is never claimed.
+- Android's activity recognition is an input to the live power decision only, and Rust
+  owns what it means: Android forwards the transition, `LiveFusion` decides. It can bring
+  power saving on sooner — a city bus in flat traffic produces no evidence of its own —
+  and it can end it, but our own evidence outranks it in both directions: a descent or
+  trail-like roughness vetoes entry even while the platform still reports a vehicle.
+  The permission is optional and declining it changes nothing about recording.
+- Transitions are written to the raw file as `activity:*` event lines: evidence kept for
+  later, never an input to today's classifier. Classification must stay reproducible from
+  GPS/IMU/baro alone, and a reader that ignores those lines must reach the same result.
+- The activity map has one subject: the descents. Transit is thin and dimmed, a likely
+  vehicle is barely there, and stops are small hollow rings rather than filled disks that
+  covered the trail itself. Confirmed stillness is only drawn when it is an event in the
+  rider's day: shorter than 15 s is a track stand, and stillness with vehicle evidence on
+  both sides is a traffic light seen from inside a bus.
+
+## 2026-08-10 — Ride statistics describe riding, not the day
+
+- Headline totals exclude spans the classifier calls `LikelyMotorized`. A shuttle lap
+  adds tens of kilometres and hundreds of metres of climb the rider did not produce, and
+  counting them makes every figure meaningless — most of all descent, which is the
+  product's subject. `RideTotals` is computed in Rust from the finalized classified
+  track, using exactly the accumulators the whole-recording analysis uses.
+- A pair of points counts as transport when either end is motorized, so a boundary is
+  never credited to the rider, and the ride and transport streams keep separate distance
+  anchors. `STILL` and `UNKNOWN` stay with the ride: a stop in the middle of a lap is
+  part of that lap.
+- What was excluded is stated, not hidden: the activity screen shows the transport
+  distance and time under the summary, so the day still adds up. `RideAnalysis` keeps its
+  whole-recording meaning and remains what export and diagnostics see.
+- Artifact schema v4. Older artifacts predate the split and are rebuilt; until then the
+  screen falls back to whole-recording numbers rather than showing nothing.
+
+## 2026-08-10 — One length floor for a trail, lowered only for field tests
+
+- The authoring floor is 300 m, the same number discovery already uses. Two floors for
+  one notion — "long enough to deserve a permanent trail identity" — was the accident;
+  50 m was never defensible, because at that length two gates account for most of the
+  distance and the time reports where the gates landed rather than how the rider rode.
+- Rust keeps ownership of the limit. Callers may request a lower one, and Rust clamps it
+  into `[40 m, 300 m]`: developer mode can never raise the floor by accident, and can
+  never go below the length at which two gates still separate.
+- The lower floor exists for one purpose: validating gate behaviour — entry and finish
+  haptics, the live clock — on a stretch next to the house instead of requiring a
+  mountain. It is not a product feature, and a segment authored that way has a time
+  dominated by gate placement.
+- `propose_segment` uses the same floor, so the editor never opens with a default
+  selection it would then refuse to save.
+
+## 2026-08-11 — Pressure impulses are rejected; the barometer is otherwise believed
+
+- The IMU cannot tell tarmac from singletrack, so it cannot gate elevation smoothing.
+  Measured on the rider's own recordings, the typical accelerometer error reads 1.4–7.9
+  m/s² on flat asphalt and 2.1–7.6 m/s² on real forest singletrack — the same range. What
+  the accelerometer reports is the phone shaking in its mount at speed, not the shape of
+  the ground. The IMU-gated design was written, calibrated against real data, and dropped
+  on that evidence.
+- What the asphalt recording actually contained was not roughness but a single impulse:
+  the barometer traced a flat road to within a metre for sixty seconds, then swung twelve
+  metres down and back in the last two, as the phone came out of its mount. The rule that
+  follows is narrow — a sample is compared against a ±2 s running median and replaced only
+  when it disagrees by more than 3 m, the most a rider can genuinely gain or lose against
+  where they were two seconds ago.
+- Every other sample passes through exactly as measured. A filter that rewrote all of them
+  would clip the crest of every real roller: measured on a synthetic 10 m rise and fall
+  over 12 s, a plain running median cost 1.3 m of it. Rejecting outliers costs nothing
+  anywhere the barometer is behaving.
+- Airtime suspends the test. Being airborne is the one thing that genuinely moves a rider
+  faster than the rule allows, and the free-fall detector already knows when it happens.
+- The baro-vs-GPS offset is filtered separately and much harder, over ±30 s of time rather
+  than a count of fixes, because it is a weather field: it drifts by about a metre over
+  ten minutes and never by ten metres in five seconds. Filtering it on its own physical
+  timescale keeps a GPS altitude excursion out of the profile and makes the filter
+  independent of the fix rate, which the power-saving profiles change.
+- A digital elevation model stays deferred, but the case for it is stronger than before.
+  Its role is the slow absolute anchor, not short-scale shape — at 30 m spacing and ±5–10
+  m vertical it knows nothing about a two-metre lip. Adopting it means on-device tiles, a
+  region choice and licensing, and is a separate decision.
+- Versioned as `gps-bounded-0.7`; existing artifacts are recomputed on device from the
+  untouched raw recordings.
+
+## 2026-08-12 — A shuttle leg is one leg, and time proves it
+
+- Two descents *inside* a Kojori shuttle climb kept being credited to the rider: 35 m over
+  36 s and 80 m over 108 s. Both are the shuttle road crossing a ridge and dropping into
+  the next valley, and the van resumed climbing immediately after each.
+- Geometry cannot settle this. Those dips give up as much height as a short run, at a
+  speed a bike reaches, on the same road. Every geometric rule tried — gross descent, net
+  descent, recovery of height afterwards — either missed the dips or swallowed real runs.
+- The timeline settles it, and it was the rider's own argument: you cannot get out, ride,
+  and be back in the vehicle in three minutes. Measured across the day, every genuine run
+  put **600 s or more** between the motorized spans on either side of it — a 105–162 s
+  descent plus 300–500 s standing at the bottom waiting for the pickup. The two road dips
+  took 72 s and 122 s. The populations are five times apart with nothing in between.
+- So an interruption between two vehicle spans shorter than `MIN_SHUTTLE_TURNAROUND_MS`
+  (240 s) cannot contain a ride, whatever its shape. The existing stop test runs first, so
+  a gap that is mostly confirmed STILL is still read as the rider getting out.
+- 240 s rather than the midpoint or the rider's suggested 600 s: the two errors are not
+  equal. Absorbing a real run into a lift erases descent, the number the product exists to
+  report; leaving a road dip only fragments a transfer. Sit close to the dips, far from
+  the runs.
+- Two guard tests encoded the impossible timeline — a rider getting out, descending 90 m,
+  and being back in the van 60 s later, with no wait at all. Their assertions were right
+  and are unchanged; their fixtures now include the wait a real turnaround has.
+- Effect on the 6.4 h shuttle day: the leg became one span of 2 362 s / +904 m instead of
+  three fragments, ride descent 2 413 → 2 296 m, and the ride's max speed dropped from
+  20.9 m/s to 16.9 m/s — 75 km/h was the van, not the rider. Nothing else in the recording
+  moved.
+
+## 2026-08-12 — Ride distance dropped its anchor when the shuttle started
+
+- `ride_totals` keeps a separate 1 m anchor for the ride and for transport so a lap and
+  the shuttle after it cannot share one. But leaving a stream never cleared its anchor, so
+  the first pair after a lift measured from wherever the rider had boarded and added the
+  straight line across the entire climb to the ride's distance.
+- Worth 22 km of the 54 km reported for one lift-served day. Each stream now drops the
+  other's anchor as it takes over, so distance restarts from the point where riding
+  actually resumed.
+- Versioned as `gps-bounded-0.10`; artifacts are recomputed on device from raw.
