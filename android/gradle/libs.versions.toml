@@ -48,7 +48,7 @@ jna = "5.19.1"
 junit = "4.13.2"
 
 # Map rendering (activity detail)
-maplibre = "11.11.0"
+maplibre = "13.4.1"
 
 [libraries]
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
