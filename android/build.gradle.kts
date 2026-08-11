@@ -3,7 +3,8 @@
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
-    alias(libs.plugins.kotlin.android) apply false
+    // No kotlin.android: AGP 9 compiles Kotlin itself and rejects the separate
+    // plugin. The compose and serialization plugins are still applied per module.
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.google.services) apply false
 }
