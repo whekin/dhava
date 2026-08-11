@@ -29,7 +29,7 @@ internal const val GPS_ACCURACY_PROPERTY = "accuracy_m"
 internal const val UNKNOWN_GPS_ACCURACY_STYLE_VALUE = -1.0
 
 private const val GPS_ACCURACY_LEGEND_DESCRIPTION =
-    "GPS accuracy scale: green 5 meters or better, yellow 10 meters, gold 20 meters, red above 20 meters"
+    "GPS accuracy scale: mint 5 meters or better, yellow 10 meters, gold 20 meters, red above 20 meters"
 
 internal data class GpsAccuracyColors(
     val good: Color,
@@ -45,7 +45,9 @@ internal fun rememberGpsAccuracyColors(): GpsAccuracyColors {
     val dark = colors.background.luminance() < 0.5f
     return remember(colors, dark) {
         GpsAccuracyColors(
-            good = colors.tertiary,
+            // The finalized path is now green. A cool mint keeps accurate GPS
+            // fixes visibly separate when their dots sit above it in Compare.
+            good = if (dark) Color(0xFF9FE7E2) else Color(0xFF176B68),
             fair = if (dark) Color(0xFFFFE082) else Color(0xFF8A6400),
             weak = if (dark) Color(0xFFD7A928) else Color(0xFFA06F00),
             rejected = colors.error,

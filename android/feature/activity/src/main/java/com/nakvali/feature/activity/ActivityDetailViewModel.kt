@@ -12,6 +12,7 @@ import com.nakvali.core.recording.Bike
 import com.nakvali.core.recording.BikeType
 import com.nakvali.core.recording.CanonicalActivityArtifact
 import com.nakvali.core.recording.CanonicalQuality
+import com.nakvali.core.recording.CanonicalRideTotals
 import com.nakvali.core.recording.GpsTrackReader
 import com.nakvali.core.recording.GpxExporter
 import com.nakvali.core.recording.GpxTrackPoint
@@ -115,6 +116,14 @@ class ActivityDetailViewModel(
      */
     private val _quality = MutableStateFlow<CanonicalQuality?>(null)
     val quality: StateFlow<CanonicalQuality?> = _quality.asStateFlow()
+
+    /**
+     * Totals with transport excluded. Null on the legacy fallback path, where
+     * the screen falls back to whole-recording numbers rather than showing
+     * nothing.
+     */
+    private val _ride = MutableStateFlow<CanonicalRideTotals?>(null)
+    val ride: StateFlow<CanonicalRideTotals?> = _ride.asStateFlow()
 
     /**
      * Pause-aware elevation/gradient profile for the detail sheet. Null means
@@ -281,6 +290,7 @@ class ActivityDetailViewModel(
             if (artifact != null) {
                 canonicalArtifact = artifact
                 _quality.value = artifact.quality
+                _ride.value = artifact.ride
                 val finalizedTrack = artifact.finalizedTrack.toCanonicalTrack()
                 _rideInsights.value = finalizedTrack
                     .takeIf { it.size >= 2 }

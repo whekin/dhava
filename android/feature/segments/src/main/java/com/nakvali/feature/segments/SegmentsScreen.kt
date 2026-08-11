@@ -29,6 +29,8 @@ import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -37,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
@@ -48,7 +51,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,10 +66,10 @@ import com.nakvali.core.recording.SegmentSourceKind
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliEmptyState
 import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliScreenHeader
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
-import com.nakvali.core.ui.rememberSheetFlingBoundary
 import kotlinx.coroutines.launch
 
 /**
@@ -90,6 +92,7 @@ private const val MY_LOCATION_ZOOM = 15.0
 fun SegmentsScreen(
     onOpenSegment: (String) -> Unit,
     onEditImportedTrace: (String) -> Unit,
+    onCreateSegment: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SegmentsViewModel = viewModel(),
 ) {
@@ -124,19 +127,43 @@ fun SegmentsScreen(
             // empty terrain would answer no question the rider has.
             Column(
                 modifier = modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
             ) {
-                NakvaliEmptyState(
-                    title = "No segments yet",
-                    description = "Create one from a saved ride, or import an existing GPX " +
-                        "as draft trail geometry.",
-                    icon = Icons.Filled.Timer,
+                NakvaliScreenHeader(
+                    eyebrow = "Trail library",
+                    title = "Segments",
+                    modifier = Modifier.padding(
+                        start = NakvaliSpacing.screen,
+                        end = NakvaliSpacing.screen,
+                        top = NakvaliSpacing.xLarge,
+                        bottom = NakvaliSpacing.large,
+                    ),
                 )
-                FilledTonalButton(onClick = launchImport) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Spacer(Modifier.width(NakvaliSpacing.small))
-                    Text("Import GPX")
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(NakvaliSpacing.screen),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    NakvaliPanel(Modifier.fillMaxWidth()) {
+                        NakvaliEmptyState(
+                            title = "No segments yet",
+                            description = "Find downhill candidates across your saved rides or import a GPX trail.",
+                            icon = Icons.Filled.Timer,
+                            action = {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    FilledTonalButton(onClick = onCreateSegment) {
+                                        Text("Find descents")
+                                    }
+                                    TextButton(onClick = launchImport) {
+                                        Icon(Icons.Filled.Add, contentDescription = null)
+                                        Spacer(Modifier.width(NakvaliSpacing.small))
+                                        Text("Import GPX")
+                                    }
+                                }
+                            },
+                        )
+                    }
                 }
             }
         } else {
@@ -144,6 +171,7 @@ fun SegmentsScreen(
                 state = current,
                 onSelect = viewModel::select,
                 onOpenSegment = onOpenSegment,
+                onCreateSegment = onCreateSegment,
                 onImportGpx = launchImport,
                 retainedCamera = viewModel.retainedCamera,
                 onCameraSettled = viewModel::onCameraSettled,
@@ -159,6 +187,7 @@ private fun SegmentLibrary(
     state: SegmentsState.Ready,
     onSelect: (String?) -> Unit,
     onOpenSegment: (String) -> Unit,
+    onCreateSegment: () -> Unit,
     onImportGpx: () -> Unit,
     retainedCamera: SegmentLibraryCamera?,
     onCameraSettled: (SegmentLibraryCamera) -> Unit,
@@ -169,12 +198,24 @@ private fun SegmentLibrary(
     // Read once per entry into the screen: a retained camera is a starting
     // point, not a target the map keeps snapping back to.
     val initialCamera = remember { retainedCamera }
+    val unratedColor = MaterialTheme.colorScheme.primary
+    val defaultCasing = MaterialTheme.colorScheme.scrim
+    val blackCasing = MaterialTheme.colorScheme.outline
     var cameraRequest by remember { mutableStateOf<SegmentLibraryCameraRequest?>(null) }
     val lines = remember(state.summaries) {
         state.summaries.map { summary ->
             SegmentLibraryLine(
                 id = summary.segment.id,
                 points = summary.segment.centerline.map { SegmentMapPoint(it.lat, it.lon) },
+                lineColor = (summary.segment.difficulty?.color ?: unratedColor).cssHex(),
+                casingColor = if (
+                    summary.segment.difficulty == com.nakvali.core.recording.SegmentDifficulty.BLACK ||
+                    summary.segment.difficulty == com.nakvali.core.recording.SegmentDifficulty.DOUBLE_BLACK
+                ) {
+                    blackCasing.cssHex()
+                } else {
+                    defaultCasing.cssHex()
+                },
             )
         }
     }
@@ -183,7 +224,7 @@ private fun SegmentLibrary(
         skipHiddenState = true,
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
-    val flingBoundary = rememberSheetFlingBoundary()
+    var addMenuExpanded by remember { mutableStateOf(false) }
 
     fun requestCamera(action: SegmentLibraryCameraAction) {
         cameraRequest = SegmentLibraryCameraRequest(
@@ -216,7 +257,7 @@ private fun SegmentLibrary(
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .nestedScroll(flingBoundary),
+                        ,
                     contentPadding = PaddingValues(
                         start = NakvaliSpacing.screen,
                         end = NakvaliSpacing.screen,
@@ -266,10 +307,29 @@ private fun SegmentLibrary(
                 shadowElevation = 8.dp,
             ) {
                 Column {
-                    IconButton(onClick = onImportGpx) {
+                    IconButton(onClick = { addMenuExpanded = true }) {
                         Icon(
                             imageVector = Icons.Filled.Add,
-                            contentDescription = "Import GPX",
+                            contentDescription = "Add segment",
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = addMenuExpanded,
+                        onDismissRequest = { addMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Find descents") },
+                            onClick = {
+                                addMenuExpanded = false
+                                onCreateSegment()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Import GPX") },
+                            onClick = {
+                                addMenuExpanded = false
+                                onImportGpx()
+                            },
                         )
                     }
                     IconButton(
@@ -312,6 +372,7 @@ private fun SegmentLibrary(
         }
     }
 }
+
 
 /**
  * The pinned peek of the sheet: the identity and primary action of whatever the
@@ -420,6 +481,14 @@ private fun SegmentCard(
                 }
                 if (segment.sourceKind == SegmentSourceKind.IMPORTED_GPX) {
                     NakvaliStatusPill(text = "GPX seed")
+                }
+                segment.difficulty?.let { difficulty ->
+                    DifficultyDot(difficulty)
+                    Text(
+                        text = difficulty.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text(
                     text = listOfNotNull(

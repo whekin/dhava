@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalContext
  * @param darkTheme whether to use the dark scheme. Defaults to the system
  *   setting, but dark is the look the app is designed around.
  * @param dynamicColor use Android 12+ wallpaper-based dynamic color instead of
- *   the Nakvali brand scheme. Off by default so the dirt-red identity wins.
+ *   the Nakvali brand scheme. Off by default so the trail-green identity wins.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable

@@ -49,6 +49,7 @@ internal class CanonicalActivityStore(
                 rawTrack = payload.rawTrack,
                 finalizedTrack = payload.finalizedTrack,
                 quality = payload.quality,
+                ride = payload.ride,
             )
             writeAtomically(id, artifact)
             artifact
@@ -122,8 +123,8 @@ internal class CanonicalActivityStore(
     private fun temporaryFile(id: String): File = File(artifactsDir, "$id.canonical.tmp")
 
     internal companion object {
-        // v3: adds Rust-derived per-point activity state + confidence.
-        const val SCHEMA_VERSION = 3
+        // v4: adds ride totals with transport excluded.
+        const val SCHEMA_VERSION = 4
         val ArtifactJson = Json {
             encodeDefaults = true
             explicitNulls = false

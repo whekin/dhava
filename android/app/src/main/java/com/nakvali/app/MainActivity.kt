@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import com.nakvali.core.recording.RecordingRepository
 import com.nakvali.core.recording.RecordingService
+import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.ui.NakvaliTheme
 
 /** Single activity hosting the whole Compose UI. */
@@ -48,9 +49,23 @@ class MainActivity : ComponentActivity() {
         applyKeepScreenOn()
     }
 
+    // The recorder scales its live work to whether anyone is looking. Tied to
+    // start/stop rather than resume/pause so a transient system dialog does
+    // not flap the recording service's cadence.
+    override fun onStart() {
+        super.onStart()
+        RecordingRepository.getInstance(application).setUiVisible(true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        RecordingRepository.getInstance(application).setUiVisible(false)
+    }
+
     fun applyKeepScreenOn() {
-        val enabled = getSharedPreferences("recorder_settings", MODE_PRIVATE)
-            .getBoolean("keep_screen_on", false)
+        val preferences = RecorderSettings.preferences(this)
+        val enabled = preferences.getBoolean(RecorderSettings.DEVELOPER_MODE, false) &&
+            preferences.getBoolean(RecorderSettings.KEEP_SCREEN_ON, false)
         if (enabled) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }

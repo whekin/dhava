@@ -6,8 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.hardware.Sensor
@@ -19,18 +21,29 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.os.HandlerCompat
+import com.google.android.gms.location.ActivityRecognition
+import com.google.android.gms.location.ActivityTransition
+import com.google.android.gms.location.ActivityTransitionRequest
+import com.google.android.gms.location.ActivityTransitionResult
+import com.google.android.gms.location.DetectedActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.nakvali.core.fusion.FusionCore
 import com.nakvali.fusion.LiveFusion
+import com.nakvali.fusion.LiveSegmentEvent
+import com.nakvali.fusion.LiveSegmentTracker
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +83,9 @@ class RecordingService : Service() {
         private const val CONTENT_REQUEST_CODE = 10
         private const val PAUSE_REQUEST_CODE = 11
         private const val RESUME_REQUEST_CODE = 12
+        private const val ACTIVITY_REQUEST_CODE = 13
+        private const val ACTION_ACTIVITY_TRANSITION =
+            "com.nakvali.core.recording.action.ACTIVITY_TRANSITION"
 
         private const val GPS_INTERVAL_MS = 1_000L
         private const val GPS_MIN_INTERVAL_MS = 500L
@@ -82,8 +98,61 @@ class RecordingService : Service() {
         private const val HEALTH_HEARTBEAT_INTERVAL_MS = 60_000L
         private const val LOG_TAG = "RecordingService"
 
-        /** How often live state is pushed to the repository (~4/s). */
+        /** How often live state is pushed while a screen is up (~4/s). */
         private const val STATE_PUSH_INTERVAL_MS = 250L
+
+        /**
+         * State cadence with no UI on screen. Nothing collects the flow then;
+         * the notification is the only reader and it changes once a second.
+         */
+        private const val BACKGROUND_STATE_PUSH_INTERVAL_MS = 1_000L
+
+        /**
+         * Sampling while the live fusion hint says the rider is in a vehicle.
+         *
+         * A transit is secondary data by design: the product tracks descents,
+         * and a shuttle lap only has to leave a readable line on the map plus
+         * enough motion to keep proving it was a vehicle. GPS moves to a
+         * 5-second balanced fix and the IMU to 25 Hz, which is where most of
+         * a long lift day's battery goes.
+         */
+        private const val TRANSPORT_GPS_INTERVAL_MS = 5_000L
+        private const val TRANSPORT_IMU_INTERVAL_US = 40_000
+
+        /**
+         * Gate haptics: timings paired with amplitudes, so each event has a
+         * shape rather than a duration.
+         *
+         * A notification is one short buzz, and the first version of these
+         * was mistaken for exactly that. These are events with a rhythm the
+         * rider can name: two revs to start a run, and a "ta-dam" to end it.
+         */
+        /** Two revs, each hit hard and allowed to fall away. */
+        private val SEGMENT_START_PATTERN = longArrayOf(0, 90, 70, 110, 150, 90, 70, 110)
+        private val SEGMENT_START_AMPLITUDES = intArrayOf(0, 255, 150, 60, 0, 255, 150, 60)
+
+        /** "Ta-dam": a short upbeat, then the long one, fading out. */
+        private val SEGMENT_FINISH_PATTERN = longArrayOf(0, 110, 80, 430, 180)
+        private val SEGMENT_FINISH_AMPLITUDES = intArrayOf(0, 200, 0, 255, 110)
+
+        /** The same shape, earned twice over. */
+        private val SEGMENT_RECORD_PATTERN =
+            longArrayOf(0, 110, 80, 110, 80, 520, 200, 260)
+        private val SEGMENT_RECORD_AMPLITUDES =
+            intArrayOf(0, 200, 0, 230, 0, 255, 120, 255)
+
+        /**
+         * Approach haptics: a metal detector for the finish gate.
+         *
+         * Inside the last stretch of a run the recorder ticks, and the ticks
+         * crowd together as the gate comes up, so the rider can time a sprint
+         * without looking at the phone. Distance drives it rather than time —
+         * the point is where the gate is, not how long the run has taken.
+         */
+        private const val APPROACH_RANGE_M = 150.0
+        private const val APPROACH_SLOWEST_MS = 900L
+        private const val APPROACH_FASTEST_MS = 110L
+        private val APPROACH_TICK_PATTERN = longArrayOf(0, 28)
 
         fun start(context: Context) {
             val intent = Intent(context, RecordingService::class.java).setAction(ACTION_START)
@@ -160,7 +229,35 @@ class RecordingService : Service() {
     @Volatile private var lastSpeedMps: Float? = null
     @Volatile private var lastAccuracyM: Float? = null
     @Volatile private var stationary = false
+    /**
+     * Live track as a ring, plus the immutable snapshot the UI reads.
+     *
+     * The ring is appended on the sensor thread and copied only when a screen
+     * is actually up: rebuilding a 10 800-point list once per second for a
+     * phone locked in a pocket was pure battery. The snapshot keeps its
+     * identity between pushes, so Compose does not redraw the map for it.
+     */
+    private val liveTrackLock = Any()
+    private val liveTrackRing = ArrayDeque<LiveTrackPoint>()
+    private var liveTrackDirty = false
     @Volatile private var liveTrack: List<LiveTrackPoint> = emptyList()
+    /**
+     * Whether reduced sampling is active. Never persisted and never a recorded
+     * result: the ride's real transport spans come from the post-ride
+     * classifier reading the raw file.
+     */
+    @Volatile private var powerSaving = false
+    @Volatile private var liveDistanceM = 0.0
+    @Volatile private var liveDescentM = 0.0
+    @Volatile private var segmentTracker: LiveSegmentTracker? = null
+    /** Guards a slow arming pass from landing on the ride that follows it. */
+    @Volatile private var segmentArmGeneration = 0
+    @Volatile private var activeSegment: ActiveSegmentRun? = null
+    /** Metres to the finish gate at [approachUpdatedElapsedMs], from Rust. */
+    @Volatile private var approachRemainingM: Double? = null
+    @Volatile private var approachUpdatedElapsedMs = 0L
+    private var approachJob: kotlinx.coroutines.Job? = null
+    @Volatile private var segmentRuns: List<LiveSegmentRun> = emptyList()
     @Volatile private var liveSectionId = 0
     private var liveFusion: LiveFusion? = null
     private var lastLiveImuMs = Long.MIN_VALUE
@@ -331,12 +428,348 @@ class RecordingService : Service() {
 
             recoveredAtElapsedMs = SystemClock.elapsedRealtime()
             startCapture()
+            seedLiveTotals(activityId)
             lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
             enqueueHealth(
                 kind = RecordingHealthLog.KIND_RESTART,
                 sessionElapsedMs = (target.endedAtMs - target.startedAtMs).coerceAtLeast(0L),
                 restartGapMs = (resumedAtMs - target.endedAtMs).coerceAtLeast(0L),
             )
+        }
+    }
+
+    /**
+     * Subscribes to Android's own activity recognition.
+     *
+     * This is the one signal the ride itself cannot provide: a bus stuck in
+     * flat city traffic neither climbs nor moves fast, so no evidence in the
+     * recording says "vehicle". Google's classifier runs on the sensor hub and
+     * costs almost nothing, which is exactly the right trade for a signal used
+     * only to decide sampling rates.
+     *
+     * Entirely optional. Without the runtime permission, or on a device
+     * without the service, the recorder behaves exactly as before and the
+     * transport decision falls back to our own climb evidence.
+     */
+    private fun requestActivityRecognition() {
+        if (!hasActivityRecognitionPermission()) return
+        val request = ActivityTransitionRequest(
+            listOf(
+                transition(DetectedActivity.IN_VEHICLE, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+                transition(DetectedActivity.IN_VEHICLE, ActivityTransition.ACTIVITY_TRANSITION_EXIT),
+                transition(DetectedActivity.ON_BICYCLE, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+                transition(DetectedActivity.ON_FOOT, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+            ),
+        )
+        try {
+            ActivityRecognition.getClient(this)
+                .requestActivityTransitionUpdates(request, activityTransitionIntent())
+        } catch (error: SecurityException) {
+            // Revoked between the check above and here; the recorder simply
+            // falls back to its own evidence.
+            Log.w(LOG_TAG, "activity recognition permission revoked", error)
+        }
+    }
+
+    private fun removeActivityRecognition() {
+        if (!hasActivityRecognitionPermission()) return
+        try {
+            ActivityRecognition.getClient(this)
+                .removeActivityTransitionUpdates(activityTransitionIntent())
+        } catch (_: SecurityException) {
+            // Nothing to remove without the permission.
+        }
+    }
+
+    private fun transition(activity: Int, type: Int): ActivityTransition =
+        ActivityTransition.Builder()
+            .setActivityType(activity)
+            .setActivityTransition(type)
+            .build()
+
+    /** Mutable by requirement: Play services delivers the result in the intent. */
+    private fun activityTransitionIntent(): PendingIntent = PendingIntent.getBroadcast(
+        this,
+        ACTIVITY_REQUEST_CODE,
+        Intent(ACTION_ACTIVITY_TRANSITION).setPackage(packageName),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+    )
+
+    private fun hasActivityRecognitionPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACTIVITY_RECOGNITION,
+            ) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Hands each transition to Rust and records it.
+     *
+     * Rust owns what the signal means (architecture principle 2). The line
+     * written here is evidence for later, not an input to today's post-ride
+     * classifier: that stays reproducible from sensors alone.
+     */
+    private val activityTransitionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!ActivityTransitionResult.hasResult(intent)) return
+            val result = ActivityTransitionResult.extractResult(intent) ?: return
+            for (event in result.transitionEvents) {
+                val entering = event.transitionType == ActivityTransition.ACTIVITY_TRANSITION_ENTER
+                val inVehicle = when {
+                    event.activityType == DetectedActivity.IN_VEHICLE -> entering
+                    entering -> false
+                    else -> continue
+                }
+                val now = System.currentTimeMillis()
+                liveFusion?.setPlatformVehicle(now, inVehicle)
+                if (!paused) {
+                    writer?.write(
+                        RecordLine.Event(now, "activity:${activityLabel(event.activityType)}${if (entering) "" else ":exit"}"),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun activityLabel(activityType: Int): String = when (activityType) {
+        DetectedActivity.IN_VEHICLE -> "in_vehicle"
+        DetectedActivity.ON_BICYCLE -> "on_bicycle"
+        DetectedActivity.ON_FOOT -> "on_foot"
+        else -> "other"
+    }
+
+    /**
+     * Follows Rust's transport hint into and out of reduced sampling.
+     *
+     * Rust owns the decision (architecture principle 2); this only re-arms the
+     * sensors and the location request around it. Re-registering is what
+     * actually saves power: gating writes alone would leave the accelerometer
+     * waking the CPU 200 times a second inside a bus.
+     *
+     * Leaving is never gated on the setting — a rider who turns power saving
+     * off mid-ride returns to full rates on the next tick.
+     */
+    private fun applyPowerProfile(motorized: Boolean) {
+        val wanted = motorized && transportPowerSaveEnabled()
+        if (wanted == powerSaving) return
+        powerSaving = wanted
+        Log.i(LOG_TAG, "transport power save ${if (wanted) "on" else "off"}")
+        sensorManager.unregisterListener(sensorListener)
+        registerSensors()
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        requestLocationUpdates()
+    }
+
+    private fun transportPowerSaveEnabled(): Boolean = RecorderSettings
+        .preferences(this)
+        .getBoolean(RecorderSettings.TRANSPORT_POWER_SAVE, true)
+
+    /**
+     * Appends one fused point to the live track ring.
+     *
+     * Only the ring is touched here. Materializing the snapshot is the
+     * ticker's job, and it only does it while a screen is up.
+     */
+    private fun appendLiveTrack(point: LiveTrackPoint) {
+        synchronized(liveTrackLock) {
+            liveTrackRing.addLast(point)
+            while (liveTrackRing.size > MAX_LIVE_TRACK_POINTS) liveTrackRing.removeFirst()
+            liveTrackDirty = true
+        }
+    }
+
+    /**
+     * Refreshes [liveTrack] when a screen is up and the ring has moved.
+     *
+     * Returns the current snapshot. With no UI the previous snapshot is
+     * returned untouched — a state flow nobody collects does not deserve a
+     * 10 000-element copy.
+     */
+    private fun refreshLiveTrackSnapshot(uiVisible: Boolean): List<LiveTrackPoint> {
+        if (!uiVisible) return liveTrack
+        return synchronized(liveTrackLock) {
+            if (liveTrackDirty) {
+                liveTrackDirty = false
+                liveTrack = liveTrackRing.toList()
+            }
+            liveTrack
+        }
+    }
+
+    /**
+     * Arms every local segment for live timing.
+     *
+     * Asynchronous on purpose: recording must start the moment the rider asks,
+     * and a segment that is not armed yet simply cannot be entered yet — the
+     * gate crossings that matter are minutes away. Segments authored during
+     * the ride are not armed until the next ride.
+     */
+    private fun armSegments() {
+        val generation = ++segmentArmGeneration
+        finalizeScope.launch {
+            val arms = runCatching { repository.liveSegmentArms() }.getOrNull().orEmpty()
+            // Arming starts during warm-up, so `preparing` counts as live here;
+            // the generation is what protects the next ride from this pass.
+            if (generation != segmentArmGeneration || !(recording || preparing)) return@launch
+            segmentTracker = if (arms.isEmpty()) null else LiveSegmentTracker(arms)
+        }
+    }
+
+    /**
+     * Publishes one live segment event and buzzes for it.
+     *
+     * Called on the sensor thread from the location callback, so it only
+     * touches volatile fields; the state ticker picks them up on its own beat.
+     */
+    private fun onSegmentEvent(event: LiveSegmentEvent) {
+        when (event) {
+            is LiveSegmentEvent.Started -> {
+                activeSegment = ActiveSegmentRun(
+                    segmentId = event.segmentId,
+                    name = event.name,
+                    startedAtMs = event.timestampMs,
+                )
+                approachRemainingM = null
+                startApproachTicks()
+                vibrateForSegment(SEGMENT_START_PATTERN, SEGMENT_START_AMPLITUDES)
+            }
+            is LiveSegmentEvent.Progress -> {
+                if (activeSegment?.segmentId == event.segmentId) {
+                    approachRemainingM = event.remainingM
+                    approachUpdatedElapsedMs = SystemClock.elapsedRealtime()
+                }
+            }
+            is LiveSegmentEvent.Finished -> {
+                if (activeSegment?.segmentId == event.segmentId) activeSegment = null
+                stopApproachTicks()
+                segmentRuns = listOf(
+                    LiveSegmentRun(
+                        segmentId = event.segmentId,
+                        name = event.name,
+                        finishedAtMs = event.timestampMs,
+                        elapsedMs = event.elapsedMs,
+                        deltaMs = event.deltaMs,
+                        personalRecord = event.personalRecord,
+                    ),
+                ) + segmentRuns
+                if (event.personalRecord) {
+                    vibrateForSegment(SEGMENT_RECORD_PATTERN, SEGMENT_RECORD_AMPLITUDES)
+                } else {
+                    vibrateForSegment(SEGMENT_FINISH_PATTERN, SEGMENT_FINISH_AMPLITUDES)
+                }
+            }
+            is LiveSegmentEvent.Ended -> {
+                if (activeSegment?.segmentId == event.segmentId) {
+                    activeSegment = null
+                    stopApproachTicks()
+                }
+            }
+        }
+    }
+
+    /**
+     * Ticks faster and faster as the finish gate comes up.
+     *
+     * Runs on its own coroutine because the interval has to shrink smoothly
+     * between GPS fixes: the remaining distance arrives about once a second,
+     * and the last of it is extrapolated from the current speed so the rhythm
+     * keeps tightening instead of stepping.
+     */
+    private fun startApproachTicks() {
+        approachJob?.cancel()
+        approachJob = scope.launch {
+            while (isActive) {
+                val interval = approachTickIntervalMs()
+                if (interval == null) {
+                    delay(300L)
+                    continue
+                }
+                if (!paused) vibrateForSegment(APPROACH_TICK_PATTERN, null)
+                delay(interval)
+            }
+        }
+    }
+
+    private fun stopApproachTicks() {
+        approachJob?.cancel()
+        approachJob = null
+        approachRemainingM = null
+    }
+
+    /**
+     * Interval to the next tick, or null while the gate is still too far to
+     * be worth counting down.
+     */
+    private fun approachTickIntervalMs(): Long? {
+        val reported = approachRemainingM ?: return null
+        val sinceFixS = (SystemClock.elapsedRealtime() - approachUpdatedElapsedMs)
+            .coerceAtLeast(0L) / 1_000.0
+        // Carry the last known distance forward at the current speed, so the
+        // rhythm does not sit still between fixes.
+        val remaining = (reported - (lastSpeedMps ?: 0f) * sinceFixS).coerceAtLeast(0.0)
+        if (remaining > APPROACH_RANGE_M) return null
+        val closeness = 1.0 - remaining / APPROACH_RANGE_M
+        val span = (APPROACH_SLOWEST_MS - APPROACH_FASTEST_MS).toDouble()
+        // Squared so the last metres tighten sharply rather than linearly.
+        return (APPROACH_SLOWEST_MS - span * closeness * closeness).toLong()
+            .coerceIn(APPROACH_FASTEST_MS, APPROACH_SLOWEST_MS)
+    }
+
+    /**
+     * Buzzes the phone directly rather than posting anything.
+     *
+     * A rider with the phone in a pocket needs the gate to be felt, not to
+     * collect notifications for every run; the recording notification stays
+     * the single one this service owns. Off when the rider turns segment
+     * haptics off in Settings.
+     */
+    private fun vibrateForSegment(pattern: LongArray, amplitudes: IntArray?) {
+        if (!RecorderSettings.preferences(this)
+                .getBoolean(RecorderSettings.SEGMENT_HAPTICS, true)
+        ) {
+            return
+        }
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Vibrator::class.java)
+        }
+        if (vibrator?.hasVibrator() != true) return
+        runCatching {
+            // Amplitude control is what makes the pattern feel like a shape.
+            // Motors without it still get the timings, which keeps the rhythm.
+            val effect = if (amplitudes != null && vibrator.hasAmplitudeControl()) {
+                VibrationEffect.createWaveform(pattern, amplitudes, -1)
+            } else {
+                VibrationEffect.createWaveform(pattern, -1)
+            }
+            vibrator.vibrate(effect)
+        }
+    }
+
+    /**
+     * Restores the ride totals of a continued recording from its raw file.
+     *
+     * Ride time survives a process restart, so distance and descent must too —
+     * a rider who lost the app mid-run would otherwise read "0.0 km" next to
+     * a 40-minute clock. Rust owns the accumulation (architecture principle 2);
+     * this only hands the already-written bytes back to it. Best-effort: a
+     * damaged file simply leaves the live totals counting from the resume.
+     */
+    private fun seedLiveTotals(recordingId: String) {
+        val fusion = liveFusion ?: return
+        val file = repository.recordingFile(recordingId)
+        finalizeScope.launch {
+            val totals = withContext(Dispatchers.IO) {
+                runCatching { FusionCore.liveTotals(file.absolutePath) }.getOrNull()
+            } ?: return@launch
+            if (liveFusion !== fusion) return@launch
+            fusion.seedTotals(totals.distanceM, totals.descentM)
+            // Show the recovered totals immediately; the next fix replaces
+            // these with the same values plus whatever has been ridden since.
+            liveDistanceM += totals.distanceM
+            liveDescentM += totals.descentM
         }
     }
 
@@ -348,9 +781,21 @@ class RecordingService : Service() {
         lastSpeedMps = null
         lastAccuracyM = null
         stationary = false
+        synchronized(liveTrackLock) {
+            liveTrackRing.clear()
+            liveTrackDirty = false
+        }
         liveTrack = emptyList()
         liveSectionId = 0
+        liveDistanceM = 0.0
+        liveDescentM = 0.0
+        segmentTracker = null
+        activeSegment = null
+        segmentRuns = emptyList()
+        stopApproachTicks()
+        powerSaving = false
         liveFusion = LiveFusion()
+        armSegments()
         lastLiveImuMs = Long.MIN_VALUE
         lastRawImuNs = Long.MIN_VALUE
         lastGpsReceivedElapsedMs = Long.MIN_VALUE
@@ -369,6 +814,13 @@ class RecordingService : Service() {
         sensorThread = HandlerThread("recording-sensors").also { it.start() }
         registerSensors()
         requestLocationUpdates()
+        ContextCompat.registerReceiver(
+            this,
+            activityTransitionReceiver,
+            IntentFilter(ACTION_ACTIVITY_TRANSITION),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        requestActivityRecognition()
         startTicker()
     }
 
@@ -445,6 +897,9 @@ class RecordingService : Service() {
     private fun tearDownCapture() {
         sensorManager.unregisterListener(sensorListener)
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        stopApproachTicks()
+        removeActivityRecognition()
+        runCatching { unregisterReceiver(activityTransitionReceiver) }
         sensorThread?.quitSafely()
         sensorThread = null
         liveFusion?.close()
@@ -517,6 +972,7 @@ class RecordingService : Service() {
 
     private fun registerSensors() {
         val handler = sensorThread?.let { HandlerCompat.createAsync(it.looper) } ?: return
+        val imuIntervalUs = if (powerSaving) TRANSPORT_IMU_INTERVAL_US else RAW_IMU_INTERVAL_US
         // 200 Hz retains 5 ms airtime/impact timing while avoiding the
         // sustained 500 Hz allocation and I/O load seen before OxygenOS
         // killed several long foreground recordings.
@@ -533,7 +989,7 @@ class RecordingService : Service() {
                     when (type) {
                         Sensor.TYPE_ACCELEROMETER,
                         Sensor.TYPE_GYROSCOPE,
-                        -> RAW_IMU_INTERVAL_US
+                        -> imuIntervalUs
                         Sensor.TYPE_MAGNETIC_FIELD -> MAG_INTERVAL_US
                         else -> BARO_INTERVAL_US
                     },
@@ -652,9 +1108,16 @@ class RecordingService : Service() {
 
     private fun requestLocationUpdates() {
         val looper = sensorThread?.looper ?: return
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, GPS_INTERVAL_MS)
-            .setMinUpdateIntervalMillis(GPS_MIN_INTERVAL_MS)
-            .build()
+        val request = if (powerSaving) {
+            LocationRequest.Builder(
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                TRANSPORT_GPS_INTERVAL_MS,
+            ).setMinUpdateIntervalMillis(TRANSPORT_GPS_INTERVAL_MS / 2).build()
+        } else {
+            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, GPS_INTERVAL_MS)
+                .setMinUpdateIntervalMillis(GPS_MIN_INTERVAL_MS)
+                .build()
+        }
         try {
             fusedLocationClient.requestLocationUpdates(request, locationCallback, looper)
         } catch (_: SecurityException) {
@@ -684,14 +1147,27 @@ class RecordingService : Service() {
                 )?.let { snapshot ->
                     lastSpeedMps = snapshot.speedMps.toFloat()
                     stationary = snapshot.stationary
-                    liveTrack = (liveTrack + LiveTrackPoint(
+                    liveDistanceM = snapshot.distanceM
+                    liveDescentM = snapshot.descentM
+                    // Segment timing consumes the fused position, never the
+                    // raw fix: the live map, the live clock and the canonical
+                    // result must all describe the same track.
+                    segmentTracker?.push(
                         timestampMs = snapshot.timestampMs,
                         lat = snapshot.lat,
                         lon = snapshot.lon,
-                        speedMps = snapshot.speedMps,
-                        stationary = snapshot.stationary,
                         sectionId = liveSectionId,
-                    )).takeLast(MAX_LIVE_TRACK_POINTS)
+                    )?.forEach(::onSegmentEvent)
+                    appendLiveTrack(
+                        LiveTrackPoint(
+                            timestampMs = snapshot.timestampMs,
+                            lat = snapshot.lat,
+                            lon = snapshot.lon,
+                            speedMps = snapshot.speedMps,
+                            stationary = snapshot.stationary,
+                            sectionId = liveSectionId,
+                        ),
+                    )
                 }
                 writer.write(
                     RecordLine.Gps(
@@ -781,6 +1257,8 @@ class RecordingService : Service() {
                     delay(STATE_PUSH_INTERVAL_MS)
                     continue
                 }
+                val uiVisible = repository.uiVisible.value
+                if (!paused) applyPowerProfile(liveFusion?.motorizedHint() == true)
                 val now = SystemClock.elapsedRealtime()
                 val currentPause = if (paused) now - pausedAtElapsedMs else 0L
                 val elapsedMs = now - startedElapsedMs - totalPausedMs - currentPause
@@ -792,8 +1270,13 @@ class RecordingService : Service() {
                         elapsedMs = elapsedMs,
                         lastSpeedMps = lastSpeedMps,
                         lastAccuracyM = lastAccuracyM,
+                        distanceM = liveDistanceM,
+                        descentM = liveDescentM,
+                        activeSegment = activeSegment,
+                        segmentRuns = segmentRuns,
+                        powerSaving = powerSaving,
                         stationary = stationary,
-                        liveTrack = liveTrack,
+                        liveTrack = refreshLiveTrackSnapshot(uiVisible),
                         gpsCount = gpsCount,
                         imuCount = imuCount,
                         baroCount = baroCount,
@@ -810,7 +1293,13 @@ class RecordingService : Service() {
                     writer?.flushDiagnostics(System.currentTimeMillis())
                     enqueueHealth(RecordingHealthLog.KIND_HEARTBEAT, elapsedMs)
                 }
-                delay(STATE_PUSH_INTERVAL_MS)
+                delay(
+                    if (uiVisible) {
+                        STATE_PUSH_INTERVAL_MS
+                    } else {
+                        BACKGROUND_STATE_PUSH_INTERVAL_MS
+                    },
+                )
             }
         }
     }
@@ -838,6 +1327,10 @@ class RecordingService : Service() {
             recovering = recovering,
             paused = paused,
             recentlyRecovered = recentlyRecovered,
+            distanceM = liveDistanceM,
+            descentM = liveDescentM,
+            lastRun = segmentRuns.firstOrNull(),
+            powerSaving = powerSaving,
         )
         val contentIntent = packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
             launchIntent
@@ -859,6 +1352,9 @@ class RecordingService : Service() {
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+        presentation.expandedText?.let { expanded ->
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
+        }
 
         when (presentation.action) {
             RecordingNotificationAction.Pause -> builder.addAction(

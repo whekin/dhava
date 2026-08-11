@@ -5,11 +5,14 @@
 //! GPS fixes, so background recording does not pay any map/UI cost.
 
 use std::collections::VecDeque;
+use std::path::Path;
 use std::sync::Mutex;
 
+use crate::FusionError;
 use crate::ekf::Ekf;
 use crate::gps_quality::{HorizontalFix, kinematically_plausible};
 use crate::orientation::{GRAVITY, Mahony};
+use crate::recording::parse_recording_file;
 
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
 const MAX_GPS_ACCURACY_M: f64 = 20.0;
@@ -32,6 +35,53 @@ const GPS_MOTION_HOLD_MS: i64 = 2_500;
 /// Keep the vertical inertial channel, but make each accepted GPS fix the
 /// authoritative horizontal output until a bounded segment model is validated.
 const HORIZONTAL_ACCEL_GAIN: f64 = 0.0;
+/// Live ride totals use the canonical accumulator rules so the recording
+/// screen and the finalized activity cannot disagree about what counts:
+/// displacement below [`MIN_MOVE_M`] is jitter and never moves the anchor,
+/// and altitude only moves the reference once it escapes the hysteresis band.
+/// The live values stay provisional — they are fed by causal fusion, while
+/// canonical results run the bounded post-pass over the same raw ride.
+const MIN_MOVE_M: f64 = 1.0;
+const ALTITUDE_HYSTERESIS_M: f64 = 2.0;
+/// Same window canonical analysis uses. Live cannot centre a filter on a
+/// sample it has not received yet, so the accumulator simply trails the newest
+/// fix by two: the median it consumes is the canonical one, two fixes late.
+const ALTITUDE_MEDIAN_WINDOW: usize = 5;
+/// Live transport hint. The thresholds mirror the post-ride classifier's
+/// vehicle evidence: a rate of climb no rider produces, held long enough that
+/// altitude noise cannot fake it. See `activity.rs` for why 0.6 m/s is the
+/// line. Entering only lowers sampling rates, so the cost of a wrong enter is
+/// a coarser transit, and every exit condition is deliberately fast.
+const TRANSPORT_CLIMB_MPS: f64 = 0.6;
+const TRANSPORT_ENTER_WINDOW_MS: i64 = 45_000;
+const TRANSPORT_CLIMB_HISTORY_MS: i64 = 150_000;
+/// A descent under way is the strongest possible "the rider is riding again" —
+/// but only when it does not look like a vehicle. A shuttle road is not
+/// monotonic: a serpentine has dips and flat shelves, and treating every one
+/// of them as the start of a run made power saving flap all the way up the
+/// mountain. A rough descent is a rider and ends power saving at once; a
+/// smooth one has to go deep enough that no road dip explains it.
+const TRANSPORT_EXIT_DESCENT_MPS: f64 = -0.2;
+const TRANSPORT_EXIT_WINDOW_MS: i64 = 25_000;
+/// Height given up since the highest point recently reached. A dip between
+/// switchbacks gives back a few metres; leaving the mountain gives back this
+/// much, however smooth the ride is.
+const TRANSPORT_EXIT_DROP_M: f64 = 40.0;
+/// Motion at or below this is a vehicle floor rather than a trail.
+const TRANSPORT_VEHICLE_SMOOTH_MPS2: f64 = 0.5;
+/// Vehicles are smooth; trail riding is not. Well above the 0.45 m/s^2 the
+/// post-ride classifier calls strongly smooth, so ordinary road bumps do not
+/// leave power save on their own.
+const TRANSPORT_EXIT_ROUGHNESS_MPS2: f64 = 1.2;
+const TRANSPORT_ENTER_ROUGHNESS_MPS2: f64 = 0.6;
+/// A vehicle that has been standing this long may have been left.
+const TRANSPORT_EXIT_STILL_MS: i64 = 45_000;
+/// How long Android's own activity recognition must agree before it is acted
+/// on. It is a hint from a classifier we do not control, so it buys a faster
+/// entry on flat ground — a city bus never climbs — but never a faster exit
+/// than our own evidence would give.
+const TRANSPORT_PLATFORM_HOLD_MS: i64 = 20_000;
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LiveSnapshot {
     pub timestamp_ms: i64,
@@ -41,6 +91,10 @@ pub struct LiveSnapshot {
     pub speed_mps: f64,
     pub stationary: bool,
     pub accuracy_m: f64,
+    /// Ride distance so far, metres. Provisional; canonical wins after Finish.
+    pub distance_m: f64,
+    /// Accumulated descent so far, metres, positive downhill.
+    pub descent_m: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +121,25 @@ struct State {
     gps_stop_anchor: Option<HorizontalFix>,
     gps_stop_rearm_anchor: Option<HorizontalFix>,
     horizontal_reseat_pending: bool,
+    distance_m: f64,
+    descent_m: f64,
+    /// Last accepted position in the EKF's local tangent frame. Cleared on a
+    /// section restart so a reseat jump is never counted as ridden distance.
+    distance_anchor: Option<[f64; 2]>,
+    /// Hysteresis reference for descent, metres, on the filtered GPS series.
+    altitude_reference: Option<f64>,
+    /// Trailing median window over accepted GPS altitudes.
+    altitude_window: VecDeque<f64>,
+    /// Filtered altitude over the recent past, for the transport hint.
+    climb_window: VecDeque<(i64, f64)>,
+    /// Mean |accel| error over the stationary window — the roughness channel.
+    recent_roughness: f64,
+    motorized: bool,
+    still_since_ms: Option<i64>,
+    /// Android's activity recognition, when the app has it: `Some(true)` in a
+    /// vehicle, `Some(false)` on a bike or on foot, `None` when unavailable.
+    platform_vehicle: Option<bool>,
+    platform_vehicle_since_ms: Option<i64>,
 }
 
 #[derive(Debug, uniffi::Object)]
@@ -95,8 +168,67 @@ impl LiveFusion {
                 gps_stop_anchor: None,
                 gps_stop_rearm_anchor: None,
                 horizontal_reseat_pending: false,
+                distance_m: 0.0,
+                descent_m: 0.0,
+                distance_anchor: None,
+                altitude_reference: None,
+                altitude_window: VecDeque::new(),
+                climb_window: VecDeque::new(),
+                recent_roughness: 0.0,
+                motorized: false,
+                still_since_ms: None,
+                platform_vehicle: None,
+                platform_vehicle_since_ms: None,
             }),
         }
+    }
+
+    /// Whether the recorder should behave as if the rider is in a vehicle.
+    ///
+    /// Consumed by Android to lower GPS and IMU rates during a shuttle or bus
+    /// leg. It is a power decision, never a recorded result: the ride's real
+    /// transport spans come from the post-ride classifier over the raw file.
+    pub fn motorized_hint(&self) -> bool {
+        self.state
+            .lock()
+            .expect("live fusion mutex poisoned")
+            .motorized
+    }
+
+    /// Feeds Android's activity recognition into the transport decision.
+    ///
+    /// The platform classifier answers the one question our own evidence
+    /// cannot on flat ground: a city bus stuck in traffic neither climbs nor
+    /// moves fast, so nothing in the ride itself says "vehicle". It is a hint
+    /// and is treated as one — it can bring power saving on sooner, and it can
+    /// end it, but it can never keep it on once our own evidence says the
+    /// rider is riding. Pass `None` when the signal is unavailable or the
+    /// permission was declined.
+    pub fn set_platform_vehicle(&self, timestamp_ms: i64, in_vehicle: Option<bool>) {
+        let mut s = self.state.lock().expect("live fusion mutex poisoned");
+        if s.platform_vehicle != in_vehicle {
+            s.platform_vehicle = in_vehicle;
+            s.platform_vehicle_since_ms = Some(timestamp_ms);
+        }
+        if in_vehicle == Some(false) {
+            s.motorized = false;
+        }
+    }
+
+    /// Adds the totals of an interrupted recording that is being continued.
+    ///
+    /// The recorder keeps ride time across a process restart, so distance and
+    /// descent must not silently restart at zero for the same ride. The caller
+    /// derives the seed from the already-written raw fixes with
+    /// [`live_totals_from_recording`], which applies these same rules.
+    ///
+    /// Additive rather than assigning: reading the raw file takes long enough
+    /// that the rider can already be moving again, and those metres are as
+    /// real as the recovered ones. Call it exactly once per resume.
+    pub fn seed_totals(&self, distance_m: f64, descent_m: f64) {
+        let mut s = self.state.lock().expect("live fusion mutex poisoned");
+        s.distance_m += distance_m.max(0.0);
+        s.descent_m += descent_m.max(0.0);
     }
 
     pub fn push_imu(&self, timestamp_ms: i64, accel: Vec<f64>, gyro: Vec<f64>) -> bool {
@@ -148,6 +280,12 @@ impl LiveFusion {
         if s.motion.len() >= MIN_STATIONARY_SAMPLES {
             let count = s.motion.len() as f64;
             let accel_mean = s.motion.iter().map(|x| x.accel_error).sum::<f64>() / count;
+            // The same mean doubles as the roughness channel of the transport
+            // hint: a vehicle floor is smooth, a trail is not.
+            s.recent_roughness = accel_mean;
+            if s.motorized && accel_mean > TRANSPORT_EXIT_ROUGHNESS_MPS2 {
+                s.motorized = false;
+            }
             let gyro_mean = s.motion.iter().map(|x| x.gyro_norm).sum::<f64>() / count;
             let calm = accel_mean < STATIONARY_ACCEL_MEAN_MAX_MPS2
                 && gyro_mean < STATIONARY_GYRO_MEAN_MAX_RAD_S;
@@ -410,14 +548,19 @@ impl LiveFusion {
         let v = ekf.velocity();
         let (out_lat, out_lon) = unproject(p[0], p[1], anchor.0, anchor.1);
         let fused_speed = v[0].hypot(v[1]).max(0.0);
+        let altitude = anchor.2.map(|a| a + p[2]);
+        accumulate_totals(&mut s, timestamp_ms, [p[0], p[1]], altitude_m);
+        update_transport(&mut s, timestamp_ms, stationary);
         Some(LiveSnapshot {
             timestamp_ms,
             lat: out_lat,
             lon: out_lon,
-            altitude_m: anchor.2.map(|a| a + p[2]),
+            altitude_m: altitude,
             speed_mps: if stationary { 0.0 } else { fused_speed },
             stationary,
             accuracy_m: accuracy,
+            distance_m: s.distance_m,
+            descent_m: s.descent_m,
         })
     }
 
@@ -427,6 +570,182 @@ impl LiveFusion {
     /// against a fix from before the pause.
     pub fn start_new_section(&self) {
         self.reset_section_state();
+    }
+}
+
+/// Ride totals recovered from an already-recorded raw file.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LiveTotals {
+    pub distance_m: f64,
+    pub descent_m: f64,
+}
+
+/// Reads distance and descent already recorded in a raw `.jsonl.gz`.
+///
+/// Used when an interrupted recording is continued: ride time survives the
+/// process restart, so the totals shown next to it must survive it too.
+/// Blocking (file IO): call from a background thread.
+#[uniffi::export]
+pub fn live_totals_from_recording(path: String) -> Result<LiveTotals, FusionError> {
+    let recording = parse_recording_file(Path::new(&path))?;
+    let (distance_m, descent_m) = crate::analysis::distance_and_descent(&recording);
+    Ok(LiveTotals {
+        distance_m,
+        descent_m,
+    })
+}
+
+/// Adds one accepted fused fix to the ride totals.
+///
+/// Position arrives in the EKF's local tangent frame, so consecutive steps are
+/// differential and free of the tangent-plane distortion a long ride would
+/// otherwise accumulate.
+/// `altitude_m` is the fix's own GPS altitude, not the fused vertical state:
+/// the EKF's vertical channel is deliberately slow, and over a real descent it
+/// reported barely a third of the drop while the rider was still on the trail.
+/// Canonical descent is accumulated from the GPS altitude series too, so this
+/// keeps the live number on the same quantity as the finalized one.
+/// Updates the transport hint from the filtered altitude series.
+///
+/// Deliberately asymmetric. Entering needs a rate of climb held for most of a
+/// minute — the same evidence the post-ride classifier calls a vehicle — while
+/// any one of a descent, trail roughness or a long stop leaves immediately.
+/// The hint only lowers sampling rates, so a missed vehicle costs battery and
+/// a false vehicle costs resolution; leaving fast is what keeps the second one
+/// from ever touching a real run.
+fn update_transport(state: &mut State, timestamp_ms: i64, stationary: bool) {
+    state.still_since_ms = if stationary {
+        Some(state.still_since_ms.unwrap_or(timestamp_ms))
+    } else {
+        None
+    };
+
+    let platform_says_vehicle = state.platform_vehicle == Some(true)
+        && state
+            .platform_vehicle_since_ms
+            .is_some_and(|since| timestamp_ms - since >= TRANSPORT_PLATFORM_HOLD_MS);
+
+    // Rough descent: a rider, immediately. Smooth descent: only once it is
+    // deeper than a serpentine dip could be.
+    let descending_roughly = state.recent_roughness > TRANSPORT_VEHICLE_SMOOTH_MPS2
+        && climb_rate_mps(state, TRANSPORT_EXIT_WINDOW_MS)
+            .is_some_and(|rate| rate <= TRANSPORT_EXIT_DESCENT_MPS);
+    let losing_the_mountain = drop_from_recent_peak(state) >= TRANSPORT_EXIT_DROP_M;
+    let descending = descending_roughly || losing_the_mountain;
+
+    if state.motorized {
+        // A long red light is not the rider getting out while Android still
+        // reports a vehicle around them.
+        let standing_too_long = !platform_says_vehicle
+            && state
+                .still_since_ms
+                .is_some_and(|since| timestamp_ms - since >= TRANSPORT_EXIT_STILL_MS);
+        if standing_too_long || descending {
+            state.motorized = false;
+        }
+        return;
+    }
+
+    // Our own evidence vetoes every entry, including the platform's. Without
+    // this a descent would exit power saving and Android's still-stale vehicle
+    // hint would switch it straight back on for the whole run.
+    if descending || state.recent_roughness > TRANSPORT_ENTER_ROUGHNESS_MPS2 {
+        return;
+    }
+    // The platform hint may enter from a standstill — congestion is mostly
+    // standing — while our own climb evidence still requires real movement.
+    if platform_says_vehicle {
+        state.motorized = true;
+        return;
+    }
+    if stationary {
+        return;
+    }
+    if climb_rate_mps(state, TRANSPORT_ENTER_WINDOW_MS)
+        .is_some_and(|rate| rate >= TRANSPORT_CLIMB_MPS)
+    {
+        state.motorized = true;
+    }
+}
+
+/// Height given up since the highest point in the retained history.
+fn drop_from_recent_peak(state: &State) -> f64 {
+    let Some((_, current_m)) = state.climb_window.back() else {
+        return 0.0;
+    };
+    let peak_m = state
+        .climb_window
+        .iter()
+        .fold(f64::MIN, |high, (_, altitude)| high.max(*altitude));
+    (peak_m - current_m).max(0.0)
+}
+
+/// Rate of climb over at least `window_ms` of filtered altitude, or None while
+/// the history is too short to mean anything.
+fn climb_rate_mps(state: &State, window_ms: i64) -> Option<f64> {
+    let (newest_ms, newest_m) = *state.climb_window.back()?;
+    // The newest sample that is already old enough: the tightest window that
+    // still covers the required span, rather than the whole retained history.
+    let (oldest_ms, oldest_m) = *state
+        .climb_window
+        .iter()
+        .rev()
+        .find(|(stamp, _)| newest_ms - stamp >= window_ms)?;
+    Some((newest_m - oldest_m) / ((newest_ms - oldest_ms) as f64 / 1_000.0))
+}
+
+fn accumulate_totals(
+    state: &mut State,
+    timestamp_ms: i64,
+    position: [f64; 2],
+    altitude_m: Option<f64>,
+) {
+    match state.distance_anchor {
+        Some(previous) => {
+            let step = (position[0] - previous[0]).hypot(position[1] - previous[1]);
+            if step >= MIN_MOVE_M {
+                state.distance_m += step;
+                state.distance_anchor = Some(position);
+            }
+        }
+        None => state.distance_anchor = Some(position),
+    }
+
+    let Some(sample) = altitude_m.filter(|value| value.is_finite()) else {
+        return;
+    };
+    state.altitude_window.push_back(sample);
+    if state.altitude_window.len() > ALTITUDE_MEDIAN_WINDOW {
+        state.altitude_window.pop_front();
+    }
+    if state.altitude_window.len() < ALTITUDE_MEDIAN_WINDOW {
+        return;
+    }
+    let mut window: Vec<f64> = state.altitude_window.iter().copied().collect();
+    window.sort_by(|a, b| a.total_cmp(b));
+    let altitude = window[window.len() / 2];
+    state.climb_window.push_back((timestamp_ms, altitude));
+    while state
+        .climb_window
+        .front()
+        .is_some_and(|(stamp, _)| timestamp_ms - stamp > TRANSPORT_CLIMB_HISTORY_MS)
+    {
+        state.climb_window.pop_front();
+    }
+    match state.altitude_reference {
+        Some(reference) => {
+            let delta = altitude - reference;
+            if delta >= ALTITUDE_HYSTERESIS_M {
+                state.altitude_reference = Some(altitude);
+            } else if delta <= -ALTITUDE_HYSTERESIS_M {
+                state.descent_m += -delta;
+                state.altitude_reference = Some(altitude);
+            }
+        }
+        // The reference starts at the oldest sample in the first full window,
+        // not at its median: the metres ridden while the filter was warming up
+        // are real, and a rider who has already dropped 20 m should see them.
+        None => state.altitude_reference = state.altitude_window.front().copied(),
     }
 }
 
@@ -494,6 +813,19 @@ impl LiveFusion {
         state.gps_stop_anchor = None;
         state.gps_stop_rearm_anchor = None;
         state.horizontal_reseat_pending = state.ekf.is_some();
+        // Totals survive the pause — the ride is the same ride — but the
+        // anchors do not: the reseat jump across a pause is not ridden
+        // distance, and altitude across it is not a continuous descent.
+        state.distance_anchor = None;
+        state.altitude_reference = None;
+        state.altitude_window.clear();
+        // A pause is a hard boundary for the transport hint too: full rates
+        // resume with the ride, and the climb has to prove itself again.
+        state.climb_window.clear();
+        state.motorized = false;
+        state.still_since_ms = None;
+        state.platform_vehicle = None;
+        state.platform_vehicle_since_ms = None;
         if let Some(ekf) = &mut state.ekf {
             ekf.reset_horizontal_velocity();
         }
@@ -1140,6 +1472,335 @@ mod tests {
         assert!(
             offset[0].hypot(offset[1]) < 0.01,
             "turn was cut by {offset:?}"
+        );
+    }
+
+    /// Metres north of 41.7 N as a latitude, for readable total assertions.
+    fn north_of(base_lat: f64, metres: f64) -> f64 {
+        base_lat + (metres / EARTH_RADIUS_M).to_degrees()
+    }
+
+    #[test]
+    fn ride_totals_accumulate_distance_and_descent() {
+        let fusion = LiveFusion::new();
+        let mut last = None;
+        for step in 0..30 {
+            last = fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 10.0),
+                44.8,
+                Some(1_000.0 - step as f64 * 10.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            );
+        }
+        let snapshot = last.expect("moving fixes produce snapshots");
+        assert!(
+            (289.5..=290.5).contains(&snapshot.distance_m),
+            "distance {} m is not the ridden 290 m",
+            snapshot.distance_m,
+        );
+        // The median window costs the two newest fixes; everything the rider
+        // has already descended must be there.
+        assert!(
+            (260.0..=290.0).contains(&snapshot.descent_m),
+            "descent {} m does not match a 290 m drop",
+            snapshot.descent_m,
+        );
+    }
+
+    #[test]
+    fn stationary_jitter_adds_no_distance_and_no_descent() {
+        let fusion = LiveFusion::new();
+        let mut last = None;
+        for step in 0..10 {
+            // Sub-metre horizontal jitter and sub-hysteresis altitude noise:
+            // a phone lying on a bench must not ride anywhere.
+            let jitter = if step % 2 == 0 { 0.4 } else { -0.4 };
+            last = fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, jitter),
+                44.8,
+                Some(1_000.0 + jitter),
+                Some(4.0),
+                Some(0.2),
+                Some(0.0),
+            );
+        }
+        let snapshot = last.expect("accepted fixes produce snapshots");
+        assert_eq!(snapshot.distance_m, 0.0);
+        assert_eq!(snapshot.descent_m, 0.0);
+    }
+
+    #[test]
+    fn manual_pause_gap_is_not_ridden_distance() {
+        let fusion = LiveFusion::new();
+        for step in 0..5 {
+            fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 10.0),
+                44.8,
+                Some(1_000.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            );
+        }
+        let before = fusion
+            .push_gps(
+                5_000,
+                north_of(41.7, 50.0),
+                44.8,
+                Some(1_000.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            )
+            .expect("moving fix")
+            .distance_m;
+
+        // Rider pauses, drives 2 km, resumes: the transit belongs to no ride.
+        fusion.start_new_section();
+        let after = fusion
+            .push_gps(
+                600_000,
+                north_of(41.7, 2_000.0),
+                44.8,
+                Some(1_000.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            )
+            .expect("first fix of the new section")
+            .distance_m;
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn seeded_totals_continue_instead_of_restarting() {
+        let fusion = LiveFusion::new();
+        fusion.seed_totals(1_234.0, 210.0);
+        for step in 0..3 {
+            fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 10.0),
+                44.8,
+                Some(1_000.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            );
+        }
+        let snapshot = fusion
+            .push_gps(
+                3_000,
+                north_of(41.7, 30.0),
+                44.8,
+                Some(1_000.0),
+                Some(4.0),
+                Some(10.0),
+                Some(0.0),
+            )
+            .expect("moving fix");
+        assert!(
+            snapshot.distance_m > 1_234.0,
+            "seeded distance {} m restarted",
+            snapshot.distance_m,
+        );
+        assert_eq!(snapshot.descent_m, 210.0);
+    }
+
+    /// Feeds `seconds` of GPS at 1 Hz climbing at `vertical_speed_mps`.
+    fn climb(fusion: &LiveFusion, start_ms: i64, seconds: i64, vertical_speed_mps: f64) {
+        for step in 0..seconds {
+            fusion.push_gps(
+                start_ms + step * 1_000,
+                north_of(41.7, step as f64 * 6.0),
+                44.8,
+                Some(500.0 + vertical_speed_mps * step as f64),
+                Some(4.0),
+                Some(6.0),
+                Some(0.0),
+            );
+        }
+    }
+
+    #[test]
+    fn a_shuttle_climb_raises_the_transport_hint() {
+        let fusion = LiveFusion::new();
+        climb(&fusion, 0, 120, 1.8);
+        assert!(fusion.motorized_hint(), "a 1.8 m/s climb is not a rider");
+    }
+
+    #[test]
+    fn a_rider_climbing_hard_never_raises_the_hint() {
+        let fusion = LiveFusion::new();
+        climb(&fusion, 0, 300, 0.45);
+        assert!(!fusion.motorized_hint(), "a human climb entered power save");
+    }
+
+    #[test]
+    fn the_hint_drops_as_soon_as_the_descent_starts() {
+        let fusion = LiveFusion::new();
+        climb(&fusion, 0, 120, 1.8);
+        assert!(fusion.motorized_hint());
+
+        // Over the top and pointing down: full rates must come back.
+        for step in 0..40 {
+            fusion.push_gps(
+                120_000 + step * 1_000,
+                north_of(41.7, 720.0 + step as f64 * 8.0),
+                44.8,
+                Some(716.0 - step as f64 * 2.0),
+                Some(4.0),
+                Some(8.0),
+                Some(180.0),
+            );
+        }
+        assert!(!fusion.motorized_hint(), "power save survived the descent");
+    }
+
+    #[test]
+    fn a_manual_pause_drops_the_hint() {
+        let fusion = LiveFusion::new();
+        climb(&fusion, 0, 120, 1.8);
+        assert!(fusion.motorized_hint());
+        fusion.start_new_section();
+        assert!(!fusion.motorized_hint());
+    }
+
+    #[test]
+    fn android_saying_vehicle_enters_power_save_without_a_climb() {
+        let fusion = LiveFusion::new();
+        fusion.set_platform_vehicle(0, Some(true));
+        // Flat city traffic: no climb, barely any speed, plenty of standing.
+        for step in 0..60 {
+            fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 1.5),
+                44.8,
+                Some(400.0),
+                Some(6.0),
+                Some(1.5),
+                Some(0.0),
+            );
+        }
+        assert!(fusion.motorized_hint(), "flat congestion never entered");
+    }
+
+    #[test]
+    fn android_saying_bicycle_ends_power_save_at_once() {
+        let fusion = LiveFusion::new();
+        climb(&fusion, 0, 120, 1.8);
+        assert!(fusion.motorized_hint());
+        fusion.set_platform_vehicle(120_000, Some(false));
+        assert!(!fusion.motorized_hint(), "the bike hint was ignored");
+    }
+
+    #[test]
+    fn android_saying_vehicle_cannot_hold_power_save_through_a_descent() {
+        let fusion = LiveFusion::new();
+        fusion.set_platform_vehicle(0, Some(true));
+        climb(&fusion, 0, 120, 1.8);
+        assert!(fusion.motorized_hint());
+
+        for step in 0..40 {
+            fusion.push_gps(
+                120_000 + step * 1_000,
+                north_of(41.7, 720.0 + step as f64 * 8.0),
+                44.8,
+                Some(716.0 - step as f64 * 2.0),
+                Some(4.0),
+                Some(8.0),
+                Some(180.0),
+            );
+        }
+        assert!(
+            !fusion.motorized_hint(),
+            "a platform hint outranked a real descent",
+        );
+    }
+
+    /// One second of a vehicle floor: smooth enough that nothing reads as
+    /// riding, delivered at the same 50 Hz Android feeds live fusion.
+    fn smooth_second(fusion: &LiveFusion, start_ms: i64) {
+        for sample in 0..50 {
+            fusion.push_imu(
+                start_ms + sample * 20,
+                vec![0.02, -0.01, GRAVITY + 0.03],
+                vec![0.004, 0.002, -0.003],
+            );
+        }
+    }
+
+    fn rough_second(fusion: &LiveFusion, start_ms: i64) {
+        for sample in 0..50 {
+            let shake = if sample % 2 == 0 { 2.6 } else { -2.2 };
+            fusion.push_imu(
+                start_ms + sample * 20,
+                vec![shake, -1.4, GRAVITY + shake],
+                vec![0.5, -0.4, 0.3],
+            );
+        }
+    }
+
+    /// Rides a profile at 6 m/s with a vehicle floor under the phone.
+    fn smooth_leg(
+        fusion: &LiveFusion,
+        start_ms: i64,
+        start_m: f64,
+        start_altitude_m: f64,
+        seconds: i64,
+        vertical_speed_mps: f64,
+        rough: bool,
+    ) {
+        for step in 0..seconds {
+            let at = start_ms + step * 1_000;
+            if rough {
+                rough_second(fusion, at);
+            } else {
+                smooth_second(fusion, at);
+            }
+            fusion.push_gps(
+                at,
+                north_of(41.7, start_m + step as f64 * 6.0),
+                44.8,
+                Some(start_altitude_m + vertical_speed_mps * step as f64),
+                Some(4.0),
+                Some(6.0),
+                Some(0.0),
+            );
+        }
+    }
+
+    #[test]
+    fn a_dip_between_switchbacks_keeps_power_saving_on() {
+        let fusion = LiveFusion::new();
+        smooth_leg(&fusion, 0, 0.0, 400.0, 120, 1.8, false);
+        assert!(fusion.motorized_hint(), "the shuttle climb never entered");
+
+        // The serpentine gives back 25 m over half a minute, then climbs on.
+        smooth_leg(&fusion, 120_000, 720.0, 616.0, 30, -0.85, false);
+
+        assert!(
+            fusion.motorized_hint(),
+            "a road dip was mistaken for the start of a run",
+        );
+    }
+
+    #[test]
+    fn a_rough_descent_ends_power_saving_even_when_shallow() {
+        let fusion = LiveFusion::new();
+        smooth_leg(&fusion, 0, 0.0, 400.0, 120, 1.8, false);
+        assert!(fusion.motorized_hint());
+
+        // Same shallow profile, but the phone is being shaken by a trail.
+        smooth_leg(&fusion, 120_000, 720.0, 616.0, 30, -0.85, true);
+
+        assert!(
+            !fusion.motorized_hint(),
+            "trail roughness did not end power saving",
         );
     }
 }

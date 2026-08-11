@@ -1,6 +1,6 @@
 //! On-device ride analysis: the first real analysis API exposed to Android.
 //!
-//! # Algorithm status: `gps-bounded-0.5`
+//! # Algorithm status: `gps-bounded-0.10`
 //!
 //! Everything in this module is a deliberately NAIVE, GPS-first v0 baseline,
 //! to be replaced by proper GPS+IMU+baro Kalman fusion. Every result is
@@ -37,18 +37,18 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.6";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.10";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;
 /// GPS fixes with a worse horizontal accuracy estimate are dropped.
 const MAX_ACCURACY_M: f64 = 20.0;
 /// Moves shorter than this are GPS jitter, not distance.
-const MIN_MOVE_M: f64 = 1.0;
+pub(crate) const MIN_MOVE_M: f64 = 1.0;
 /// Speed above which the rider counts as moving.
-const MOVING_SPEED_MPS: f64 = 0.7;
+pub(crate) const MOVING_SPEED_MPS: f64 = 0.7;
 /// Inter-fix gaps longer than this never count as moving time.
-const MAX_MOVING_GAP_MS: i64 = 10_000;
+pub(crate) const MAX_MOVING_GAP_MS: i64 = 10_000;
 /// Median filter window (samples) for the altitude series.
 const ALTITUDE_MEDIAN_WINDOW: usize = 5;
 /// Altitude reversals smaller than this are ignored (hysteresis).
@@ -140,6 +140,20 @@ pub fn algorithm_version() -> String {
 pub fn analyze_recording(path: String) -> Result<RideAnalysis, FusionError> {
     let recording = parse_recording_file(Path::new(&path))?;
     analyze(&recording)
+}
+
+/// Returns `(distance_m, descent_m)` for an already-parsed recording, using
+/// exactly the accumulators [`analyze`] uses and none of its IMU work.
+///
+/// This exists so continuing an interrupted ride can restore the live totals
+/// without paying for airtime detection over the full IMU stream.
+pub(crate) fn distance_and_descent(recording: &ParsedRecording) -> (f64, f64) {
+    let mut gps: Vec<GpsPoint> = recording.gps.clone();
+    gps.sort_by_key(|p| p.timestamp_ms);
+    let accepted = accuracy_filter(&gps);
+    let (distance_m, _, _) = distance_and_moving_time(&accepted, &recording.events);
+    let (_, descent_m) = ascent_descent(&accepted);
+    (distance_m, descent_m)
 }
 
 /// Analyzes an already-parsed recording.

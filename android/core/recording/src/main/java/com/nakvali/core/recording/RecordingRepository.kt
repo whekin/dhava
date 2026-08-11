@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.nakvali.core.fusion.FusionCore
 import com.nakvali.fusion.LatLon
+import com.nakvali.fusion.LiveSegmentArm
 import java.io.File
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -45,6 +46,18 @@ import kotlinx.serialization.encodeToString
 class RecordingRepository private constructor(private val appContext: Context) {
 
     companion object {
+        /**
+         * Whether activities are pushed to the server at all.
+         *
+         * Off while the server has raw uploads disabled: every save queued a
+         * job that could only ever fail, and the resulting UPLOAD FAILED badge
+         * described the deployment rather than anything the rider did. The
+         * client machinery — [UploadWorker], [ActivityUploader] — is left whole
+         * and unreferenced, so turning this back on is the whole change once
+         * the endpoint is live.
+         */
+        const val UPLOADS_ENABLED = false
+
         private const val INDEX_FILE = "recordings.json"
         private const val BIKES_FILE = "bikes.json"
         private const val RECORDINGS_DIR = "recordings"
@@ -132,6 +145,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 // Must run before `loaded` completes so UploadWorker and the
                 // UI never observe pre-recovery state.
                 recoverInterruptedRecordings()
+                settleUploadsWhileDisabled()
             }
             _segments.value = segmentStore.loadSegments()
             loaded.complete(Unit)
@@ -139,7 +153,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
             // unique job persisted in WorkManager; re-enqueueing with KEEP is
             // a harmless no-op and covers a crash between save and enqueue.
             _recordings.value
-                .filter { it.status == RecordingStatus.PENDING_UPLOAD }
+                .filter { UPLOADS_ENABLED && it.status == RecordingStatus.PENDING_UPLOAD }
                 .forEach { UploadWorker.enqueue(appContext, it.id) }
             _recordings.value
                 .filter {
@@ -149,6 +163,33 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 .forEach { StravaExportWorker.enqueue(appContext, it.id) }
             refreshStravaConnection()
         }
+    }
+
+    /**
+     * Retires upload state left over from when uploads were on.
+     *
+     * A queued or failed upload describes work that can no longer happen, and
+     * an activity carrying that status would show the rider a badge about it
+     * forever. Both mean the same thing while uploads are off — saved on the
+     * device and nowhere else — which is exactly [RecordingStatus.RECORDED].
+     * Already-uploaded activities keep their status; that one is still true.
+     */
+    private suspend fun settleUploadsWhileDisabled() {
+        if (UPLOADS_ENABLED) return
+        var changed = false
+        _recordings.update { list ->
+            list.map { entry ->
+                if (entry.status == RecordingStatus.PENDING_UPLOAD ||
+                    entry.status == RecordingStatus.FAILED
+                ) {
+                    changed = true
+                    entry.copy(status = RecordingStatus.RECORDED)
+                } else {
+                    entry
+                }
+            }
+        }
+        if (changed) saveIndex()
     }
 
     /** Directory holding the raw `.jsonl.gz` files. */
@@ -417,6 +458,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
     suspend fun createSegment(
         recordingId: String,
         name: String,
+        difficulty: SegmentDifficulty?,
+        externalUrl: String,
         startPosition: Double,
         endPosition: Double,
         startGateCenter: LatLon,
@@ -436,9 +479,14 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     endPosition = endPosition,
                     startGateCenter = startGateCenter,
                     finishGateCenter = finishGateCenter,
+                    minLengthM = developerSegmentFloorM(),
                 ).definition
             }
-            val segment = definition.toStored(createdAtMs = System.currentTimeMillis())
+            val segment = definition.toStored(
+                createdAtMs = System.currentTimeMillis(),
+                difficulty = difficulty,
+                externalLinks = externalUrl.toExternalTrailLinks(),
+            )
             segmentStore.saveSegment(segment)
             _segments.update { list -> (list + segment).sortedBy { it.createdAtMs } }
             segment
@@ -449,6 +497,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
     suspend fun createSegmentFromImportedTrace(
         traceId: String,
         name: String,
+        difficulty: SegmentDifficulty?,
+        externalUrl: String,
         startPosition: Double,
         endPosition: Double,
         startGateCenter: LatLon,
@@ -467,11 +517,14 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     endPosition = endPosition,
                     startGateCenter = startGateCenter,
                     finishGateCenter = finishGateCenter,
+                    minLengthM = developerSegmentFloorM(),
                 ).definition
             }
             val segment = definition.toStored(
                 createdAtMs = System.currentTimeMillis(),
                 sourceKind = SegmentSourceKind.IMPORTED_GPX,
+                difficulty = difficulty,
+                externalLinks = externalUrl.toExternalTrailLinks(),
             )
             segmentStore.saveSegment(segment)
             _segments.update { list -> (list + segment).sortedBy { it.createdAtMs } }
@@ -480,13 +533,41 @@ class RecordingRepository private constructor(private val appContext: Context) {
     }
 
     suspend fun renameSegment(id: String, name: String) {
+        val current = segment(id) ?: return
+        updateSegmentDetails(
+            id = id,
+            name = name,
+            difficulty = current.difficulty,
+            externalUrl = current.externalLinks.firstOrNull()?.url.orEmpty(),
+        )
+    }
+
+    /** Updates context only; geometry and every derived timing result stay valid. */
+    suspend fun updateSegmentDetails(
+        id: String,
+        name: String,
+        difficulty: SegmentDifficulty?,
+        externalUrl: String,
+    ) {
         loaded.await()
         segmentsMutex.withLock {
             val segment = _segments.value.firstOrNull { it.id == id } ?: return@withLock
-            val renamed = segment.copy(name = name.trim().ifBlank { segment.name })
-            segmentStore.saveSegment(renamed)
-            _segments.update { list -> list.map { if (it.id == id) renamed else it } }
+            val updated = segment.copy(
+                name = name.trim().ifBlank { segment.name },
+                difficulty = difficulty,
+                externalLinks = externalUrl.toExternalTrailLinks() + segment.externalLinks.drop(1),
+            )
+            segmentStore.saveSegment(updated)
+            _segments.update { list -> list.map { if (it.id == id) updated else it } }
         }
+    }
+
+    private fun String.toExternalTrailLinks(): List<SegmentExternalLink> {
+        if (isBlank()) return emptyList()
+        val normalized = requireNotNull(normalizeExternalTrailUrl(this)) {
+            "Trail page must be a valid http or https URL"
+        }
+        return listOf(SegmentExternalLink(externalTrailProvider(normalized), normalized))
     }
 
     /** Removes an authored segment and every result derived from it. */
@@ -495,6 +576,39 @@ class RecordingRepository private constructor(private val appContext: Context) {
         segmentsMutex.withLock {
             segmentStore.deleteSegment(id)
             _segments.update { list -> list.filterNot { it.id == id } }
+        }
+    }
+
+    /**
+     * Every local segment, armed for live timing with the personal record it
+     * has to beat.
+     *
+     * Deliberately reads only the cached results: arming happens the moment
+     * the rider hits Start, and a full re-match over every ride there would
+     * delay the recording for the sake of a number. A cache written by an
+     * older algorithm, match or geometry version arms the segment with no
+     * record rather than with a time the current rules never produced — the
+     * run is still timed, it is just not called a PR against a stale best.
+     */
+    internal suspend fun liveSegmentArms(): List<LiveSegmentArm> {
+        loaded.await()
+        val algorithm = FusionCore.algorithmVersion
+        val match = FusionCore.segmentMatchVersion
+        return _segments.value.map { segment ->
+            val results = segmentStore.loadResults(segment.id)?.takeIf { results ->
+                results.schemaVersion == SegmentStore.RESULTS_SCHEMA_VERSION &&
+                    results.algorithmVersion == algorithm &&
+                    results.matchVersion == match &&
+                    results.geometryVersion == segment.geometryVersion
+            }
+            LiveSegmentArm(
+                definition = segment.toDefinition(),
+                bestElapsedMs = results
+                    ?.rides
+                    ?.flatMap { it.attempts }
+                    ?.personalRecord()
+                    ?.elapsedMs,
+            )
         }
     }
 
@@ -513,12 +627,40 @@ class RecordingRepository private constructor(private val appContext: Context) {
             .getOrNull()
     }
 
+    /**
+     * The lowered segment floor while developer mode is on, else null.
+     *
+     * Authoring a 40 m segment is not a product feature: at that length two
+     * gates account for most of it and the time reports where the gates landed.
+     * It exists so gate behaviour — entry and finish haptics, the live clock —
+     * can be validated on a stretch next to the house instead of requiring a
+     * mountain. Rust clamps whatever is asked for.
+     */
+    fun developerSegmentFloorM(): Double? = FusionCore
+        .DEVELOPER_MIN_SEGMENT_LENGTH_M
+        .takeIf { RecorderSettings.developerModeEnabled(appContext) }
+
     /** Deletes every derived segment result; authored segments are kept. */
     suspend fun clearSegmentResults(): Int = segmentStore.clearResults()
 
     /** Observes a single index entry; emits null once the entry is gone (discarded). */
     fun recording(id: String): Flow<LocalRecording?> =
         recordings.map { list -> list.firstOrNull { it.id == id } }
+
+    /**
+     * Whether a Nakvali screen is actually on top.
+     *
+     * The recorder must keep recording with the screen off, but nothing that
+     * exists only to be looked at should keep running there: the live track
+     * snapshot and the state cadence follow this flag. Set from the activity
+     * lifecycle, so a locked phone in a pocket reads false.
+     */
+    private val _uiVisible = MutableStateFlow(false)
+    val uiVisible: StateFlow<Boolean> = _uiVisible.asStateFlow()
+
+    fun setUiVisible(visible: Boolean) {
+        _uiVisible.value = visible
+    }
 
     /** Pushed by [RecordingService]; throttled to ~4 updates/s on its side. */
     internal fun pushState(state: RecordingState) {
@@ -733,14 +875,17 @@ class RecordingRepository private constructor(private val appContext: Context) {
      * waits for network.
      */
     fun saveActivity(id: String, title: String, description: String, bike: Bike?) {
-        val offline = appContext
-            .getSharedPreferences("recorder_settings", Context.MODE_PRIVATE)
-            .getBoolean("offline_mode", true)
+        val offline = RecorderSettings.preferences(appContext)
+            .getBoolean(RecorderSettings.OFFLINE_MODE, true)
         scope.launch {
             updateEntry(id) {
                 it.withMetadata(title, description, bike).copy(
                     savedAtMs = System.currentTimeMillis(),
-                    status = if (offline) RecordingStatus.RECORDED else RecordingStatus.PENDING_UPLOAD,
+                    status = if (offline || !UPLOADS_ENABLED) {
+                        RecordingStatus.RECORDED
+                    } else {
+                        RecordingStatus.PENDING_UPLOAD
+                    },
                 )
             }
             if (bike != null) {
@@ -749,7 +894,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                     saveBikes()
                 }
             }
-            if (!offline) UploadWorker.enqueue(appContext, id)
+            if (UPLOADS_ENABLED && !offline) UploadWorker.enqueue(appContext, id)
         }
     }
 
@@ -801,6 +946,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
 
     /** Re-enqueues an upload whose worker exhausted its retries. */
     fun retryUpload(id: String) {
+        if (!UPLOADS_ENABLED) return
         scope.launch {
             updateEntry(id) {
                 if (it.status == RecordingStatus.FAILED) {
@@ -937,15 +1083,31 @@ class RecordingRepository private constructor(private val appContext: Context) {
         }
 
     /** Adds a bike to the local garage and returns it. */
-    fun addBike(name: String, type: BikeType): Bike {
+    fun addBike(name: String, type: BikeType, makeActive: Boolean = false): Bike {
         val bike = Bike(id = UUID.randomUUID().toString(), name = name.trim(), type = type)
         scope.launch {
+            loaded.await()
             indexMutex.withLock {
                 _bikes.update { it + bike }
+                if (makeActive || _lastUsedBikeId.value == null) {
+                    _lastUsedBikeId.value = bike.id
+                }
                 saveBikes()
             }
         }
         return bike
+    }
+
+    /** Selects the bike prefilled for the next ride save. */
+    fun selectBike(id: String) {
+        scope.launch {
+            loaded.await()
+            indexMutex.withLock {
+                if (_bikes.value.none { it.id == id } || _lastUsedBikeId.value == id) return@withLock
+                _lastUsedBikeId.value = id
+                saveBikes()
+            }
+        }
     }
 
     /** Resets a Finished state back to Idle (UI acknowledged the summary). */
@@ -1024,6 +1186,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
             val stored = IndexJson.decodeFromString<BikesFile>(file.readText())
             _bikes.value = stored.bikes
             _lastUsedBikeId.value = stored.lastUsedId
+                ?.takeIf { id -> stored.bikes.any { it.id == id } }
+                ?: stored.bikes.firstOrNull()?.id
         }
     }
 

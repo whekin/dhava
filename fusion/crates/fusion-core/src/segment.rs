@@ -28,8 +28,29 @@ use crate::{
 pub const SEGMENT_MATCH_VERSION: &str = "gates-0.3";
 
 /// Shortest acceptable segment. Below this, gate geometry and GPS uncertainty
-/// dominate the result.
-const MIN_SEGMENT_LENGTH_M: f64 = 50.0;
+/// dominate the result: two gates alone can account for most of the distance,
+/// and the time says more about where the gates landed than about the rider.
+/// The same floor discovery uses, so one trail has one notion of "long enough
+/// to deserve a permanent identity" rather than two.
+pub(crate) const MIN_SEGMENT_LENGTH_M: f64 = 300.0;
+/// Floor available in developer mode, for validating gate behaviour — entry
+/// and finish haptics, live timing — on a stretch next to the house instead of
+/// on a mountain. Deliberately still long enough for two gates to separate.
+pub(crate) const DEVELOPER_MIN_SEGMENT_LENGTH_M: f64 = 40.0;
+
+/// Resolves the caller's requested floor against the rules.
+///
+/// Rust keeps ownership of the limit: a caller may lower it for a field test
+/// but never below [`DEVELOPER_MIN_SEGMENT_LENGTH_M`], and never raise it
+/// above the production floor by accident.
+fn resolved_min_length_m(requested_m: Option<f64>) -> f64 {
+    match requested_m {
+        Some(value) if value.is_finite() => {
+            value.clamp(DEVELOPER_MIN_SEGMENT_LENGTH_M, MIN_SEGMENT_LENGTH_M)
+        }
+        _ => MIN_SEGMENT_LENGTH_M,
+    }
+}
 /// Gate half-widths derived from source-ride accuracy, clamped so a gate can
 /// neither be missed by a normal fix error nor swallow a neighboring trail.
 const GATE_MIN_HALF_WIDTH_M: f64 = 10.0;
@@ -41,16 +62,16 @@ const CORRIDOR_MAX_M: f64 = 40.0;
 const CORRIDOR_ACCURACY_MULTIPLIER: f64 = 3.0;
 /// Crossing direction is compared against the local centerline tangent, which
 /// already follows switchbacks, so the tolerance can stay tight-ish.
-const DIRECTION_TOLERANCE_DEG: f64 = 60.0;
+pub(crate) const DIRECTION_TOLERANCE_DEG: f64 = 60.0;
 /// Minimum planar distance used to estimate a stable gate tangent.
 const TANGENT_MIN_SPAN_M: f64 = 5.0;
 /// An attempt may not bridge a manual pause or a sensor/GPS gap.
 pub(crate) const MAX_ATTEMPT_GAP_MS: i64 = 3_000;
 /// Allowed cumulative backward progress along the centerline, as a fraction of
 /// segment length. Absorbs GPS noise without accepting a rider who turned back.
-const MAX_BACKTRACK_FRACTION: f64 = 0.15;
+pub(crate) const MAX_BACKTRACK_FRACTION: f64 = 0.15;
 /// An attempt must actually cover the segment, not shortcut between gates.
-const MIN_COVERAGE_FRACTION: f64 = 0.85;
+pub(crate) const MIN_COVERAGE_FRACTION: f64 = 0.85;
 /// Centerline bin size used by the coverage test, meters.
 const COVERAGE_BIN_M: f64 = 10.0;
 /// Assumed horizontal accuracy when a fix does not report one.
@@ -320,6 +341,7 @@ fn consider_run(
 /// Gate widths and the corridor are derived here, from the source ride's own
 /// horizontal accuracy, so the matching policy stays in Rust.
 #[uniffi::export]
+#[allow(clippy::too_many_arguments)]
 pub fn build_segment(
     id: String,
     name: String,
@@ -327,6 +349,7 @@ pub fn build_segment(
     track: Vec<CanonicalTrackPoint>,
     start_index: i32,
     end_index: i32,
+    min_length_m: Option<f64>,
 ) -> Result<SegmentDefinition, SegmentError> {
     let invalid = |msg: String| SegmentError::InvalidSelection { msg };
     if start_index < 0 || end_index < 0 {
@@ -353,6 +376,7 @@ pub fn build_segment(
         start_gate_center,
         finish_gate_center,
         1,
+        min_length_m,
     )
 }
 
@@ -360,6 +384,7 @@ pub fn build_segment(
 /// polyline. The integer part identifies a canonical point; the fractional
 /// part lies on the following edge.
 #[uniffi::export]
+#[allow(clippy::too_many_arguments)]
 pub fn build_segment_continuous(
     id: String,
     name: String,
@@ -367,6 +392,7 @@ pub fn build_segment_continuous(
     track: Vec<CanonicalTrackPoint>,
     start_position: f64,
     end_position: f64,
+    min_length_m: Option<f64>,
 ) -> Result<SegmentBuildResult, SegmentError> {
     let invalid = |msg: String| SegmentError::InvalidSelection { msg };
     if track.len() < 2 {
@@ -404,6 +430,7 @@ pub fn build_segment_continuous(
         start_gate_center,
         finish_gate_center,
         2,
+        min_length_m,
     )?;
     Ok(SegmentBuildResult {
         definition,
@@ -420,6 +447,7 @@ pub fn build_segment_continuous(
 /// a gate into accepting travel along a crossing trail. Gate centers are not
 /// snapped: map editors may place them at any valid geographic coordinate.
 #[uniffi::export]
+#[allow(clippy::too_many_arguments)]
 pub fn build_segment_continuous_with_gates(
     id: String,
     name: String,
@@ -428,6 +456,7 @@ pub fn build_segment_continuous_with_gates(
     start_position: f64,
     end_position: f64,
     gate_centers: SegmentGateCenters,
+    min_length_m: Option<f64>,
 ) -> Result<SegmentBuildResult, SegmentError> {
     let invalid = |msg: String| SegmentError::InvalidSelection { msg };
     if track.len() < 2 {
@@ -465,6 +494,7 @@ pub fn build_segment_continuous_with_gates(
         gate_centers.start,
         gate_centers.finish,
         3,
+        min_length_m,
     )?;
     Ok(SegmentBuildResult {
         definition,
@@ -473,6 +503,7 @@ pub fn build_segment_continuous_with_gates(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_segment_definition(
     id: String,
     name: String,
@@ -481,6 +512,7 @@ fn build_segment_definition(
     start_gate_center: LatLon,
     finish_gate_center: LatLon,
     geometry_version: i32,
+    min_length_m: Option<f64>,
 ) -> Result<SegmentDefinition, SegmentError> {
     let invalid = |msg: String| SegmentError::InvalidSelection { msg };
     if selection
@@ -497,10 +529,11 @@ fn build_segment_definition(
         return Err(invalid("selection crosses a recording gap".to_string()));
     }
 
+    let minimum_m = resolved_min_length_m(min_length_m);
     let length_m = polyline_length_m(selection);
-    if length_m < MIN_SEGMENT_LENGTH_M {
+    if length_m < minimum_m {
         return Err(invalid(format!(
-            "selection is {length_m:.0} m, minimum is {MIN_SEGMENT_LENGTH_M:.0} m"
+            "selection is {length_m:.0} m, minimum is {minimum_m:.0} m"
         )));
     }
 
@@ -842,10 +875,10 @@ enum GateKind {
 
 /// One directed gate line in projected meters.
 #[derive(Debug, Clone, Copy)]
-struct GateLine {
-    a: [f64; 2],
-    b: [f64; 2],
-    bearing_deg: f64,
+pub(crate) struct GateLine {
+    pub(crate) a: [f64; 2],
+    pub(crate) b: [f64; 2],
+    pub(crate) bearing_deg: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -856,12 +889,16 @@ struct GateEvent {
     index: usize,
 }
 
-fn gate_at_start(centerline: &[[f64; 2]], center: [f64; 2], half_width_m: f64) -> Option<GateLine> {
+pub(crate) fn gate_at_start(
+    centerline: &[[f64; 2]],
+    center: [f64; 2],
+    half_width_m: f64,
+) -> Option<GateLine> {
     let tangent = forward_tangent(centerline)?;
     Some(gate_line(center, tangent, half_width_m))
 }
 
-fn gate_at_finish(
+pub(crate) fn gate_at_finish(
     centerline: &[[f64; 2]],
     center: [f64; 2],
     half_width_m: f64,
@@ -1147,14 +1184,23 @@ fn coverage_fraction(progress: &[f64], total_length: f64) -> f64 {
     if total_length <= 0.0 || progress.is_empty() {
         return 0.0;
     }
-    let bins = ((total_length / COVERAGE_BIN_M).round() as usize).clamp(8, 400);
+    let bins = coverage_bins(total_length);
     let mut visited = vec![false; bins];
     for s in progress {
-        let bin = ((s / total_length) * bins as f64).floor();
-        let bin = (bin.max(0.0) as usize).min(bins - 1);
-        visited[bin] = true;
+        visited[coverage_bin_index(*s, total_length, bins)] = true;
     }
     visited.iter().filter(|seen| **seen).count() as f64 / bins as f64
+}
+
+/// Bin count of the coverage test. Shared with live matching so a run cannot
+/// be judged complete on the trail and incomplete after Finish.
+pub(crate) fn coverage_bins(total_length: f64) -> usize {
+    ((total_length / COVERAGE_BIN_M).round() as usize).clamp(8, 400)
+}
+
+pub(crate) fn coverage_bin_index(s: f64, total_length: f64, bins: usize) -> usize {
+    let bin = ((s / total_length) * bins as f64).floor();
+    (bin.max(0.0) as usize).min(bins - 1)
 }
 
 /// Perpendicular distance from `point` to `polyline`, plus the arclength of the
@@ -1302,6 +1348,11 @@ fn median_accuracy_m(track: &[CanonicalTrackPoint]) -> Option<f64> {
 mod tests {
     use super::*;
 
+    /// Geometry fixtures are a couple of hundred metres — long enough to
+    /// exercise gates and corridors, shorter than the production floor. The
+    /// floor itself has its own test.
+    const TEST_MIN_LENGTH_M: Option<f64> = Some(50.0);
+
     const LAT: f64 = 43.0;
     const LON: f64 = 42.0;
     /// Meters per degree of latitude at [`LAT`], and of longitude at [`LAT`].
@@ -1335,6 +1386,14 @@ mod tests {
             .collect()
     }
 
+    /// Long enough to clear the production floor, for the proposal tests: a
+    /// proposal the editor would refuse to save is not a useful proposal.
+    fn long_straight_track(start_ms: i64) -> Vec<CanonicalTrackPoint> {
+        (0..=600)
+            .map(|step| point(start_ms + step * 200, 0.0, step as f64 * 1.0))
+            .collect()
+    }
+
     /// Appends a straight leg sampled roughly every meter at 5 Hz, continuing
     /// from the current end of `track`.
     fn append_leg(track: &mut Vec<CanonicalTrackPoint>, from: (f64, f64), to: (f64, f64)) {
@@ -1363,6 +1422,7 @@ mod tests {
             track.to_vec(),
             0,
             (track.len() - 1) as i32,
+            TEST_MIN_LENGTH_M,
         )
         .expect("selection should be valid")
     }
@@ -1644,6 +1704,7 @@ mod tests {
             track,
             0.25,
             199.75,
+            TEST_MIN_LENGTH_M,
         )
         .expect("continuous selection should be valid");
 
@@ -1679,6 +1740,7 @@ mod tests {
                 start: start_gate_center,
                 finish: finish_gate_center,
             },
+            TEST_MIN_LENGTH_M,
         )
         .expect("free gate centers should be valid")
         .definition;
@@ -1703,6 +1765,7 @@ mod tests {
             track,
             99.5,
             199.0,
+            TEST_MIN_LENGTH_M,
         )
         .expect_err("fractional position cannot cross a pause");
         assert!(matches!(error, SegmentError::InvalidSelection { .. }));
@@ -1720,9 +1783,43 @@ mod tests {
             track,
             0,
             20,
+            None,
         )
         .expect_err("20 m selection must be rejected");
         assert!(matches!(error, SegmentError::InvalidSelection { .. }));
+    }
+
+    #[test]
+    fn the_production_floor_rejects_a_trail_length_selection() {
+        // 200 m is a real stretch of trail and still not a segment: two gates
+        // account for most of it and the time would be gate placement.
+        let track: Vec<CanonicalTrackPoint> = (0..=200)
+            .map(|step| point(step * 200, 0.0, step as f64))
+            .collect();
+        let error = build_segment(
+            "seg".to_string(),
+            "Two hundred".to_string(),
+            "source".to_string(),
+            track.clone(),
+            0,
+            200,
+            None,
+        )
+        .expect_err("200 m must be below the production floor");
+        assert!(matches!(error, SegmentError::InvalidSelection { .. }));
+
+        // Developer mode may lower the floor to validate gate behaviour on a
+        // stretch next to the house, but never below its own limit.
+        build_segment(
+            "seg".to_string(),
+            "Two hundred".to_string(),
+            "source".to_string(),
+            track,
+            0,
+            200,
+            Some(1.0),
+        )
+        .expect("a developer floor makes the same selection valid");
     }
 
     #[test]
@@ -1738,6 +1835,7 @@ mod tests {
             track,
             0,
             200,
+            TEST_MIN_LENGTH_M,
         )
         .expect_err("a selection crossing a pause must be rejected");
         assert!(matches!(error, SegmentError::InvalidSelection { .. }));
@@ -1745,21 +1843,21 @@ mod tests {
 
     #[test]
     fn proposal_picks_the_longest_downhill_run() {
-        let mut track = straight_track(0);
+        let mut track = long_straight_track(0);
         // Transit for the first 60 points, downhill for the rest.
         for point in track.iter_mut().take(60) {
             point.activity_state = ActivityState::Transit;
         }
         let proposal = propose_segment(track).expect("a downhill run should be proposed");
         assert_eq!(proposal.start_index, 60);
-        assert_eq!(proposal.end_index, 200);
-        assert!(proposal.length_m > 130.0 && proposal.length_m < 145.0);
+        assert_eq!(proposal.end_index, 600);
+        assert!(proposal.length_m > 520.0 && proposal.length_m < 560.0);
         assert!(proposal.descent_m.is_some_and(|drop| drop > 13.0));
     }
 
     #[test]
     fn proposal_never_crosses_a_pause() {
-        let mut track = straight_track(0);
+        let mut track = long_straight_track(0);
         for point in track.iter_mut().skip(100) {
             point.section_id = 1;
         }

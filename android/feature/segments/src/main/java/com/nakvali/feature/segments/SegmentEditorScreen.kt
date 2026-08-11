@@ -16,8 +16,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.size
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.outlined.ZoomInMap
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
@@ -33,24 +41,30 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nakvali.core.map.SegmentMap
+import com.nakvali.core.map.SegmentMapCamera
 import com.nakvali.core.map.SegmentMapCameraRequest
 import com.nakvali.core.map.SegmentMapCameraTarget
 import com.nakvali.core.map.SegmentMapGate
 import com.nakvali.core.map.SegmentMapPoint
 import com.nakvali.core.recording.CanonicalPoint
+import com.nakvali.core.recording.normalizeSegmentName
+import com.nakvali.core.recording.segmentNameProblem
+import com.nakvali.core.recording.SegmentDifficulty
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliPanel
@@ -58,7 +72,6 @@ import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliTextField
-import com.nakvali.core.ui.rememberSheetFlingBoundary
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -77,7 +90,12 @@ fun SegmentEditorScreen(
     onCreated: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SegmentEditorViewModel = viewModel(
-        key = "segment-editor-${source.javaClass.simpleName}-${source.id}",
+        key = buildString {
+            append("segment-editor-${source.javaClass.simpleName}-${source.id}")
+            if (source is SegmentEditorSource.Ride) {
+                append("-${source.initialStartPosition}-${source.initialEndPosition}")
+            }
+        },
         factory = SegmentEditorViewModel.factory(source),
     ),
 ) {
@@ -111,8 +129,12 @@ fun SegmentEditorScreen(
             state = current,
             onBack = onBack,
             onSelectionChange = viewModel::setSelection,
+            onGestureStart = viewModel::beginGateGesture,
+            onUndo = viewModel::undo,
             onGateCenterChange = viewModel::setGateCenter,
             onNameChange = viewModel::setName,
+            onDifficultyChange = viewModel::setDifficulty,
+            onExternalUrlChange = viewModel::setExternalUrl,
             onSave = {
                 viewModel.save(
                     onSaved = onCreated,
@@ -152,7 +174,11 @@ private fun EditorBody(
     onBack: () -> Unit,
     onSelectionChange: (Double, Double) -> Unit,
     onGateCenterChange: (SelectionHandle, com.nakvali.fusion.LatLon) -> Unit,
+    onGestureStart: () -> Unit,
+    onUndo: () -> Unit,
     onNameChange: (String) -> Unit,
+    onDifficultyChange: (SegmentDifficulty?) -> Unit,
+    onExternalUrlChange: (String) -> Unit,
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -161,6 +187,14 @@ private fun EditorBody(
         mutableStateOf(focusedDomain(state.startPosition, state.endPosition, lastPosition))
     }
     var activeHandle by remember { mutableStateOf<SelectionHandle?>(null) }
+    // The map's zoom refines dragging on the chart, so a rider who has zoomed
+    // in on a gate gets the same scale in both instruments.
+    var mapZoom by remember { mutableDoubleStateOf(0.0) }
+    // Where the camera was before a hold closed in on a gate, so the rider
+    // gets their own view back when they let go.
+    var settledCamera by remember { mutableStateOf<SegmentMapCamera?>(null) }
+    var cameraBeforeFine by remember { mutableStateOf<SegmentMapCamera?>(null) }
+    var cameraToken by remember { mutableIntStateOf(0) }
     var cameraRequest by remember {
         mutableStateOf(
             SegmentMapCameraRequest(
@@ -178,7 +212,6 @@ private fun EditorBody(
     }
     val valid = state.preview as? SelectionPreview.Valid
     val wholeRide = domain.start <= 0.0 && domain.end >= lastPosition
-    val flingBoundary = rememberSheetFlingBoundary()
     val sheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true,
@@ -201,7 +234,19 @@ private fun EditorBody(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.88f),
+                    // Exactly the height the sheet may have, never a fraction
+                    // of the screen: asking for 88% left the sheet trying to
+                    // become a size the scaffold would not grant, which is the
+                    // resistance that made scrolling feel random. With the
+                    // content bound to the sheet's own maximum, the inner
+                    // scroll gets a real viewport and the sheet stops fighting
+                    // it.
+                    .fillMaxHeight()
+                    // One scroll for the whole body. Splitting it left the
+                    // details below a fixed-height trimmer with a viewport the
+                    // size of their own content, so there was nothing to
+                    // scroll anywhere except inside the name field.
+                    .verticalScroll(rememberScrollState()),
             ) {
                 Column(modifier = Modifier.padding(horizontal = NakvaliSpacing.screen)) {
                     Row(
@@ -263,18 +308,68 @@ private fun EditorBody(
                                 lastPosition,
                             )
                         },
-                        onActiveHandleChange = { activeHandle = it },
+                        mapZoom = mapZoom,
+                        onFineModeChange = { fine ->
+                            // Precision is scale: holding a handle brings the
+                            // map down to the gate, and letting go returns the
+                            // rider to the view they had chosen.
+                            val gate = when (activeHandle) {
+                                SelectionHandle.FINISH -> state.finishGateCenter.toMapPoint()
+                                else -> state.startGateCenter.toMapPoint()
+                            }
+                            cameraToken += 1
+                            if (fine) {
+                                cameraBeforeFine = settledCamera
+                                cameraRequest = SegmentMapCameraRequest(
+                                    target = SegmentMapCameraTarget.GATE_CLOSEUP,
+                                    token = cameraToken,
+                                    point = gate,
+                                )
+                            } else {
+                                cameraRequest = SegmentMapCameraRequest(
+                                    target = SegmentMapCameraTarget.RESTORE,
+                                    token = cameraToken,
+                                    restore = cameraBeforeFine,
+                                )
+                                cameraBeforeFine = null
+                            }
+                        },
+                        onActiveHandleChange = { handle ->
+                            // A grab is the start of a move: snapshot here, not
+                            // on release, so undo returns to where the gate was
+                            // before the finger touched it.
+                            if (handle != null && activeHandle == null) onGestureStart()
+                            activeHandle = handle
+                        },
                         height = SegmentProfileHeight,
                     )
-                    TrimmerStatus(state = state, valid = valid, wholeRide = wholeRide)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.weight(1f)) {
+                            TrimmerStatus(state = state, valid = valid, wholeRide = wholeRide)
+                        }
+                        // Undo is only offered once there is something to take
+                        // back, so the row stays quiet on a fresh selection.
+                        if (state.canUndo) {
+                            TextButton(onClick = onUndo) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Undo,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(NakvaliSpacing.small))
+                                Text("Undo")
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(NakvaliSpacing.small))
                 }
                 NakvaliDivider(Modifier.padding(top = NakvaliSpacing.small))
                 Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .nestedScroll(flingBoundary)
-                        .verticalScroll(rememberScrollState())
                         .padding(
                             start = NakvaliSpacing.screen,
                             end = NakvaliSpacing.screen,
@@ -287,6 +382,8 @@ private fun EditorBody(
                         state = state,
                         valid = valid,
                         onNameChange = onNameChange,
+                        onDifficultyChange = onDifficultyChange,
+                        onExternalUrlChange = onExternalUrlChange,
                         onSave = onSave,
                     )
                 }
@@ -305,6 +402,12 @@ private fun EditorBody(
                     null -> null
                 },
                 trackingBottomInset = SegmentEditorSheetPeekHeight,
+                onZoomChanged = { mapZoom = it },
+                onCameraSettled = { camera ->
+                    // Only remember the rider's own framing: a close-up is the
+                    // editor's doing and must never become what we restore to.
+                    if (cameraBeforeFine == null) settledCamera = camera
+                },
                 startGate = state.startGateCenter.toMapPoint(),
                 finishGate = state.finishGateCenter.toMapPoint(),
                 onGateDrag = { gate, point ->
@@ -318,6 +421,7 @@ private fun EditorBody(
                     )
                 },
                 onGateDragStateChanged = { gate ->
+                    if (gate != null && activeHandle == null) onGestureStart()
                     activeHandle = when (gate) {
                         SegmentMapGate.START -> SelectionHandle.START
                         SegmentMapGate.FINISH -> SelectionHandle.FINISH
@@ -400,6 +504,8 @@ private fun SegmentEditorDetails(
     state: SegmentEditorState.Editing,
     valid: SelectionPreview.Valid?,
     onNameChange: (String) -> Unit,
+    onDifficultyChange: (SegmentDifficulty?) -> Unit,
+    onExternalUrlChange: (String) -> Unit,
     onSave: () -> Unit,
 ) {
     Column {
@@ -457,53 +563,148 @@ private fun SegmentEditorDetails(
         }
         if (state.duplicateOf != null) {
             Spacer(Modifier.height(NakvaliSpacing.medium))
+            var duplicateExplained by rememberSaveable { mutableStateOf(false) }
             NakvaliPanel(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
             ) {
-                Text(
-                    text = "This selection covers “${state.duplicateOf}”, which you already " +
-                        "have. Nakvali never merges segments, so saving this creates a second " +
-                        "one with its own results.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(NakvaliSpacing.large),
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { duplicateExplained = !duplicateExplained }
+                        .padding(NakvaliSpacing.large),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Already covered by “${state.duplicateOf}”",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            imageVector = if (duplicateExplained) {
+                                Icons.Filled.ExpandLess
+                            } else {
+                                Icons.Filled.ExpandMore
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    AnimatedVisibility(visible = duplicateExplained) {
+                        Text(
+                            text = "Nakvali never merges segments, so saving this creates a " +
+                                "second one with its own results.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = NakvaliSpacing.small),
+                        )
+                    }
+                }
             }
         }
         valid?.let { preview ->
             Spacer(Modifier.height(NakvaliSpacing.medium))
+            // The numbers are worth a glance every time; the paragraph behind
+            // them is worth reading once. Explanations are folded away by
+            // default so they stop pushing the form off the screen.
+            var explained by rememberSaveable { mutableStateOf(false) }
             NakvaliPanel(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Gates ${preview.gateWidthM.toInt()} m wide, corridor " +
-                        "${preview.corridorM.toInt()} m — " +
-                        (if (state.importedGpx) {
-                            "a conservative initial margin because imported GPX has no " +
-                                "trustworthy accuracy. "
-                        } else {
-                            "derived from this ride's own GPS accuracy estimate. "
-                        }) +
-                        "Drag either gate directly on the map for exact " +
-                        "placement. The first segment stays a draft: it times runs but is " +
-                        "not treated as ground truth.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(NakvaliSpacing.large),
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { explained = !explained }
+                        .padding(NakvaliSpacing.large),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Gates ${preview.gateWidthM.toInt()} m · corridor " +
+                                "${preview.corridorM.toInt()} m",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            imageVector = if (explained) {
+                                Icons.Filled.ExpandLess
+                            } else {
+                                Icons.Filled.ExpandMore
+                            },
+                            contentDescription = if (explained) "Hide details" else "What is this?",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    AnimatedVisibility(visible = explained) {
+                        Text(
+                            text = (if (state.importedGpx) {
+                                "A conservative initial margin, because imported GPX has no " +
+                                    "trustworthy accuracy. "
+                            } else {
+                                "Derived from this ride's own GPS accuracy estimate. "
+                            }) +
+                                "Drag either gate directly on the map for exact " +
+                                "placement. The first segment stays a draft: it times runs " +
+                                "but is not treated as ground truth.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = NakvaliSpacing.small),
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(NakvaliSpacing.large))
+        // The rule is explained while the name is being typed, never held back
+        // until the rider reaches for Save.
+        val nameProblem = segmentNameProblem(state.name)
         NakvaliTextField(
             value = state.name,
-            onValueChange = onNameChange,
+            onValueChange = { onNameChange(normalizeSegmentName(it)) },
             label = "Segment name",
             placeholder = "Name this trail",
+            supportingText = nameProblem
+                ?: "Letters and digits, numbers as separate words",
+            isError = nameProblem != null,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(NakvaliSpacing.large))
+        NakvaliSectionLabel("Difficulty · optional")
+        Spacer(Modifier.height(NakvaliSpacing.small))
+        SegmentDifficultyPicker(
+            value = state.difficulty,
+            onValueChange = onDifficultyChange,
+        )
+        Spacer(Modifier.height(NakvaliSpacing.large))
+        val externalUrlValid = SegmentEditorViewModel.externalUrlIsValid(state.externalUrl)
+        NakvaliTextField(
+            value = state.externalUrl,
+            onValueChange = onExternalUrlChange,
+            label = "Trail page · optional",
+            placeholder = "trailforks.com/trails/…",
+            supportingText = if (externalUrlValid) {
+                "Trailforks or another public trail resource"
+            } else {
+                "Enter a valid web address"
+            },
+            isError = !externalUrlValid,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(NakvaliSpacing.large))
         Button(
             onClick = onSave,
-            enabled = valid != null && state.name.isNotBlank() && !state.saving,
+            enabled = valid != null &&
+                state.name.isNotBlank() &&
+                nameProblem == null &&
+                externalUrlValid &&
+                !state.saving,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(NakvaliSizes.primaryActionHeight),

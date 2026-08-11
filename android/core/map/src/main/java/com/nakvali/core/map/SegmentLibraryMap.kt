@@ -31,6 +31,9 @@ import org.maplibre.geojson.Point
 data class SegmentLibraryLine(
     val id: String,
     val points: List<SegmentMapPoint>,
+    /** CSS colors keep the map module independent from segment-domain enums. */
+    val lineColor: String,
+    val casingColor: String,
 )
 
 /** The rider's own view of the library, retained across navigation. */
@@ -68,6 +71,8 @@ private const val LIBRARY_SELECTED_LAYER_ID = "nakvali-library-segment-selected"
 private const val LIBRARY_ENDPOINT_SOURCE_ID = "nakvali-library-endpoints"
 private const val LIBRARY_ENDPOINT_LAYER_ID = "nakvali-library-endpoint-circles"
 private const val SEGMENT_ID_PROPERTY = "segment_id"
+private const val LINE_COLOR_PROPERTY = "line_color"
+private const val CASING_COLOR_PROPERTY = "casing_color"
 private const val ENDPOINT_ROLE_PROPERTY = "role"
 private const val LIBRARY_ROLE_START = "start"
 private const val LIBRARY_ROLE_FINISH = "finish"
@@ -184,7 +189,9 @@ fun SegmentLibraryMap(
                 // casing that separates it from any basemap.
                 style.addLayer(
                     LineLayer(LIBRARY_CASING_LAYER_ID, LIBRARY_SOURCE_ID).withProperties(
-                        PropertyFactory.lineColor(palette.roadCasing),
+                        PropertyFactory.lineColor(
+                            Expression.toColor(Expression.get(CASING_COLOR_PROPERTY)),
+                        ),
                         PropertyFactory.lineWidth(6.5f),
                         PropertyFactory.lineOpacity(0.7f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
@@ -193,7 +200,9 @@ fun SegmentLibraryMap(
                 )
                 style.addLayer(
                     LineLayer(LIBRARY_LINE_LAYER_ID, LIBRARY_SOURCE_ID).withProperties(
-                        PropertyFactory.lineColor(palette.primary),
+                        PropertyFactory.lineColor(
+                            Expression.toColor(Expression.get(LINE_COLOR_PROPERTY)),
+                        ),
                         PropertyFactory.lineWidth(3.5f),
                         PropertyFactory.lineOpacity(0.62f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
@@ -205,7 +214,9 @@ fun SegmentLibraryMap(
                         LIBRARY_SELECTED_CASING_LAYER_ID,
                         LIBRARY_SOURCE_ID,
                     ).withProperties(
-                        PropertyFactory.lineColor(palette.roadCasing),
+                        PropertyFactory.lineColor(
+                            Expression.toColor(Expression.get(CASING_COLOR_PROPERTY)),
+                        ),
                         PropertyFactory.lineWidth(9f),
                         PropertyFactory.lineOpacity(0.9f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
@@ -214,7 +225,9 @@ fun SegmentLibraryMap(
                 )
                 style.addLayer(
                     LineLayer(LIBRARY_SELECTED_LAYER_ID, LIBRARY_SOURCE_ID).withProperties(
-                        PropertyFactory.lineColor(palette.primary),
+                        PropertyFactory.lineColor(
+                            Expression.toColor(Expression.get(LINE_COLOR_PROPERTY)),
+                        ),
                         PropertyFactory.lineWidth(5.5f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -318,7 +331,11 @@ private fun renderLibrary(
         val features = lines.filter { it.points.size >= 2 }.map { line ->
             Feature.fromGeometry(
                 LineString.fromLngLats(line.points.map { Point.fromLngLat(it.lon, it.lat) }),
-            ).also { it.addStringProperty(SEGMENT_ID_PROPERTY, line.id) }
+            ).also { feature ->
+                feature.addStringProperty(SEGMENT_ID_PROPERTY, line.id)
+                feature.addStringProperty(LINE_COLOR_PROPERTY, line.lineColor)
+                feature.addStringProperty(CASING_COLOR_PROPERTY, line.casingColor)
+            }
         }
         source.setGeoJson(FeatureCollection.fromFeatures(features))
     }

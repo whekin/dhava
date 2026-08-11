@@ -5,20 +5,20 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
 /**
- * Nakvali palette, derived from a deep orange / dirt-red seed (#D84315).
- * Dark surfaces resemble soil, rubber and workshop carbon rather than the
- * neutral blue-gray defaults. The brighter orange is reserved for action and
- * live state so it stays legible outdoors without turning every surface warm.
+ * Nakvali palette, derived from a vivid fern-green seed (#2E8B57).
+ * Dark surfaces still resemble soil, rubber and workshop carbon rather than
+ * neutral blue-gray defaults. The fresh green is reserved for action, the
+ * canonical track and live state so it remains legible outdoors.
  */
 
 // Seed family
-val DirtRed = Color(0xFFD84315)
+val TrailGreen = Color(0xFF2E8B57)
 
 // Dark scheme (primary look)
-val DarkPrimary = Color(0xFFFF7040)
-val DarkOnPrimary = Color(0xFF2B0B00)
-val DarkPrimaryContainer = Color(0xFF6D2108)
-val DarkOnPrimaryContainer = Color(0xFFFFD8CA)
+val DarkPrimary = Color(0xFF6FDD87)
+val DarkOnPrimary = Color(0xFF003916)
+val DarkPrimaryContainer = Color(0xFF18542C)
+val DarkOnPrimaryContainer = Color(0xFFAEF5BA)
 val DarkSecondary = Color(0xFFD0B9B0)
 val DarkOnSecondary = Color(0xFF382D29)
 val DarkSecondaryContainer = Color(0xFF443631)
@@ -46,10 +46,10 @@ val DarkSurfaceContainerHigh = Color(0xFF261F1C)
 val DarkSurfaceContainerHighest = Color(0xFF302722)
 
 // Light scheme (secondary look)
-val LightPrimary = Color(0xFFAC2F00)
+val LightPrimary = Color(0xFF176C35)
 val LightOnPrimary = Color(0xFFFFFFFF)
-val LightPrimaryContainer = Color(0xFFFFDBCF)
-val LightOnPrimaryContainer = Color(0xFF3A0A00)
+val LightPrimaryContainer = Color(0xFFA6F5B7)
+val LightOnPrimaryContainer = Color(0xFF00210C)
 val LightSecondary = Color(0xFF77574C)
 val LightOnSecondary = Color(0xFFFFFFFF)
 val LightSecondaryContainer = Color(0xFFFFDBCF)

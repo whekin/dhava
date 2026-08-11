@@ -25,6 +25,10 @@ import kotlinx.serialization.Serializable
 data class StoredSegment(
     val id: String,
     val name: String,
+    /** Optional rider-authored trail context; it never changes timing geometry. */
+    val difficulty: SegmentDifficulty? = null,
+    @SerialName("external_links")
+    val externalLinks: List<SegmentExternalLink> = emptyList(),
     @SerialName("source_recording_id") val sourceRecordingId: String,
     @SerialName("source_kind") val sourceKind: SegmentSourceKind = SegmentSourceKind.RIDE,
     @SerialName("geometry_version") val geometryVersion: Int,
@@ -49,6 +53,27 @@ data class StoredSegment(
      */
     val trusted: Boolean = false,
     @SerialName("created_at_ms") val createdAtMs: Long,
+)
+
+/** A small, signage-shaped scale; null means the segment has not been graded. */
+@Serializable
+enum class SegmentDifficulty {
+    @SerialName("green") GREEN,
+
+    @SerialName("blue") BLUE,
+
+    @SerialName("red") RED,
+
+    @SerialName("black") BLACK,
+
+    @SerialName("double_black") DOUBLE_BLACK,
+}
+
+/** Attribution to a trail catalog or community page. */
+@Serializable
+data class SegmentExternalLink(
+    val provider: String,
+    val url: String,
 )
 
 @Serializable
@@ -204,9 +229,13 @@ fun StoredSegment.toDefinition(): SegmentDefinition = SegmentDefinition(
 fun SegmentDefinition.toStored(
     createdAtMs: Long,
     sourceKind: SegmentSourceKind = SegmentSourceKind.RIDE,
+    difficulty: SegmentDifficulty? = null,
+    externalLinks: List<SegmentExternalLink> = emptyList(),
 ): StoredSegment = StoredSegment(
     id = id,
     name = name,
+    difficulty = difficulty,
+    externalLinks = externalLinks,
     sourceRecordingId = sourceRecordingId,
     sourceKind = sourceKind,
     geometryVersion = geometryVersion,
@@ -227,6 +256,30 @@ fun SegmentDefinition.toStored(
     trusted = trusted,
     createdAtMs = createdAtMs,
 )
+
+/** Accepts only web links and adds https when the rider omitted a scheme. */
+fun normalizeExternalTrailUrl(value: String): String? {
+    val trimmed = value.trim()
+    if (trimmed.isEmpty()) return null
+    val candidate = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+    val uri = runCatching { java.net.URI(candidate) }.getOrNull() ?: return null
+    if (uri.scheme?.lowercase() !in setOf("http", "https")) return null
+    val host = uri.host?.lowercase()?.removePrefix("www.") ?: return null
+    if (host.isBlank() || !host.contains('.')) return null
+    return uri.normalize().toASCIIString()
+}
+
+fun externalTrailProvider(url: String): String {
+    val host = runCatching { java.net.URI(url).host.orEmpty().lowercase().removePrefix("www.") }
+        .getOrDefault("")
+    return when {
+        host == "trailforks.com" || host.endsWith(".trailforks.com") -> "Trailforks"
+        host == "mtbproject.com" || host.endsWith(".mtbproject.com") -> "MTB Project"
+        host == "openstreetmap.org" || host.endsWith(".openstreetmap.org") -> "OpenStreetMap"
+        host == "komoot.com" || host.endsWith(".komoot.com") -> "Komoot"
+        else -> host.substringBefore('.').replaceFirstChar { it.uppercase() }.ifBlank { "Trail page" }
+    }
+}
 
 internal fun SegmentAttempt.toStored(): StoredAttempt = StoredAttempt(
     recordingId = recordingId,
@@ -343,3 +396,47 @@ fun List<StoredAttempt>.fastestUncountableAhead(record: StoredAttempt?): StoredA
         ?.takeIf { record == null || it.elapsedMs < record.elapsedMs }
 
 fun List<StoredAttempt>.latestAttempt(): StoredAttempt? = maxByOrNull { it.startedAtMs }
+
+/**
+ * Why a segment name is not acceptable, or null when it is.
+ *
+ * Trail names are read on leaderboards, in notifications and through a jacket
+ * pocket, so they are held to a shape rather than accepted as free text. The
+ * rules are deliberately few and each has a reason:
+ *
+ *  * at least one letter — "101" names nothing;
+ *  * digits stand apart from words — "Trail 2" is a variant of a trail, while
+ *    "Trail2" reads as a typo and sorts unpredictably;
+ *  * one alphabet per name — a Latin "a" inside a Cyrillic word is invisible
+ *    to the eye and fatal to search;
+ *  * letters, digits, spaces and hyphens only.
+ *
+ * Returned as a message the rider can act on, shown while typing rather than
+ * saved up for the moment they press Save.
+ */
+fun segmentNameProblem(name: String): String? {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) return null
+    if (trimmed.none(Char::isLetter)) return "Give the trail a name, not just numbers"
+    if (trimmed.any { !it.isLetterOrDigit() && it != ' ' && it != '-' }) {
+        return "Letters, digits, spaces and hyphens only"
+    }
+    val glued = trimmed.zipWithNext().any { (left, right) ->
+        (left.isLetter() && right.isDigit()) || (left.isDigit() && right.isLetter())
+    }
+    if (glued) return "Separate numbers from words, like “Ridge 2”"
+    val latin = trimmed.any { it in 'a'..'z' || it in 'A'..'Z' }
+    val cyrillic = trimmed.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
+    if (latin && cyrillic) return "Keep one alphabet per name"
+    return null
+}
+
+/**
+ * The stored form of an accepted name: single spaces, capital first letter.
+ *
+ * Applied as the rider types, so what they see is what gets saved.
+ */
+fun normalizeSegmentName(name: String): String = name
+    .replace(Regex("\\s+"), " ")
+    .trimStart()
+    .replaceFirstChar { it.uppercaseChar() }

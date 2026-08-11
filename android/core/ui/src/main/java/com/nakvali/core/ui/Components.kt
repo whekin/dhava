@@ -177,19 +177,31 @@ fun NakvaliEmptyState(
     description: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(
-            modifier = Modifier.padding(horizontal = NakvaliSpacing.xLarge, vertical = 40.dp),
+            modifier = Modifier.padding(
+                horizontal = NakvaliSpacing.xLarge,
+                vertical = NakvaliSpacing.xxLarge,
+            ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(36.dp),
-                )
+                Surface(
+                    modifier = Modifier.size(56.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(NakvaliSpacing.large))
             }
             Text(
@@ -205,6 +217,10 @@ fun NakvaliEmptyState(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+            if (action != null) {
+                Spacer(Modifier.height(NakvaliSpacing.xLarge))
+                action()
+            }
         }
     }
 }

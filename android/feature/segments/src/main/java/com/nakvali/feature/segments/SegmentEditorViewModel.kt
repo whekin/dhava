@@ -9,6 +9,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.nakvali.core.fusion.FusionCore
 import com.nakvali.core.recording.CanonicalPoint
 import com.nakvali.core.recording.RecordingRepository
+import com.nakvali.core.recording.SegmentDifficulty
+import com.nakvali.core.recording.normalizeExternalTrailUrl
 import com.nakvali.core.recording.toCanonicalTrack
 import com.nakvali.core.recording.toDefinition
 import com.nakvali.fusion.CanonicalTrackPoint
@@ -44,11 +46,15 @@ sealed interface SegmentEditorState {
         val startGateCenter: LatLon,
         val finishGateCenter: LatLon,
         val name: String,
+        val difficulty: SegmentDifficulty? = null,
+        val externalUrl: String = "",
         /** Rust-derived preview of the current selection, or its rejection. */
         val preview: SelectionPreview,
         /** The existing segment this selection would duplicate, if any. */
         val duplicateOf: String? = null,
         val saving: Boolean = false,
+        /** Whether a finished gate move can still be taken back. */
+        val canUndo: Boolean = false,
     ) : SegmentEditorState
 }
 
@@ -85,7 +91,11 @@ enum class SelectionHandle { START, FINISH }
 sealed interface SegmentEditorSource {
     val id: String
 
-    data class Ride(override val id: String) : SegmentEditorSource
+    data class Ride(
+        override val id: String,
+        val initialStartPosition: Double? = null,
+        val initialEndPosition: Double? = null,
+    ) : SegmentEditorSource
     data class ImportedGpx(override val id: String) : SegmentEditorSource
 }
 
@@ -115,6 +125,16 @@ class SegmentEditorViewModel(
     private var existing: List<SegmentDefinition> = emptyList()
 
     private var previewJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Selections as they were before each gate move.
+     *
+     * Pushed when a handle is grabbed rather than when it is released: the
+     * state at the start of a gesture is what the rider wants back, and a drag
+     * emits hundreds of intermediate positions that must never each become a
+     * step. Bounded — this is an undo button, not a document history.
+     */
+    private val history = ArrayDeque<GateSelection>()
 
     init {
         viewModelScope.launch {
@@ -158,10 +178,23 @@ class SegmentEditorViewModel(
             val fallback = withContext(Dispatchers.Default) {
                 runCatching { FusionCore.proposeSegment(fusionTrack) }.getOrNull()
             }
-            val start = candidates.firstOrNull()?.startPosition
+            val requested = (source as? SegmentEditorSource.Ride)
+                ?.let { ride ->
+                    ride.initialStartPosition?.let { start ->
+                        ride.initialEndPosition?.let { end ->
+                            (start to end).takeIf {
+                                start.isFinite() && end.isFinite() &&
+                                    start >= 0.0 && end <= track.lastIndex.toDouble() && start < end
+                            }
+                        }
+                    }
+                }
+            val start = requested?.first
+                ?: candidates.firstOrNull()?.startPosition
                 ?: fallback?.startIndex?.toDouble()
                 ?: 0.0
-            val end = candidates.firstOrNull()?.endPosition
+            val end = requested?.second
+                ?: candidates.firstOrNull()?.endPosition
                 ?: fallback?.endIndex?.toDouble()
                 ?: track.lastIndex.toDouble()
             val title = loadedSource.title
@@ -174,6 +207,12 @@ class SegmentEditorViewModel(
                         track = fusionTrack,
                         startPosition = start,
                         endPosition = end,
+                        // The preview has to answer with the same floor the
+                        // save will apply. Asking Rust for the production one
+                        // here made developer mode unreachable: the editor
+                        // rejected a short selection long before the lowered
+                        // floor on the save path could be used.
+                        minLengthM = repository.developerSegmentFloorM(),
                     )
                 }
             }
@@ -213,6 +252,54 @@ class SegmentEditorViewModel(
         }
     }
 
+    /**
+     * Records where the gates were before the gesture that is starting now.
+     */
+    fun beginGateGesture() {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        val snapshot = GateSelection(
+            startPosition = editing.startPosition,
+            endPosition = editing.endPosition,
+            startGateCenter = editing.startGateCenter,
+            finishGateCenter = editing.finishGateCenter,
+        )
+        if (history.lastOrNull() == snapshot) return
+        history.addLast(snapshot)
+        while (history.size > MAX_UNDO_STEPS) history.removeFirst()
+        _state.value = editing.copy(canUndo = true)
+    }
+
+    /** Restores the gates to where they were before the last completed move. */
+    fun undo() {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        val previous = history.removeLastOrNull() ?: return
+        val restored = editing.copy(
+            startPosition = previous.startPosition,
+            endPosition = previous.endPosition,
+            startGateCenter = previous.startGateCenter,
+            finishGateCenter = previous.finishGateCenter,
+            canUndo = history.isNotEmpty(),
+        )
+        _state.value = restored
+        refreshPreview(restored)
+    }
+
+    private fun refreshPreview(editing: SegmentEditorState.Editing) {
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch {
+            val computed = withContext(Dispatchers.Default) {
+                preview(
+                    editing.startPosition,
+                    editing.endPosition,
+                    editing.startGateCenter,
+                    editing.finishGateCenter,
+                )
+            }
+            val current = _state.value as? SegmentEditorState.Editing ?: return@launch
+            _state.value = current.copy(preview = computed)
+        }
+    }
+
     fun setSelection(startPosition: Double, endPosition: Double) {
         val editing = _state.value as? SegmentEditorState.Editing ?: return
         val lastPosition = editing.track.lastIndex.toDouble()
@@ -248,9 +335,23 @@ class SegmentEditorViewModel(
 
     fun setGateCenter(handle: SelectionHandle, center: LatLon) {
         val editing = _state.value as? SegmentEditorState.Editing ?: return
+        // The authored gate centre stays exactly where the finger dropped it,
+        // but the selection has to come along: the map line, the trimmer
+        // handles and the preview all key off positions, and leaving them
+        // behind made a dragged marker detach from its own segment.
+        val position = FusionCore.nearestTrackPosition(
+            editing.track.toCanonicalTrack(),
+            center,
+        ).coerceIn(0.0, editing.track.lastIndex.toDouble())
         val updated = when (handle) {
-            SelectionHandle.START -> editing.copy(startGateCenter = center)
-            SelectionHandle.FINISH -> editing.copy(finishGateCenter = center)
+            SelectionHandle.START -> editing.copy(
+                startGateCenter = center,
+                startPosition = position.coerceAtMost(editing.endPosition),
+            )
+            SelectionHandle.FINISH -> editing.copy(
+                finishGateCenter = center,
+                endPosition = position.coerceAtLeast(editing.startPosition),
+            )
         }
         _state.value = updated
         previewJob?.cancel()
@@ -278,6 +379,16 @@ class SegmentEditorViewModel(
         _state.value = editing.copy(name = name)
     }
 
+    fun setDifficulty(difficulty: SegmentDifficulty?) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        _state.value = editing.copy(difficulty = difficulty)
+    }
+
+    fun setExternalUrl(url: String) {
+        val editing = _state.value as? SegmentEditorState.Editing ?: return
+        _state.value = editing.copy(externalUrl = url)
+    }
+
     /** Persists the selection; [onSaved] receives the new segment id. */
     fun save(onSaved: (String) -> Unit, onError: (String) -> Unit) {
         val editing = _state.value as? SegmentEditorState.Editing ?: return
@@ -289,6 +400,8 @@ class SegmentEditorViewModel(
                     is SegmentEditorSource.Ride -> repository.createSegment(
                         recordingId = source.id,
                         name = editing.name,
+                        difficulty = editing.difficulty,
+                        externalUrl = editing.externalUrl,
                         startPosition = editing.startPosition,
                         endPosition = editing.endPosition,
                         startGateCenter = editing.startGateCenter,
@@ -297,6 +410,8 @@ class SegmentEditorViewModel(
                     is SegmentEditorSource.ImportedGpx -> repository.createSegmentFromImportedTrace(
                         traceId = source.id,
                         name = editing.name,
+                        difficulty = editing.difficulty,
+                        externalUrl = editing.externalUrl,
                         startPosition = editing.startPosition,
                         endPosition = editing.endPosition,
                         startGateCenter = editing.startGateCenter,
@@ -376,6 +491,7 @@ class SegmentEditorViewModel(
             endPosition = endPosition,
             startGateCenter = startGateCenter,
             finishGateCenter = finishGateCenter,
+            minLengthM = repository.developerSegmentFloorM(),
         )
     }.fold(
         onSuccess = { result -> result.toPreview() },
@@ -391,7 +507,14 @@ class SegmentEditorViewModel(
         },
     )
 
-    private fun defaultName(rideTitle: String): String = "$rideTitle segment"
+    /**
+     * Left empty on purpose.
+     *
+     * A prefilled name is a name the rider has to delete before typing their
+     * own, and "<ride> segment" was never the name anyone wanted. The field
+     * carries a hint instead, and saving requires a real one.
+     */
+    private fun defaultName(rideTitle: String): String = ""
 
     private fun sourceId(): String = when (source) {
         is SegmentEditorSource.Ride -> source.id
@@ -430,6 +553,9 @@ class SegmentEditorViewModel(
     companion object {
         private const val PREVIEW_ID = "preview"
 
+        fun externalUrlIsValid(value: String): Boolean =
+            value.isBlank() || normalizeExternalTrailUrl(value) != null
+
         fun factory(source: SegmentEditorSource): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
@@ -439,3 +565,13 @@ class SegmentEditorViewModel(
         }
     }
 }
+
+/** One undoable gate placement. */
+private data class GateSelection(
+    val startPosition: Double,
+    val endPosition: Double,
+    val startGateCenter: LatLon,
+    val finishGateCenter: LatLon,
+)
+
+private const val MAX_UNDO_STEPS = 20

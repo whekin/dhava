@@ -33,6 +33,32 @@ data class CanonicalActivityArtifact(
      * the schema bump makes the store rebuild artifacts that predate it.
      */
     val quality: CanonicalQuality? = null,
+    /**
+     * Headline totals with transport removed — what the rider actually rode.
+     * Nullable for decode compatibility; the schema bump rebuilds older
+     * artifacts, which were computed before transport was excluded.
+     */
+    val ride: CanonicalRideTotals? = null,
+)
+
+/**
+ * What the rider did, with vehicle spans taken out.
+ *
+ * [CanonicalAnalysis] still describes the whole recording end to end; this is
+ * the part a rider should be shown, because a shuttle lap's kilometres and
+ * climb are not theirs. The transport figures are kept so the day still adds
+ * up rather than silently losing distance.
+ */
+@Serializable
+data class CanonicalRideTotals(
+    val distanceM: Double,
+    val movingTimeS: Double,
+    val ascentM: Double,
+    val descentM: Double,
+    val maxSpeedMps: Double,
+    val avgMovingSpeedMps: Double,
+    val transportDistanceM: Double,
+    val transportTimeS: Double,
 )
 
 @Serializable
@@ -116,12 +142,23 @@ internal data class CanonicalArtifactPayload(
     val rawTrack: List<CanonicalPoint>,
     val finalizedTrack: List<CanonicalPoint>,
     val quality: CanonicalQuality,
+    val ride: CanonicalRideTotals,
 )
 
 internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
     CanonicalArtifactPayload(
         algorithmVersion = algorithmVersion,
         analysis = analysis.toCanonicalAnalysis(),
+        ride = CanonicalRideTotals(
+            distanceM = ride.distanceM,
+            movingTimeS = ride.movingTimeS,
+            ascentM = ride.ascentM,
+            descentM = ride.descentM,
+            maxSpeedMps = ride.maxSpeedMps,
+            avgMovingSpeedMps = ride.avgMovingSpeedMps,
+            transportDistanceM = ride.transportDistanceM,
+            transportTimeS = ride.transportTimeS,
+        ),
         rawTrack = rawTrack.map { point ->
             CanonicalPoint(
                 timestampMs = point.timestampMs,

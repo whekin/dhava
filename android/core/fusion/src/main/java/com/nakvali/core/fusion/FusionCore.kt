@@ -4,6 +4,8 @@ import com.nakvali.fusion.CandidateDescent
 import com.nakvali.fusion.CanonicalActivity
 import com.nakvali.fusion.CanonicalTrackPoint
 import com.nakvali.fusion.GeoBounds
+import com.nakvali.fusion.LatLon
+import com.nakvali.fusion.LiveTotals
 import com.nakvali.fusion.RideAnalysis
 import com.nakvali.fusion.RideProfile
 import com.nakvali.fusion.RecordingReplay
@@ -19,7 +21,9 @@ import com.nakvali.fusion.buildSegment as ffiBuildSegment
 import com.nakvali.fusion.buildSegmentContinuous as ffiBuildSegmentContinuous
 import com.nakvali.fusion.buildSegmentContinuousWithGates as ffiBuildSegmentContinuousWithGates
 import com.nakvali.fusion.finalizeRecording as ffiFinalizeRecording
+import com.nakvali.fusion.liveTotalsFromRecording as ffiLiveTotalsFromRecording
 import com.nakvali.fusion.matchSegment as ffiMatchSegment
+import com.nakvali.fusion.nearestTrackPosition as ffiNearestTrackPosition
 import com.nakvali.fusion.proposeDescents as ffiProposeDescents
 import com.nakvali.fusion.proposeSegment as ffiProposeSegment
 import com.nakvali.fusion.replayRecording as ffiReplayRecording
@@ -65,6 +69,15 @@ object FusionCore {
     fun finalize(path: String): CanonicalActivity = ffiFinalizeRecording(path)
 
     /**
+     * Distance and descent already recorded in the raw file at [path], for
+     * restoring the live ride totals when an interrupted recording continues.
+     *
+     * Blocking (file IO) — call from a background thread. Cheaper than
+     * [analyze]: no IMU airtime pass, the same accumulators.
+     */
+    fun liveTotals(path: String): LiveTotals = ffiLiveTotalsFromRecording(path)
+
+    /**
      * Replays a raw recording through the exact live Rust pipeline and
      * returns raw/fused tracks for post-ride diagnostics.
      *
@@ -81,6 +94,15 @@ object FusionCore {
     val segmentMatchVersion: String by lazy { ffiSegmentMatchVersion() }
 
     /**
+     * Position along [track] closest to [point], in continuous index units.
+     *
+     * Used when a gate marker is dragged on the map: the authored gate centre
+     * stays where the rider dropped it, while the selection follows.
+     */
+    fun nearestTrackPosition(track: List<CanonicalTrackPoint>, point: LatLon): Double =
+        ffiNearestTrackPosition(track, point)
+
+    /**
      * Suggests the longest continuous descent of a finalized track as the
      * default start/finish selection for the segment editor.
      */
@@ -88,9 +110,22 @@ object FusionCore {
         ffiProposeSegment(track)
 
     /**
+     * Shortest segment developer mode may author, metres.
+     *
+     * The production floor lives in Rust and is the same one discovery uses.
+     * A lower floor exists only to validate gate behaviour — entry and finish
+     * haptics, live timing — on a stretch next to the house rather than on a
+     * mountain, and Rust clamps whatever is asked for.
+     */
+    const val DEVELOPER_MIN_SEGMENT_LENGTH_M = 40.0
+
+    /**
      * Builds a draft segment from a selection on one finalized track. Gate
      * widths and the corridor are derived in Rust from the source ride's own
      * horizontal accuracy.
+     *
+     * [minLengthM] lowers the minimum length for a developer-mode field test;
+     * null uses the production floor. Rust clamps the request either way.
      *
      * @throws com.nakvali.fusion.SegmentException.InvalidSelection when the
      *   selection is too short, inverted, or crosses a pause/gap.
@@ -102,8 +137,9 @@ object FusionCore {
         track: List<CanonicalTrackPoint>,
         startIndex: Int,
         endIndex: Int,
+        minLengthM: Double? = null,
     ): SegmentDefinition =
-        ffiBuildSegment(id, name, sourceRecordingId, track, startIndex, endIndex)
+        ffiBuildSegment(id, name, sourceRecordingId, track, startIndex, endIndex, minLengthM)
 
     /**
      * Builds geometry v2 with start and finish at continuous positions along
@@ -116,6 +152,7 @@ object FusionCore {
         track: List<CanonicalTrackPoint>,
         startPosition: Double,
         endPosition: Double,
+        minLengthM: Double? = null,
     ): SegmentBuildResult = ffiBuildSegmentContinuous(
         id,
         name,
@@ -123,6 +160,7 @@ object FusionCore {
         track,
         startPosition,
         endPosition,
+        minLengthM,
     )
 
     /**
@@ -139,6 +177,7 @@ object FusionCore {
         endPosition: Double,
         startGateCenter: com.nakvali.fusion.LatLon,
         finishGateCenter: com.nakvali.fusion.LatLon,
+        minLengthM: Double? = null,
     ): SegmentBuildResult = ffiBuildSegmentContinuousWithGates(
         id,
         name,
@@ -147,6 +186,7 @@ object FusionCore {
         startPosition,
         endPosition,
         SegmentGateCenters(start = startGateCenter, finish = finishGateCenter),
+        minLengthM,
     )
 
     /**
@@ -159,8 +199,8 @@ object FusionCore {
 
     /**
      * Every descent in one ride worth offering as a ready-made selection,
-     * longest first. Stops, pauses, recording gaps and motorized evidence end a
-     * candidate; a short link inside one trail does not.
+     * longest first. Pauses, recording gaps and motorized evidence end a
+     * candidate; a held stationary position and short trail link do not.
      */
     fun proposeDescents(track: List<CanonicalTrackPoint>): List<CandidateDescent> =
         ffiProposeDescents(track)

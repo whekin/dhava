@@ -3,12 +3,14 @@ package com.nakvali.feature.activity
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -22,6 +24,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
@@ -39,6 +43,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberStandardBottomSheetState
@@ -52,7 +57,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -68,8 +72,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nakvali.core.recording.Bike
 import com.nakvali.core.recording.BikeType
 import com.nakvali.core.recording.CanonicalQuality
+import com.nakvali.core.recording.CanonicalRideTotals
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordingStatus
+import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.StravaExportStatus
 import com.nakvali.core.ui.NakvaliDivider
@@ -77,7 +83,6 @@ import com.nakvali.core.ui.NakvaliEmptyState
 import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
-import com.nakvali.core.ui.rememberSheetFlingBoundary
 import com.nakvali.core.ui.NakvaliStatusPill
 import com.nakvali.core.ui.NakvaliTheme
 import com.nakvali.fusion.ActivityState
@@ -107,11 +112,15 @@ fun ActivityDetailScreen(
     val analysis by viewModel.analysis.collectAsState()
     val diagnostics by viewModel.diagnostics.collectAsState()
     val quality by viewModel.quality.collectAsState()
+    val ride by viewModel.ride.collectAsState()
     val rideInsights by viewModel.rideInsights.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val stravaConnection by viewModel.stravaConnection.collectAsState()
     val context = LocalContext.current
+    val developerMode = remember(context) {
+        RecorderSettings.developerModeEnabled(context)
+    }
 
     // Pops the screen once the entry disappears (deleted here or elsewhere).
     // Guarded on "seen at least once" so the initial null emitted while the
@@ -131,10 +140,12 @@ fun ActivityDetailScreen(
         analysis = analysis,
         diagnostics = diagnostics,
         quality = quality,
+        ride = ride,
         rideInsights = rideInsights,
         bikes = bikes,
         healthLogAvailable = healthLogAvailable,
         stravaConnection = stravaConnection,
+        developerMode = developerMode,
         onBack = onBack,
         onExport = { kind ->
             viewModel.export(kind) { result ->
@@ -202,10 +213,12 @@ private fun ActivityDetailContent(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
+    ride: CanonicalRideTotals?,
     rideInsights: ActivityRideInsights?,
     bikes: List<Bike>,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
+    developerMode: Boolean,
     onBack: () -> Unit,
     onExport: (ActivityExportKind) -> Unit,
     onCreateSegment: () -> Unit,
@@ -218,7 +231,7 @@ private fun ActivityDetailContent(
     onViewStrava: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var trackMode by remember { mutableStateOf(TrackMode.Compare) }
+    var trackMode by remember(developerMode) { mutableStateOf(TrackMode.Fusion) }
     var showMapLegend by rememberSaveable { mutableStateOf(false) }
     var inspectedProfilePosition by rememberSaveable(recording?.id) {
         mutableStateOf<Double?>(null)
@@ -297,6 +310,7 @@ private fun ActivityDetailContent(
                 analysis = analysis,
                 diagnostics = diagnostics,
                 quality = quality,
+                ride = ride,
                 rideInsights = rideInsights,
                 inspectedProfilePoint = inspectedProfilePoint,
                 inspectedMapPoint = inspectedMapPoint,
@@ -366,7 +380,7 @@ private fun ActivityDetailContent(
                     .padding(NakvaliSpacing.medium),
             )
 
-            if (fusedPoints.isNotEmpty()) {
+            if (developerMode && fusedPoints.isNotEmpty()) {
                 TrackModeControl(
                     selected = trackMode,
                     onSelected = {
@@ -389,7 +403,11 @@ private fun ActivityDetailContent(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(
-                            top = if (fusedPoints.isNotEmpty()) 84.dp else NakvaliSpacing.medium,
+                            top = if (developerMode && fusedPoints.isNotEmpty()) {
+                                84.dp
+                            } else {
+                                NakvaliSpacing.medium
+                            },
                             end = NakvaliSpacing.medium,
                         ),
                 )
@@ -431,6 +449,7 @@ private fun ActivityDetailsSheet(
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
     quality: CanonicalQuality?,
+    ride: CanonicalRideTotals?,
     rideInsights: ActivityRideInsights?,
     inspectedProfilePoint: RideProfilePoint?,
     inspectedMapPoint: MapTrackPoint?,
@@ -513,12 +532,11 @@ private fun ActivityDetailsSheet(
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
-                    .nestedScroll(rememberSheetFlingBoundary())
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = NakvaliSpacing.xLarge),
             ) {
                 NakvaliDivider(Modifier.padding(vertical = NakvaliSpacing.large))
-                ActivityMetrics(recording, analysis, quality, rideInsights)
+                ActivityMetrics(recording, analysis, ride, quality, rideInsights)
                 rideInsights?.profile
                     ?.takeIf { it.points.size >= 2 }
                     ?.let { profile ->
@@ -1009,39 +1027,154 @@ private data class StatusPresentation(val label: String, val container: Color, v
 private fun ActivityMetrics(
     recording: LocalRecording?,
     analysis: RideAnalysis?,
+    ride: CanonicalRideTotals?,
     quality: CanonicalQuality?,
     rideInsights: ActivityRideInsights?,
 ) {
+    var showMore by rememberSaveable(recording?.id) { mutableStateOf(false) }
     val durationMs = recording
         ?.takeIf { it.endedAtMs > it.startedAtMs }
         ?.let { it.endedAtMs - it.startedAtMs }
         ?: analysis?.let { it.endedAtMs - it.startedAtMs }
-    val metrics = listOf(
-        "Duration" to (durationMs?.let(::formatElapsed) ?: Placeholder),
-        "Moving" to (analysis?.movingTimeS
-            ?.let { formatElapsed((it * 1_000.0).toLong()) }
-            ?: Placeholder),
-        "Distance" to (analysis?.let { formatDistance(it.distanceM) } ?: Placeholder),
-        "Avg speed" to (analysis?.avgMovingSpeedMps?.let(::formatSpeed) ?: Placeholder),
-        "Max speed" to (analysis?.maxSpeedMps?.let(::formatSpeed) ?: Placeholder),
-        descentMetricLabel(quality) to
-            (analysis?.let { formatDistance(it.descentM) } ?: Placeholder),
-        ascentMetricLabel(quality) to
-            (analysis?.let { formatDistance(it.ascentM) } ?: Placeholder),
-        "Low point" to
-            (rideInsights?.profile?.minAltitudeM?.let(::formatAltitude) ?: Placeholder),
-        "High point" to
-            (rideInsights?.profile?.maxAltitudeM?.let(::formatAltitude) ?: Placeholder),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large)) {
-        metrics.chunked(3).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+    // Every headline number describes riding. A shuttle lap's kilometres and
+    // climb belong to the vehicle, and counting them makes the ride's own
+    // figures meaningless. Legacy artifacts predate the split and fall back to
+    // whole-recording numbers rather than showing nothing.
+    val moving = (ride?.movingTimeS ?: analysis?.movingTimeS)
+        ?.let { formatElapsed((it * 1_000.0).toLong()) }
+        ?: Placeholder
+    val distance = (ride?.distanceM ?: analysis?.distanceM)?.let(::formatDistance) ?: Placeholder
+    val descent = (ride?.descentM ?: analysis?.descentM)?.let(::formatDistance) ?: Placeholder
+    val ascent = (ride?.ascentM ?: analysis?.ascentM)?.let(::formatDistance) ?: Placeholder
+    val avgSpeed = (ride?.avgMovingSpeedMps ?: analysis?.avgMovingSpeedMps)
+        ?.let(::formatSpeed) ?: Placeholder
+    val maxSpeed = (ride?.maxSpeedMps ?: analysis?.maxSpeedMps)?.let(::formatSpeed) ?: Placeholder
+    val transport = ride
+        ?.takeIf { it.transportDistanceM >= 100.0 }
+        ?.let { totals ->
+            "${formatDistance(totals.transportDistanceM)} · " +
+                formatElapsed((totals.transportTimeS * 1_000.0).toLong())
+        }
+    val elevationRange = rideInsights?.profile?.let { profile ->
+        val low = profile.minAltitudeM
+        val high = profile.maxAltitudeM
+        if (low != null && high != null) {
+            "${formatAltitude(low)}–${formatAltitude(high)}"
+        } else {
+            Placeholder
+        }
+    } ?: Placeholder
+
+    Column {
+        NakvaliSectionLabel("Ride summary")
+        Spacer(Modifier.size(NakvaliSpacing.medium))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.xLarge),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(Modifier.weight(1.15f)) {
+                Text(
+                    text = distance,
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "DISTANCE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(0.85f),
+                verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
             ) {
-                row.forEach { (label, value) ->
-                    NakvaliMetric(value = value, label = label, modifier = Modifier.weight(1f))
+                NakvaliMetric(value = moving, label = "Moving")
+                NakvaliMetric(
+                    value = descent,
+                    label = descentMetricLabel(quality),
+                )
+            }
+        }
+        // The day still has to add up: what was left out is said, not hidden.
+        transport?.let { summary ->
+            Spacer(Modifier.size(NakvaliSpacing.medium))
+            Text(
+                text = "Not counted · $summary by transport",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.size(NakvaliSpacing.xLarge))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(NakvaliSpacing.large),
+                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NakvaliMetric(avgSpeed, "Avg speed", Modifier.weight(1f))
+                VerticalDivider(
+                    modifier = Modifier.heightIn(min = 44.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                NakvaliMetric(maxSpeed, "Max speed", Modifier.weight(1f))
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showMore = !showMore }
+                .padding(vertical = NakvaliSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (showMore) "Fewer ride details" else "More ride details",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Icon(
+                imageVector = if (showMore) {
+                    Icons.Filled.KeyboardArrowUp
+                } else {
+                    Icons.Filled.KeyboardArrowDown
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        if (showMore) {
+            NakvaliDivider(Modifier.padding(bottom = NakvaliSpacing.large))
+            Column(verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.xLarge),
+                ) {
+                    NakvaliMetric(
+                        value = durationMs?.let(::formatElapsed) ?: Placeholder,
+                        label = "Total time",
+                        modifier = Modifier.weight(1f),
+                    )
+                    NakvaliMetric(
+                        value = ascent,
+                        label = ascentMetricLabel(quality),
+                        modifier = Modifier.weight(1f),
+                    )
                 }
+                NakvaliMetric(
+                    value = elevationRange,
+                    label = "Elevation range",
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -1131,10 +1264,12 @@ private fun ActivityDetailContentPreview() {
             analysis = null,
             diagnostics = DiagnosticTrackState.Unavailable,
             quality = null,
+            ride = null,
             rideInsights = null,
             bikes = emptyList(),
             healthLogAvailable = true,
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),
+            developerMode = false,
             onBack = {},
             onExport = { _ -> },
             onCreateSegment = {},

@@ -1,5 +1,8 @@
 package com.nakvali.feature.segments
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,11 +16,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +44,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
@@ -48,8 +57,10 @@ import com.nakvali.core.map.SegmentMap
 import com.nakvali.core.map.SegmentMapPoint
 import com.nakvali.core.recording.StoredAttempt
 import com.nakvali.core.recording.StoredSegment
+import com.nakvali.core.recording.SegmentDifficulty
 import com.nakvali.core.recording.SegmentSourceKind
 import com.nakvali.core.recording.countable
+import com.nakvali.core.recording.normalizeExternalTrailUrl
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliPanel
@@ -77,7 +88,7 @@ fun SegmentDetailScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var confirmDelete by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
+    var editingDetails by remember { mutableStateOf(false) }
 
     LaunchedEffect(state) {
         if (state is SegmentDetailState.Gone) onBack()
@@ -103,7 +114,7 @@ fun SegmentDetailScreen(
             )
             SegmentOverflowMenu(
                 enabled = state is SegmentDetailState.Ready,
-                onRename = { renaming = true },
+                onEdit = { editingDetails = true },
                 onDelete = { confirmDelete = true },
             )
         }
@@ -134,14 +145,16 @@ fun SegmentDetailScreen(
     }
 
     val ready = state as? SegmentDetailState.Ready
-    if (renaming && ready != null) {
-        RenameSegmentDialog(
+    if (editingDetails && ready != null) {
+        EditSegmentDetailsDialog(
             initialName = ready.segment.name,
-            onConfirm = { name ->
-                renaming = false
-                viewModel.rename(name)
+            initialDifficulty = ready.segment.difficulty,
+            initialExternalUrl = ready.segment.externalLinks.firstOrNull()?.url.orEmpty(),
+            onConfirm = { name, difficulty, externalUrl ->
+                editingDetails = false
+                viewModel.updateDetails(name, difficulty, externalUrl)
             },
-            onDismiss = { renaming = false },
+            onDismiss = { editingDetails = false },
         )
     }
     if (confirmDelete && ready != null) {
@@ -174,6 +187,7 @@ fun SegmentDetailScreen(
 @Composable
 private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
     val segment = state.segment
+    val context = LocalContext.current
     val centerline = remember(segment) {
         segment.centerline.map { SegmentMapPoint(it.lat, it.lon) }
     }
@@ -185,6 +199,12 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
             SegmentMap(
                 sections = emptyList(),
                 segment = centerline,
+                segmentColor = segment.difficulty?.color?.toArgb(),
+                segmentCasingColor = segment.difficulty
+                    ?.takeIf {
+                        it == SegmentDifficulty.BLACK || it == SegmentDifficulty.DOUBLE_BLACK
+                    }
+                    ?.let { MaterialTheme.colorScheme.outline.toArgb() },
                 startGate = (segment.startGateCenter ?: segment.centerline.firstOrNull())
                     ?.let { SegmentMapPoint(it.lat, it.lon) },
                 finishGate = (segment.finishGateCenter ?: segment.centerline.lastOrNull())
@@ -224,6 +244,24 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
                 if (!segment.trusted) {
                     Spacer(Modifier.height(NakvaliSpacing.medium))
                     DraftNotice(segment)
+                }
+                if (segment.difficulty != null || segment.externalLinks.isNotEmpty()) {
+                    Spacer(Modifier.height(NakvaliSpacing.medium))
+                    TrailContextPanel(
+                        segment = segment,
+                        onOpenLink = { url ->
+                            val normalized = normalizeExternalTrailUrl(url)
+                            if (normalized == null) {
+                                Toast.makeText(context, "This trail link is not valid", Toast.LENGTH_SHORT).show()
+                            } else {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(normalized)))
+                                }.onFailure {
+                                    Toast.makeText(context, "No app can open this link", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -308,6 +346,38 @@ private fun SegmentDetailBody(state: SegmentDetailState.Ready) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = NakvaliSpacing.screen),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrailContextPanel(segment: StoredSegment, onOpenLink: (String) -> Unit) {
+    NakvaliPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(NakvaliSpacing.large)) {
+            NakvaliSectionLabel("Trail details")
+            segment.difficulty?.let { difficulty ->
+                Spacer(Modifier.height(NakvaliSpacing.medium))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DifficultyDot(difficulty)
+                    Text(
+                        text = "${difficulty.label} difficulty",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
+            }
+            segment.externalLinks.forEach { link ->
+                TextButton(onClick = { onOpenLink(link.url) }) {
+                    Text(link.provider)
+                    Spacer(Modifier.width(NakvaliSpacing.small))
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = "Open ${link.provider}",
+                    )
+                }
             }
         }
     }
@@ -518,7 +588,7 @@ private fun RejectionListRow(row: RejectionRow) {
 @Composable
 private fun SegmentOverflowMenu(
     enabled: Boolean,
-    onRename: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -528,10 +598,10 @@ private fun SegmentOverflowMenu(
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
-                text = { Text("Rename") },
+                text = { Text("Edit details") },
                 onClick = {
                     expanded = false
-                    onRename()
+                    onEdit()
                 },
             )
             DropdownMenuItem(
@@ -546,30 +616,57 @@ private fun SegmentOverflowMenu(
 }
 
 @Composable
-private fun RenameSegmentDialog(
+private fun EditSegmentDetailsDialog(
     initialName: String,
-    onConfirm: (String) -> Unit,
+    initialDifficulty: SegmentDifficulty?,
+    initialExternalUrl: String,
+    onConfirm: (String, SegmentDifficulty?, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf(initialName) }
+    var difficulty by remember { mutableStateOf(initialDifficulty) }
+    var externalUrl by remember { mutableStateOf(initialExternalUrl) }
+    val externalUrlValid = SegmentEditorViewModel.externalUrlIsValid(externalUrl)
     AlertDialog(
         // Edge-to-edge windows are not resized for the keyboard, so a centred
         // dialog would otherwise sit behind it.
         modifier = Modifier.imePadding(),
         onDismissRequest = onDismiss,
-        title = { Text("Rename segment") },
+        title = { Text("Edit segment details") },
         text = {
-            NakvaliTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = "Name",
-                keyboardActions = KeyboardActions(
-                    onDone = { if (name.isNotBlank()) onConfirm(name) },
-                ),
-            )
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                NakvaliTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "Name",
+                )
+                Spacer(Modifier.height(NakvaliSpacing.large))
+                NakvaliSectionLabel("Difficulty · optional")
+                Spacer(Modifier.height(NakvaliSpacing.small))
+                SegmentDifficultyPicker(value = difficulty, onValueChange = { difficulty = it })
+                Spacer(Modifier.height(NakvaliSpacing.large))
+                NakvaliTextField(
+                    value = externalUrl,
+                    onValueChange = { externalUrl = it },
+                    label = "Trail page · optional",
+                    placeholder = "trailforks.com/trails/…",
+                    supportingText = if (externalUrlValid) null else "Enter a valid web address",
+                    isError = !externalUrlValid,
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (name.isNotBlank() && externalUrlValid) {
+                                onConfirm(name, difficulty, externalUrl)
+                            }
+                        },
+                    ),
+                )
+            }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) {
+            TextButton(
+                onClick = { onConfirm(name, difficulty, externalUrl) },
+                enabled = name.isNotBlank() && externalUrlValid,
+            ) {
                 Text("Save")
             }
         },

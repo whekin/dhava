@@ -1,36 +1,64 @@
 package com.nakvali.feature.profile
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PedalBike
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nakvali.core.recording.Bike
+import com.nakvali.core.recording.BikeType
+import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliPanel
 import com.nakvali.core.ui.NakvaliScreenHeader
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.NakvaliTheme
 
 data class ProfileAccount(
@@ -65,8 +93,42 @@ fun ProfileScreen(
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onRetrySync: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: ProfileViewModel = viewModel(),
+) {
+    val bikes by viewModel.bikes.collectAsState()
+    val activeBikeId by viewModel.activeBikeId.collectAsState()
+
+    ProfileContent(
+        state = state,
+        bikes = bikes,
+        activeBikeId = activeBikeId,
+        onSignIn = onSignIn,
+        onSignOut = onSignOut,
+        onRetrySync = onRetrySync,
+        onOpenSettings = onOpenSettings,
+        onAddBike = viewModel::addBike,
+        onSelectBike = viewModel::selectBike,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ProfileContent(
+    state: ProfileUiState,
+    bikes: List<Bike>,
+    activeBikeId: String?,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onRetrySync: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onAddBike: (String, BikeType) -> Unit,
+    onSelectBike: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showAddBike by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -74,37 +136,95 @@ fun ProfileScreen(
             .padding(horizontal = NakvaliSpacing.screen, vertical = NakvaliSpacing.xLarge),
     ) {
         NakvaliScreenHeader(
-            eyebrow = "Rider identity",
+            eyebrow = "Rider",
             title = "Profile",
-            description = when (state) {
-                ProfileUiState.Loading -> "Checking your account…"
-                is ProfileUiState.SignedOut -> "Sign in for shared segments, PRs and leaderboards."
-                is ProfileUiState.SignedIn -> "Your identity for synced segment results."
-            },
+            description = "Your bikes, identity and app setup.",
         )
-        Spacer(Modifier.height(NakvaliSpacing.xxLarge))
 
-        when (state) {
-            ProfileUiState.Loading -> LoadingProfile()
-            is ProfileUiState.SignedOut -> SignedOutProfile(state, onSignIn)
-            is ProfileUiState.SignedIn -> SignedInProfile(
-                state = state,
-                onSignOut = onSignOut,
-                onRetrySync = onRetrySync,
+        ProfileSection(title = "Account") {
+            when (state) {
+                ProfileUiState.Loading -> LoadingAccount()
+                is ProfileUiState.SignedOut -> SignedOutAccount(state, onSignIn)
+                is ProfileUiState.SignedIn -> SignedInAccount(state, onRetrySync)
+            }
+        }
+
+        ProfileSection(
+            title = "Bikes",
+            action = {
+                if (bikes.isNotEmpty()) {
+                    TextButton(onClick = { showAddBike = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(NakvaliSpacing.small))
+                        Text("Add")
+                    }
+                }
+            },
+        ) {
+            Garage(
+                bikes = bikes,
+                activeBikeId = activeBikeId,
+                onSelectBike = onSelectBike,
+                onAddBike = { showAddBike = true },
             )
         }
 
-        Spacer(Modifier.height(NakvaliSpacing.xxLarge))
-        Text(
-            text = "Recording and local segments always work without an account.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        ProfileSection(title = "App") {
+            SettingsCard(onOpenSettings)
+        }
+
+        if (state is ProfileUiState.SignedIn) {
+            Spacer(Modifier.height(NakvaliSpacing.large))
+            TextButton(
+                onClick = onSignOut,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) {
+                Text("Sign out")
+            }
+            Text(
+                text = "Your rides and bikes stay on this phone.",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Spacer(Modifier.height(NakvaliSpacing.xLarge))
+    }
+
+    if (showAddBike) {
+        AddBikeDialog(
+            onDismiss = { showAddBike = false },
+            onAdd = { name, type ->
+                onAddBike(name, type)
+                showAddBike = false
+            },
         )
     }
 }
 
 @Composable
-private fun LoadingProfile() {
+private fun ProfileSection(
+    title: String,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Spacer(Modifier.height(NakvaliSpacing.xxLarge))
+    Row(
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NakvaliSectionLabel(title)
+        action?.invoke()
+    }
+    Spacer(Modifier.height(NakvaliSpacing.small))
+    content()
+}
+
+@Composable
+private fun LoadingAccount() {
     NakvaliPanel(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(NakvaliSpacing.xLarge),
@@ -112,38 +232,38 @@ private fun LoadingProfile() {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-            Text(
-                text = "Restoring your session",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Column {
+                Text("Restoring your session", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                Text(
+                    "Local rides are already available.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SignedOutProfile(state: ProfileUiState.SignedOut, onSignIn: () -> Unit) {
+private fun SignedOutAccount(state: ProfileUiState.SignedOut, onSignIn: () -> Unit) {
     NakvaliPanel(Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(NakvaliSpacing.xLarge),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            RiderMark("N")
-            Spacer(Modifier.height(NakvaliSpacing.large))
-            Text(
-                text = "Keep your trail history yours",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(NakvaliSpacing.small))
-            Text(
-                text = "Google sign-in links future PRs and segment results across devices. " +
-                    "Raw sensor recordings stay on this phone.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+        Column(Modifier.padding(NakvaliSpacing.xLarge)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RiderMark("N")
+                Column(Modifier.weight(1f)) {
+                    Text("Local rider", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                    Text(
+                        "Sign in to sync future PRs and segment results.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             if (state.error != null) {
                 Spacer(Modifier.height(NakvaliSpacing.large))
                 Surface(
@@ -182,83 +302,317 @@ private fun SignedOutProfile(state: ProfileUiState.SignedOut, onSignIn: () -> Un
 }
 
 @Composable
-private fun SignedInProfile(
+private fun SignedInAccount(
     state: ProfileUiState.SignedIn,
-    onSignOut: () -> Unit,
     onRetrySync: () -> Unit,
 ) {
     val account = state.account
     val title = account.displayName.ifBlank {
         account.email.substringBefore('@').ifBlank { "Rider" }
     }
-    NakvaliSectionLabel("Account")
-    Spacer(Modifier.height(NakvaliSpacing.medium))
+
     NakvaliPanel(Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(NakvaliSpacing.xLarge),
-            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+        Column(Modifier.padding(NakvaliSpacing.xLarge)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RiderMark(title.firstOrNull()?.uppercase() ?: "N")
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (account.email.isNotBlank()) {
+                        Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                        Text(
+                            text = account.email,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                    Text(
+                        text = if (account.emailVerified) "Google account · Verified" else "Google account",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (account.emailVerified) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(NakvaliSpacing.large))
+            NakvaliDivider()
+            Spacer(Modifier.height(NakvaliSpacing.large))
+            ServerStatus(state.server, onRetrySync)
+        }
+    }
+}
+
+@Composable
+private fun ServerStatus(server: ProfileServerState, onRetrySync: () -> Unit) {
+    when (server) {
+        ProfileServerState.Syncing -> Row(
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RiderMark(title.firstOrNull()?.uppercase() ?: "N")
-            Column(Modifier.weight(1f)) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            Column {
+                Text("Connecting to Nakvali", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = account.email.ifBlank { "Google account" },
-                    style = MaterialTheme.typography.bodyMedium,
+                    "Your local data stays available.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (account.emailVerified) NakvaliStatusPill("Verified")
         }
-    }
 
-    Spacer(Modifier.height(NakvaliSpacing.xxLarge))
-    NakvaliSectionLabel("Nakvali server")
-    Spacer(Modifier.height(NakvaliSpacing.medium))
-    NakvaliPanel(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(NakvaliSpacing.large)) {
-            when (val server = state.server) {
-                ProfileServerState.Syncing -> {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Linking your Nakvali profile…")
-                    }
-                }
-                ProfileServerState.Synced -> {
-                    NakvaliStatusPill(
-                        text = "Synced",
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Spacer(Modifier.height(NakvaliSpacing.small))
-                    Text(
-                        text = "This account is ready for shared segment results.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                is ProfileServerState.Unavailable -> {
-                    NakvaliStatusPill("Local only")
-                    Spacer(Modifier.height(NakvaliSpacing.small))
-                    Text(
-                        text = server.message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(onClick = onRetrySync) { Text("Try sync again") }
-                }
+        ProfileServerState.Synced -> Row(
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NakvaliStatusPill(
+                text = "Synced",
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                "Ready for shared segment results.",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        is ProfileServerState.Unavailable -> Column {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NakvaliStatusPill("Local only")
+                Text(
+                    server.message,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onRetrySync, modifier = Modifier.align(Alignment.End)) {
+                Text("Try sync again")
             }
         }
     }
-    Spacer(Modifier.height(NakvaliSpacing.large))
-    TextButton(onClick = onSignOut) { Text("Sign out") }
+}
+
+@Composable
+private fun Garage(
+    bikes: List<Bike>,
+    activeBikeId: String?,
+    onSelectBike: (String) -> Unit,
+    onAddBike: () -> Unit,
+) {
+    if (bikes.isEmpty()) {
+        NakvaliPanel(Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(NakvaliSpacing.xLarge),
+                horizontalAlignment = Alignment.Start,
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.PedalBike, contentDescription = null, Modifier.size(24.dp))
+                    }
+                }
+                Spacer(Modifier.height(NakvaliSpacing.large))
+                Text("Build your garage", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                Text(
+                    "Add a bike once and it will be ready when you save a ride.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(NakvaliSpacing.large))
+                FilledTonalButton(onClick = onAddBike) {
+                    Icon(Icons.Filled.Add, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.size(NakvaliSpacing.small))
+                    Text("Add bike")
+                }
+            }
+        }
+        return
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.small)) {
+        bikes.forEach { bike ->
+            BikeRow(
+                bike = bike,
+                active = bike.id == activeBikeId,
+                onClick = { onSelectBike(bike.id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun BikeRow(bike: Bike, active: Boolean, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(NakvaliSpacing.large),
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                color = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHighest
+                },
+                contentColor = if (active) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.PedalBike, contentDescription = null, Modifier.size(23.dp))
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = bike.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                Text(
+                    text = bike.type.label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (active) {
+                NakvaliStatusPill(
+                    text = "Active",
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsCard(onOpenSettings: () -> Unit) {
+    NakvaliPanel(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenSettings),
+    ) {
+        Row(
+            modifier = Modifier.padding(NakvaliSpacing.large),
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, Modifier.size(20.dp))
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Settings", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                Text(
+                    "Recording, storage and backups",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AddBikeDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String, BikeType) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf(BikeType.FULL_SUS) }
+
+    AlertDialog(
+        modifier = Modifier.imePadding(),
+        onDismissRequest = onDismiss,
+        title = { Text("Add bike") },
+        text = {
+            Column {
+                NakvaliTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = "Name",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(NakvaliSpacing.medium))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.small)) {
+                    BikeType.entries.forEach { candidate ->
+                        FilterChip(
+                            selected = type == candidate,
+                            onClick = { type = candidate },
+                            label = { Text(candidate.label) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(name.trim(), type) },
+                enabled = name.isNotBlank(),
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -275,26 +629,49 @@ private fun RiderMark(initial: String) {
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF11100F)
+@Preview(name = "Signed out", showBackground = true, backgroundColor = 0xFF11100F)
 @Composable
 private fun SignedOutPreview() {
     NakvaliTheme(darkTheme = true) {
-        ProfileScreen(ProfileUiState.SignedOut(), {}, {}, {})
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF11100F)
-@Composable
-private fun SignedInPreview() {
-    NakvaliTheme(darkTheme = true) {
-        ProfileScreen(
-            state = ProfileUiState.SignedIn(
-                account = ProfileAccount("Trail Rider", "rider@example.com", "", true),
-                server = ProfileServerState.Synced,
-            ),
+        ProfileContent(
+            state = ProfileUiState.SignedOut(),
+            bikes = emptyList(),
+            activeBikeId = null,
             onSignIn = {},
             onSignOut = {},
             onRetrySync = {},
+            onOpenSettings = {},
+            onAddBike = { _, _ -> },
+            onSelectBike = {},
+        )
+    }
+}
+
+@Preview(name = "Rider garage", showBackground = true, backgroundColor = 0xFF11100F)
+@Composable
+private fun SignedInPreview() {
+    NakvaliTheme(darkTheme = true) {
+        ProfileContent(
+            state = ProfileUiState.SignedIn(
+                account = ProfileAccount(
+                    "Stanislav Kalishin",
+                    "stanislavkalishin@gmail.com",
+                    "",
+                    true,
+                ),
+                server = ProfileServerState.Synced,
+            ),
+            bikes = listOf(
+                Bike("capra", "Capra", BikeType.FULL_SUS),
+                Bike("hardtail", "Street bike", BikeType.HARDTAIL),
+            ),
+            activeBikeId = "capra",
+            onSignIn = {},
+            onSignOut = {},
+            onRetrySync = {},
+            onOpenSettings = {},
+            onAddBike = { _, _ -> },
+            onSelectBike = {},
         )
     }
 }

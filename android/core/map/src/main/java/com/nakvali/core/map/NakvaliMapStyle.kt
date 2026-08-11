@@ -56,7 +56,9 @@ fun rememberNakvaliMapPalette(): NakvaliMapPalette {
             waterLine = if (dark) Color(0xFF557276).toArgb() else Color(0xFF668285).toArgb(),
             building = colors.surfaceContainerHighest.toArgb(),
             road = colors.outline.toArgb(),
-            majorRoad = colors.primaryContainer.toArgb(),
+            // Keep the base map earthy and neutral so the green canonical
+            // track cannot disappear into roads or terrain at riding zooms.
+            majorRoad = if (dark) Color(0xFF4A3932).toArgb() else Color(0xFFE7D3C9).toArgb(),
             roadCasing = colors.surfaceContainerLowest.toArgb(),
             trail = colors.tertiary.toArgb(),
             label = colors.onSurface.toArgb(),

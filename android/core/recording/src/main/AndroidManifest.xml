@@ -9,6 +9,19 @@
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!--
+        Segment gate haptics. The rider feels a run start and finish through a
+        pocket; this is a direct vibration, never an extra notification.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+        Android's own activity recognition. Optional: it is only used to decide
+        sampling rates in a vehicle, and the recorder works unchanged without
+        it. Declared where it is used.
+    -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <application>
         <!--
             Foreground service that records GPS + IMU + barometer while a ride

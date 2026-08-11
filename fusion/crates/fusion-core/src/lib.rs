@@ -21,13 +21,16 @@ pub mod ekf;
 mod gps_quality;
 pub mod linalg;
 pub mod live;
+pub mod live_segment;
+mod motion;
 pub mod orientation;
 pub mod recording;
 pub mod replay;
 pub mod segment;
 pub mod segment_editor;
 
-pub use live::{LiveFusion, LiveSnapshot};
+pub use live::{LiveFusion, LiveSnapshot, LiveTotals, live_totals_from_recording};
+pub use live_segment::{LiveRunEnd, LiveSegmentArm, LiveSegmentEvent, LiveSegmentTracker};
 pub use replay::{DiagnosticTrackPoint, RecordingReplay, replay_recording};
 
 pub use activity::ActivityState;

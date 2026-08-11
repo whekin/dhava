@@ -1,5 +1,7 @@
 package com.nakvali.core.recording
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,6 +9,68 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SegmentTest {
+
+    @Test
+    fun `legacy segment metadata defaults to unrated and no links`() {
+        val segment = SegmentStore.SegmentJson.decodeFromString<StoredSegment>(
+            """
+            {
+              "id": "legacy",
+              "name": "Legacy trail",
+              "source_recording_id": "ride-1",
+              "geometry_version": 3,
+              "centerline": [
+                {"lat": 41.7, "lon": 44.7},
+                {"lat": 41.69, "lon": 44.71}
+              ],
+              "gate_half_width_m": 6.0,
+              "corridor_m": 18.0,
+              "length_m": 420.0,
+              "trusted": false,
+              "created_at_ms": 1
+            }
+            """.trimIndent(),
+        )
+
+        assertNull(segment.difficulty)
+        assertTrue(segment.externalLinks.isEmpty())
+    }
+
+    @Test
+    fun `segment difficulty and external links survive persistence`() {
+        val segment = StoredSegment(
+            id = "udzo",
+            name = "Udzo",
+            difficulty = SegmentDifficulty.BLACK,
+            externalLinks = listOf(
+                SegmentExternalLink("Trailforks", "https://www.trailforks.com/trails/udzo/"),
+            ),
+            sourceRecordingId = "ride-1",
+            geometryVersion = 3,
+            centerline = listOf(StoredLatLon(41.7, 44.7), StoredLatLon(41.69, 44.71)),
+            gateHalfWidthM = 6.0,
+            corridorM = 18.0,
+            lengthM = 420.0,
+            createdAtMs = 1,
+        )
+
+        val encoded = SegmentStore.SegmentJson.encodeToString(segment)
+        val restored = SegmentStore.SegmentJson.decodeFromString<StoredSegment>(encoded)
+
+        assertEquals(SegmentDifficulty.BLACK, restored.difficulty)
+        assertEquals("Trailforks", restored.externalLinks.single().provider)
+        assertEquals("https://www.trailforks.com/trails/udzo/", restored.externalLinks.single().url)
+    }
+
+    @Test
+    fun `trail links normalize and retain their provider`() {
+        val normalized = normalizeExternalTrailUrl("trailforks.com/trails/udzo/")
+
+        assertEquals("https://trailforks.com/trails/udzo/", normalized)
+        assertEquals("Trailforks", externalTrailProvider(normalized!!))
+        assertNull(normalizeExternalTrailUrl("file:///sdcard/secret"))
+        assertNull(normalizeExternalTrailUrl("not a link"))
+    }
 
     private fun bounds(
         minLat: Double,

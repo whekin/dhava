@@ -38,7 +38,7 @@ internal const val ACTIVITY_STATE_TRANSIT = "transit"
 internal const val ACTIVITY_STATE_LIKELY_MOTORIZED = "likely_motorized"
 
 private const val ACTIVITY_STATE_LEGEND_DESCRIPTION =
-    "Track state: orange solid downhill, beige solid transit, blue dashed likely transport, ring stop, gray dotted uncertain"
+    "Track state: green solid downhill, beige solid transit, blue dashed likely transport, ring stop, gray dotted uncertain"
 
 internal data class ActivityStateColors(
     val downhill: Color,

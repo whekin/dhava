@@ -25,7 +25,7 @@ const GRADIENT_WINDOW_M: f64 = 25.0;
 
 /// Shortest descent worth proposing. Below this a segment is dominated by gate
 /// geometry and GPS uncertainty rather than by riding.
-const MIN_CANDIDATE_LENGTH_M: f64 = 200.0;
+const MIN_CANDIDATE_LENGTH_M: f64 = 300.0;
 /// A candidate may contain some climbing — a flat or pedalled link between two
 /// steep pitches is part of the trail — but not enough to make it a loop.
 const MAX_CANDIDATE_ASCENT_FRACTION: f64 = 0.15;
@@ -33,6 +33,10 @@ const MAX_CANDIDATE_ASCENT_FRACTION: f64 = 0.15;
 /// one trail into fragments that each fall under the length floor.
 const BRIDGE_MAX_MS: i64 = 8_000;
 const BRIDGE_MAX_M: f64 = 40.0;
+/// A stationary wait may last much longer than an ordinary trail link. It only
+/// joins two downhill spans when the canonical held position confirms that the
+/// rider stayed in essentially the same place.
+const STILL_BRIDGE_MAX_M: f64 = 12.0;
 /// Coverage above which a selection is reported as duplicating an existing
 /// segment. It warns the rider; it never blocks authoring.
 const SUBSTANTIAL_OVERLAP_FRACTION: f64 = 0.6;
@@ -144,9 +148,60 @@ pub fn ride_profile(track: Vec<CanonicalTrackPoint>) -> RideProfile {
 ///
 /// Reuses the conservative [`ActivityState`] pass rather than inventing a
 /// gradient heuristic, because a car descending a switchback road is
-/// geometrically indistinguishable from a rider descending a trail. Stops,
-/// pauses, recording gaps and motorised evidence always end a candidate; short
-/// non-descending links inside one trail do not.
+/// geometrically indistinguishable from a rider descending a trail. Pauses,
+/// recording gaps and motorised evidence always end a candidate; a true
+/// stationary wait and short non-descending links inside one trail do not.
+/// Position along `track` closest to `point`, in continuous track index units.
+///
+/// Dragging a gate marker on the map has to move the selection with it. The
+/// gate's authored centre stays wherever the rider dropped it — it is
+/// deliberately independent from the centreline — but the span the map draws,
+/// the trimmer handles and the preview all key off positions, so the position
+/// has to follow the finger too. Doing the projection here keeps it the same
+/// geometry the matcher uses rather than a second one in Kotlin.
+#[uniffi::export]
+pub fn nearest_track_position(track: Vec<CanonicalTrackPoint>, point: LatLon) -> f64 {
+    if track.len() < 2 {
+        return 0.0;
+    }
+    let middle = &track[track.len() / 2];
+    let origin = LatLon {
+        lat: middle.lat,
+        lon: middle.lon,
+    };
+    let target = project(point, origin);
+    let mut best = (f64::MAX, 0.0);
+    for index in 0..track.len() - 1 {
+        let a = project(
+            LatLon {
+                lat: track[index].lat,
+                lon: track[index].lon,
+            },
+            origin,
+        );
+        let b = project(
+            LatLon {
+                lat: track[index + 1].lat,
+                lon: track[index + 1].lon,
+            },
+            origin,
+        );
+        let ab = [b[0] - a[0], b[1] - a[1]];
+        let length_sq = ab[0] * ab[0] + ab[1] * ab[1];
+        let t = if length_sq > 0.0 {
+            (((target[0] - a[0]) * ab[0] + (target[1] - a[1]) * ab[1]) / length_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let closest = [a[0] + ab[0] * t, a[1] + ab[1] * t];
+        let distance = (target[0] - closest[0]).hypot(target[1] - closest[1]);
+        if distance < best.0 {
+            best = (distance, index as f64 + t);
+        }
+    }
+    best.1
+}
+
 #[uniffi::export]
 pub fn propose_descents(track: Vec<CanonicalTrackPoint>) -> Vec<CandidateDescent> {
     let mut candidates = Vec::new();
@@ -154,19 +209,13 @@ pub fn propose_descents(track: Vec<CanonicalTrackPoint>) -> Vec<CandidateDescent
 
     for index in 0..track.len() {
         let point = &track[index];
-        let hard_stop = !connects(&track, index)
-            || matches!(
-                point.activity_state,
-                ActivityState::Still | ActivityState::LikelyMotorized
-            );
+        let hard_stop =
+            !connects(&track, index) || point.activity_state == ActivityState::LikelyMotorized;
         if hard_stop {
             if let Some((start, last)) = run.take() {
                 push_candidate(&track, start, last, &mut candidates);
             }
-            if matches!(
-                point.activity_state,
-                ActivityState::Still | ActivityState::LikelyMotorized
-            ) {
+            if point.activity_state == ActivityState::LikelyMotorized {
                 continue;
             }
         }
@@ -295,10 +344,19 @@ fn bridgeable(track: &[CanonicalTrackPoint], last: usize, index: usize) -> bool 
     if !((last + 1)..=index).all(|between| connects(track, between)) {
         return false;
     }
-    if track[index].timestamp_ms - track[last].timestamp_ms > BRIDGE_MAX_MS {
-        return false;
+    let distance_m = polyline_length_m(&track[last..=index]);
+    let bridge = &track[(last + 1)..index];
+    if bridge
+        .iter()
+        .any(|point| point.activity_state == ActivityState::Still)
+    {
+        return bridge
+            .iter()
+            .all(|point| point.activity_state == ActivityState::Still)
+            && distance_m <= STILL_BRIDGE_MAX_M;
     }
-    polyline_length_m(&track[last..=index]) <= BRIDGE_MAX_M
+    track[index].timestamp_ms - track[last].timestamp_ms <= BRIDGE_MAX_MS
+        && distance_m <= BRIDGE_MAX_M
 }
 
 fn push_candidate(
@@ -469,6 +527,11 @@ pub(crate) mod tests_support {
 mod tests {
     use super::tests_support::{append, point};
     use super::*;
+
+    /// Geometry fixtures are a couple of hundred metres — long enough to
+    /// exercise gates and corridors, shorter than the production floor. The
+    /// floor itself has its own test.
+    const TEST_MIN_LENGTH_M: Option<f64> = Some(50.0);
     use crate::segment::build_segment;
 
     #[test]
@@ -518,13 +581,34 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_splits_candidates() {
+    fn moving_while_labelled_still_splits_candidates() {
         let mut track = vec![point(0, 0.0, 0, ActivityState::Downhill)];
-        append(&mut track, 250, ActivityState::Downhill);
+        append(&mut track, 350, ActivityState::Downhill);
         append(&mut track, 20, ActivityState::Still);
-        append(&mut track, 250, ActivityState::Downhill);
+        append(&mut track, 350, ActivityState::Downhill);
 
         assert_eq!(propose_descents(track).len(), 2);
+    }
+
+    #[test]
+    fn a_real_stationary_wait_does_not_split_one_trail() {
+        let mut track = vec![point(0, 0.0, 0, ActivityState::Downhill)];
+        append(&mut track, 250, ActivityState::Downhill);
+        let stopped = track.last().unwrap().clone();
+        for index in 1..=150 {
+            track.push(CanonicalTrackPoint {
+                timestamp_ms: stopped.timestamp_ms + index * 200,
+                activity_state: ActivityState::Still,
+                stationary: Some(true),
+                speed_mps: Some(0.0),
+                ..stopped.clone()
+            });
+        }
+        append(&mut track, 250, ActivityState::Downhill);
+
+        let candidates = propose_descents(track);
+        assert_eq!(candidates.len(), 1);
+        assert!(candidates[0].length_m > 490.0);
     }
 
     #[test]
@@ -538,7 +622,7 @@ mod tests {
     #[test]
     fn descents_shorter_than_the_floor_are_not_proposed() {
         let mut track = vec![point(0, 0.0, 0, ActivityState::Downhill)];
-        append(&mut track, 150, ActivityState::Downhill);
+        append(&mut track, 250, ActivityState::Downhill);
 
         assert!(propose_descents(track).is_empty());
     }
@@ -546,7 +630,7 @@ mod tests {
     #[test]
     fn candidates_are_longest_first() {
         let mut track = vec![point(0, 0.0, 0, ActivityState::Downhill)];
-        append(&mut track, 250, ActivityState::Downhill);
+        append(&mut track, 350, ActivityState::Downhill);
         append(&mut track, 30, ActivityState::Still);
         append(&mut track, 600, ActivityState::Downhill);
 
@@ -566,6 +650,7 @@ mod tests {
             track.clone(),
             0,
             track.len() as i32 - 1,
+            TEST_MIN_LENGTH_M,
         )
         .expect("definition builds");
 
@@ -612,6 +697,7 @@ mod tests {
             track.clone(),
             0,
             200,
+            TEST_MIN_LENGTH_M,
         )
         .expect("definition builds");
 
@@ -625,8 +711,13 @@ mod tests {
 
 #[cfg(test)]
 mod boundary_tests {
+    use super::nearest_track_position;
     use super::tests_support::*;
     use crate::segment::build_segment_continuous;
+    use crate::{ActivityState, CanonicalTrackPoint, LatLon};
+
+    /// See the note in `tests`: fixtures are shorter than the real floor.
+    const TEST_MIN_LENGTH_M: Option<f64> = Some(50.0);
 
     /// A gate a hair short of the next canonical sample used to round onto that
     /// sample's own timestamp and get the whole selection rejected.
@@ -641,6 +732,7 @@ mod boundary_tests {
                 track.clone(),
                 100.0 + offset,
                 300.0 + offset,
+                TEST_MIN_LENGTH_M,
             );
             assert!(
                 result.is_ok(),
@@ -648,5 +740,25 @@ mod boundary_tests {
                 result.err(),
             );
         }
+    }
+
+    #[test]
+    fn a_dragged_gate_projects_onto_the_track() {
+        let track: Vec<CanonicalTrackPoint> = (0..=20)
+            .map(|step| point(step * 1_000, step as f64 * 10.0, 0, ActivityState::Downhill))
+            .collect();
+
+        // A finger dropped 20 m east of the track, between samples 10 and 11.
+        let dropped = LatLon {
+            lat: track[10].lat + 5.0 / M_PER_DEG_LAT,
+            lon: track[10].lon + 0.0002,
+        };
+
+        let position = nearest_track_position(track, dropped);
+
+        assert!(
+            (10.0..=11.0).contains(&position),
+            "projected to {position} instead of between 10 and 11",
+        );
     }
 }

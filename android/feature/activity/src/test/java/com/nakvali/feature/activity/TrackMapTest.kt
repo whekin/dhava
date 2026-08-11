@@ -158,15 +158,63 @@ class TrackMapTest {
         val points = listOf(arrival, stillStart, stillMiddle, stillEnd, departure)
 
         val runs = points.semanticLineRuns()
-        val markers = points.aggregatedStopMarkers()
 
         assertEquals(listOf(ActivityState.DOWNHILL, ActivityState.TRANSIT), runs.map { it.activityState })
         assertEquals(listOf(arrival, stillStart), runs[0].points)
         assertEquals(listOf(stillEnd, departure), runs[1].points)
+    }
+
+    @Test
+    fun `a real stop aggregates into one marker at its middle`() {
+        val arrival = point(0, ActivityState.DOWNHILL)
+        val still = (1..20).map { step ->
+            point(step * 1_000L, ActivityState.STILL, confidence = 0.8, offset = 0.001)
+        }
+        val departure = point(21_000, ActivityState.TRANSIT, offset = 0.002)
+
+        val markers = (listOf(arrival) + still + departure).aggregatedStopMarkers()
+
         assertEquals(1, markers.size)
-        assertEquals(stillMiddle, markers.single().point)
-        assertEquals(2_000L, markers.single().durationMs)
+        assertEquals(19_000L, markers.single().durationMs)
         assertEquals(0.8, markers.single().confidence!!, 0.000_001)
+    }
+
+    @Test
+    fun `a track stand is not a stop worth marking`() {
+        val points = listOf(
+            point(0, ActivityState.DOWNHILL),
+            point(1_000, ActivityState.STILL, offset = 0.001),
+            point(3_000, ActivityState.STILL, offset = 0.001),
+            point(4_000, ActivityState.DOWNHILL, offset = 0.002),
+        )
+
+        assertEquals(emptyList<StopMarker>(), points.aggregatedStopMarkers())
+    }
+
+    @Test
+    fun `a traffic light inside a vehicle is not a rider stop`() {
+        val inTraffic = buildList {
+            add(point(0, ActivityState.LIKELY_MOTORIZED))
+            (1..40).forEach { step ->
+                add(point(step * 1_000L, ActivityState.STILL, offset = 0.001))
+            }
+            add(point(41_000, ActivityState.LIKELY_MOTORIZED, offset = 0.002))
+        }
+
+        assertEquals(emptyList<StopMarker>(), inTraffic.aggregatedStopMarkers())
+    }
+
+    @Test
+    fun `getting off the shuttle and standing is still a stop`() {
+        val arrival = buildList {
+            add(point(0, ActivityState.LIKELY_MOTORIZED))
+            (1..40).forEach { step ->
+                add(point(step * 1_000L, ActivityState.STILL, offset = 0.001))
+            }
+            add(point(41_000, ActivityState.DOWNHILL, offset = 0.002))
+        }
+
+        assertEquals(1, arrival.aggregatedStopMarkers().size)
     }
 
     @Test

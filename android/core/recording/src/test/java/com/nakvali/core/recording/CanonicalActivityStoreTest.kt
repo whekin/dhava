@@ -195,5 +195,15 @@ class CanonicalActivityStoreTest {
                 longestGapS = 0.0,
                 elevationUncertaintyM = 6.0,
             ),
+            ride = CanonicalRideTotals(
+                distanceM = 120.0,
+                movingTimeS = 30.0,
+                ascentM = 2.0,
+                descentM = 18.0,
+                maxSpeedMps = 9.0,
+                avgMovingSpeedMps = 4.0,
+                transportDistanceM = 0.0,
+                transportTimeS = 0.0,
+            ),
         )
 }

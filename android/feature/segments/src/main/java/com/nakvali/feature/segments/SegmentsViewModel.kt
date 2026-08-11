@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.nakvali.core.map.SegmentLibraryCamera
 import com.nakvali.core.recording.RecordingRepository
 import com.nakvali.core.recording.SegmentResults
+import com.nakvali.core.recording.SegmentDifficulty
 import com.nakvali.core.recording.StoredAttempt
 import com.nakvali.core.recording.StoredAttemptQuality
 import com.nakvali.core.recording.StoredSegment
@@ -230,9 +231,9 @@ class SegmentDetailViewModel(
         }
     }
 
-    fun rename(name: String) {
+    fun updateDetails(name: String, difficulty: SegmentDifficulty?, externalUrl: String) {
         viewModelScope.launch {
-            repository.renameSegment(segmentId, name)
+            repository.updateSegmentDetails(segmentId, name, difficulty, externalUrl)
             refresh()
         }
     }

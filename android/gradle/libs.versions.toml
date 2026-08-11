@@ -16,7 +16,12 @@ activityCompose = "1.10.1"
 composeBom = "2025.10.01"
 # 1.4.0 stable made MaterialExpressiveTheme internal; the 1.5 alphas expose it
 # again behind @ExperimentalMaterial3ExpressiveApi.
-material3 = "1.5.0-alpha09"
+# Carries the BottomSheet motion fix (b/452071842), which landed in alpha16: sheets now
+# respect MaterialTheme.motionScheme during nested scroll and drag instead of a hardcoded
+# settle, which is what could hold a child scroll gesture while the sheet was moving.
+# Pinned at alpha18 rather than newer: alpha21 deprecates the sheet state APIs this app
+# uses in favour of a unified rememberBottomSheetState, which is its own migration.
+material3 = "1.5.0-alpha18"
 navigationCompose = "2.9.0"
 
 # Recording stack

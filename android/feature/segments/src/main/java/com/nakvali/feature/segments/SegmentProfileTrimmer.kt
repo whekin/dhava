@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -24,7 +28,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
@@ -79,6 +87,60 @@ internal const val MIN_SELECTION_GAP_M = 25.0
 private const val MIN_DOMAIN_SPAN = 1.0
 private const val DOMAIN_FOCUS_PADDING_FRACTION = 0.12
 private val HandleTouchSlop = 28.dp
+
+/**
+ * Trail shown around a held handle, metres.
+ *
+ * Holding a gate asks for precision, and precision is scale: the axis closes
+ * in until a metre is a visible distance and the finger stays honest at 1:1.
+ * Scaling the finger instead was tried and was wrong — the gate felt stuck,
+ * and a large movement against a shrunken delta arrived as a jump.
+ */
+private const val FINE_FOCUS_TRAIL_M = 60.0
+
+/**
+ * Breathing room at both ends of the chart.
+ *
+ * A handle sitting on the screen edge is unreachable: the system's back
+ * gesture owns that strip, and every attempt to grab the gate left the editor
+ * instead. The chart is inset, and the strip it does occupy is claimed back
+ * from the system gesture on top of that.
+ */
+/**
+ * Smallest height difference a profile chart will scale to.
+ *
+ * Auto-scaling to whatever the selection contains is what made a smooth road
+ * with a few metres of undulation look like a pump track: the axis was
+ * magnifying GPS and barometer noise to full height. Real relief still fills
+ * the chart, because it is larger than this.
+ */
+private const val MIN_VISIBLE_RELIEF_M = 25.0
+
+private val ChartEdgeInset = 22.dp
+
+/** Dragging into this strip pans the axis instead of stopping at the end. */
+private val EdgePanZone = 40.dp
+
+/**
+ * How fast the axis travels while a handle is held at the edge, in fractions
+ * of the visible span per second. Fast enough to cross a ride without
+ * boredom, slow enough to release on the metre the rider wanted.
+ */
+private const val EDGE_PAN_SPAN_PER_SECOND = 0.55
+private const val EDGE_PAN_STEP_MS = 16L
+
+/**
+ * How much the map's zoom refines gate dragging.
+ *
+ * A rider who has zoomed the map to a gate is working at that scale and
+ * expects the chart to follow; leaving the chart at ride scale was the reason
+ * a close-up map still moved the gate in large jumps.
+ */
+internal fun dragSensitivityForMapZoom(zoom: Double): Double = when {
+    !zoom.isFinite() || zoom <= 14.0 -> 1.0
+    zoom >= 18.0 -> 0.3
+    else -> 1.0 - (zoom - 14.0) / 4.0 * 0.7
+}
 private val CandidateRibbonHeight = 18.dp
 
 /**
@@ -106,10 +168,14 @@ internal fun SegmentProfileTrimmer(
     onCandidatePicked: (CandidateSpan) -> Unit,
     onActiveHandleChange: (SelectionHandle?) -> Unit,
     modifier: Modifier = Modifier,
+    /** Raised while a handle is held, so the map can close in on the gate. */
+    onFineModeChange: (Boolean) -> Unit = {},
+    mapZoom: Double = 0.0,
     height: Dp = 168.dp,
 ) {
     val density = LocalDensity.current
     val slopPx = with(density) { HandleTouchSlop.toPx() }
+    val edgeZonePx = with(density) { EdgePanZone.toPx() }
     val ribbonPx = with(density) { CandidateRibbonHeight.toPx() }
     val descendColor = MaterialTheme.colorScheme.primary
     val climbColor = MaterialTheme.colorScheme.tertiary
@@ -117,6 +183,12 @@ internal fun SegmentProfileTrimmer(
     val guideColor = MaterialTheme.colorScheme.outlineVariant
     val existingColor = MaterialTheme.colorScheme.onSurfaceVariant
 
+    val haptic = LocalHapticFeedback.current
+    // The gate always tracks the finger one to one. What changes is how much
+    // trail a screen width covers: the chart domain is the coarse control,
+    // the map's zoom refines it, and holding a handle closes both right down
+    // on the gate.
+    val mapSensitivity = dragSensitivityForMapZoom(mapZoom)
     val current = rememberUpdatedState(
         TrimmerInput(profile, candidates, startPosition, endPosition, domain),
     )
@@ -124,7 +196,33 @@ internal fun SegmentProfileTrimmer(
     val onDomain = rememberUpdatedState(onDomainChange)
     val onCandidate = rememberUpdatedState(onCandidatePicked)
     val onActiveHandle = rememberUpdatedState(onActiveHandleChange)
+    val onFine = rememberUpdatedState(onFineModeChange)
     var viewportWidth by remember { mutableIntStateOf(0) }
+    // -1 pans towards the start of the ride, +1 towards its end, 0 is idle.
+    var edgePan by remember { mutableIntStateOf(0) }
+    var edgePanPosition by remember { mutableStateOf<((Double) -> Unit)?>(null) }
+
+    // Holding a handle against an edge keeps the axis moving under it, so a
+    // selection can be extended past the visible window without a pinch. The
+    // handle rides along with the axis rather than stopping at the border.
+    LaunchedEffect(edgePan) {
+        if (edgePan == 0) return@LaunchedEffect
+        while (isActive) {
+            val input = current.value
+            val step = input.domain.span * EDGE_PAN_SPAN_PER_SECOND *
+                (EDGE_PAN_STEP_MS / 1_000.0) * edgePan
+            val moved = clampDomain(
+                ProfileDomain(input.domain.start + step, input.domain.end + step),
+                input.profile.lastPosition,
+            )
+            if (moved.start == input.domain.start && moved.end == input.domain.end) return@LaunchedEffect
+            onDomain.value(moved)
+            edgePanPosition?.invoke(
+                if (edgePan < 0) moved.start else moved.end,
+            )
+            delay(EDGE_PAN_STEP_MS)
+        }
+    }
 
     // Two fingers narrow the domain, one finger away from a handle pans it.
     // Precision is a property of the axis, never of a scaled finger delta.
@@ -154,6 +252,10 @@ internal fun SegmentProfileTrimmer(
         modifier = modifier
             .fillMaxWidth()
             .height(height + CandidateRibbonHeight)
+            // The inset keeps a handle off the screen edge; the exclusion
+            // covers the strip that is still within the system's reach.
+            .padding(horizontal = ChartEdgeInset)
+            .systemGestureExclusion()
             .onSizeChanged { viewportWidth = it.width }
             .transformable(state = transformState),
     ) {
@@ -175,11 +277,16 @@ internal fun SegmentProfileTrimmer(
 
             val minAltitude = profile.minAltitudeM ?: return@Canvas
             val maxAltitude = profile.maxAltitudeM ?: return@Canvas
-            val altitudeRange = (maxAltitude - minAltitude).coerceAtLeast(1.0)
+            // A chart that always fills its height turns three metres of
+            // asphalt undulation into a pump track. Below a floor the range is
+            // held and the data centred inside it, so gentle ground reads as
+            // gentle and only real relief reaches the top of the chart.
+            val altitudeRange = (maxAltitude - minAltitude).coerceAtLeast(MIN_VISIBLE_RELIEF_M)
+            val altitudeTop = (maxAltitude + minAltitude) / 2.0 + altitudeRange / 2.0
             val topInset = 10.dp.toPx()
             fun x(position: Double) = xForPosition(position, size.width, domain)
             fun y(altitude: Double) = (
-                topInset + (maxAltitude - altitude) / altitudeRange * (chartHeight - topInset)
+                topInset + (altitudeTop - altitude) / altitudeRange * (chartHeight - topInset)
                 ).toFloat()
 
             // Fill under the selection first, so the coloured line stays on top.
@@ -299,14 +406,43 @@ internal fun SegmentProfileTrimmer(
                             SelectionHandle.START -> input.startPosition
                             SelectionHandle.FINISH -> input.endPosition
                         }
-                        drag(down.id) { change: PointerInputChange ->
-                            // Read the movement before consuming it:
-                            // positionChange() reports zero once the change is
-                            // consumed, which silently froze the gate.
-                            val movedX = change.positionChange().x
-                            change.consume()
+
+                        // A held handle that has not moved yet asks for the
+                        // slow mode; moving instead simply starts the drag.
+                        // Both the fine sensitivity and the axis zoom belong to
+                        // that deliberate hold: collapsing the view on a plain
+                        // grab yanked the chart away from under the finger
+                        // before the rider had asked for anything.
+                        // Holding is one action with a beginning and an end:
+                        // whatever it zooms, it gives back on release. The
+                        // rider's own framing is never spent by a fine
+                        // adjustment.
+                        var domainBeforeFine: ProfileDomain? = null
+                        val fine = awaitLongPressOrCancellation(down.id) != null
+                        if (fine) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             val live = current.value
-                            position += movedX / width * live.domain.span
+                            domainBeforeFine = live.domain
+                            val perMetre = live.profile.positionsPerMetre()
+                            if (perMetre != null) {
+                                val half = FINE_FOCUS_TRAIL_M * perMetre / 2.0
+                                onDomain.value(
+                                    clampDomain(
+                                        ProfileDomain(position - half, position + half),
+                                        live.profile.lastPosition,
+                                    ),
+                                )
+                            }
+                            onFine.value(true)
+                        }
+                        val sensitivity = mapSensitivity
+
+                        // While the axis is panning under a held finger the
+                        // handle has to travel with it, so the pan driver
+                        // reports the edge it has reached back into the drag.
+                        fun applyPosition(next: Double) {
+                            position = next
+                            val live = current.value
                             val (start, end) = applyHandle(
                                 handle = handle,
                                 proposed = position,
@@ -315,6 +451,33 @@ internal fun SegmentProfileTrimmer(
                                 endPosition = live.endPosition,
                             )
                             onSelection.value(start, end)
+                        }
+                        edgePanPosition = ::applyPosition
+
+                        drag(down.id) { change: PointerInputChange ->
+                            // Read the movement before consuming it:
+                            // positionChange() reports zero once the change is
+                            // consumed, which silently froze the gate.
+                            val movedX = change.positionChange().x
+                            change.consume()
+                            val live = current.value
+                            position += movedX / width * live.domain.span * sensitivity
+                            applyPosition(position)
+                            edgePan = when {
+                                change.position.x <= edgeZonePx -> -1
+                                change.position.x >= width - edgeZonePx -> 1
+                                else -> 0
+                            }
+                        }
+                        edgePan = 0
+                        edgePanPosition = null
+                        if (fine) {
+                            domainBeforeFine?.let { restored ->
+                                onDomain.value(
+                                    clampDomain(restored, current.value.profile.lastPosition),
+                                )
+                            }
+                            onFine.value(false)
                         }
                         onActiveHandle.value(null)
                     }
@@ -500,6 +663,10 @@ internal fun focusedDomain(
         lastPosition,
     )
 }
+
+/** Track positions per metre of trail, or null when the length is unknown. */
+private fun RideProfileUi.positionsPerMetre(): Double? =
+    (lastPosition / lengthM).takeIf { lengthM > 0.0 && lastPosition > 0.0 && it.isFinite() }
 
 internal fun clampDomain(domain: ProfileDomain, lastPosition: Double): ProfileDomain {
     val limit = lastPosition.coerceAtLeast(MIN_DOMAIN_SPAN)

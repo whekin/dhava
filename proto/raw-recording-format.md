@@ -44,6 +44,15 @@ Rules:
 - `event` lines mark manual `pause` / `resume`. No sensor samples are written while
   paused. An unmatched `pause` extends to the end of the recording. Analysis must
   not add distance, moving time or airtime across paused intervals.
+- `event` actions `activity:in_vehicle`, `activity:in_vehicle:exit`, `activity:on_bicycle`
+  and `activity:on_foot` record Android's own activity recognition when the optional
+  permission is granted. They are platform hints kept as evidence for later analysis,
+  never a substitute for sensor evidence: classification must stay reproducible from
+  GPS/IMU/baro alone, and a reader that ignores these lines must reach the same result.
+- While the recorder judges the rider to be in a vehicle, GPS drops to a 5 s balanced
+  fix and accelerometer/gyroscope acquisition to 25 Hz. This is a deliberate, bounded
+  loss of transit fidelity; the rate returns to full as soon as a descent, trail-like
+  motion, a long stop or a manual pause ends the vehicle state.
 - `event` action `imu_overflow:<count>` is diagnostic only: it reports IMU rows
   dropped since the previous writer health checkpoint because the bounded queue
   was full. Readers must not treat it as a pause boundary.

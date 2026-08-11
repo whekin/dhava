@@ -17,8 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -42,10 +46,10 @@ import com.nakvali.core.map.mapCacheSizeBytes
 import com.nakvali.core.recording.BackupPreview
 import com.nakvali.core.recording.DirectoryUsage
 import com.nakvali.core.recording.RecordingRepository
+import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.recording.directoryUsage
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliPanel
-import com.nakvali.core.ui.NakvaliScreenHeader
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import java.text.SimpleDateFormat
@@ -56,12 +60,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun SettingsScreen() {
+internal fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val preferences = remember { context.getSharedPreferences("recorder_settings", 0) }
-    var offline by remember { mutableStateOf(preferences.getBoolean("offline_mode", true)) }
-    var diagnostics by remember { mutableStateOf(preferences.getBoolean("sensor_diagnostics", false)) }
-    var keepScreenOn by remember { mutableStateOf(preferences.getBoolean("keep_screen_on", false)) }
+    val preferences = remember { RecorderSettings.preferences(context) }
+    var offline by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.OFFLINE_MODE, true))
+    }
+    var developerMode by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.DEVELOPER_MODE, false))
+    }
+    var diagnostics by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.SENSOR_DIAGNOSTICS, false))
+    }
+    var keepScreenOn by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.KEEP_SCREEN_ON, false))
+    }
+    var segmentHaptics by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.SEGMENT_HAPTICS, true))
+    }
+    var transportPowerSave by remember {
+        mutableStateOf(preferences.getBoolean(RecorderSettings.TRANSPORT_POWER_SAVE, true))
+    }
+    var buildNumberTaps by remember { mutableIntStateOf(0) }
 
     Column(
         Modifier
@@ -69,34 +89,103 @@ internal fun SettingsScreen() {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = NakvaliSpacing.screen, vertical = NakvaliSpacing.xLarge),
     ) {
-        NakvaliScreenHeader(
-            eyebrow = "Field kit",
-            title = "Settings",
-            description = "Recorder behavior and tools for field testing.",
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to profile",
+                )
+            }
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.height(NakvaliSpacing.small))
+        Text(
+            text = "Recorder behavior, backups and field tools.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(NakvaliSpacing.xxLarge))
         NakvaliSectionLabel("Recording")
         Spacer(Modifier.height(NakvaliSpacing.medium))
         NakvaliPanel(Modifier.fillMaxWidth()) {
-            SettingToggle("Offline mode", "Keep every activity local and skip sync attempts.", offline) {
-                offline = it
-                preferences.edit().putBoolean("offline_mode", it).apply()
-            }
-        }
-        Spacer(Modifier.height(NakvaliSpacing.xxLarge))
-        NakvaliSectionLabel("Field diagnostics")
-        Spacer(Modifier.height(NakvaliSpacing.medium))
-        NakvaliPanel(Modifier.fillMaxWidth()) {
             Column {
-                SettingToggle("Sensor diagnostics", "Show GPS accuracy while riding.", diagnostics) {
-                    diagnostics = it
-                    preferences.edit().putBoolean("sensor_diagnostics", it).apply()
+                SettingToggle("Offline mode", "Keep every activity local and skip sync attempts.", offline) {
+                    offline = it
+                    preferences.edit().putBoolean(RecorderSettings.OFFLINE_MODE, it).apply()
                 }
                 NakvaliDivider(Modifier.padding(horizontal = NakvaliSpacing.large))
-                SettingToggle("Keep screen awake", "Useful during field tests; consumes more battery.", keepScreenOn) {
-                    keepScreenOn = it
-                    preferences.edit().putBoolean("keep_screen_on", it).apply()
-                    (context as? MainActivity)?.applyKeepScreenOn()
+                SettingToggle(
+                    "Save power in transport",
+                    "Lower GPS and motion rates on a shuttle or bus, back to full the moment you ride.",
+                    transportPowerSave,
+                ) {
+                    transportPowerSave = it
+                    preferences.edit().putBoolean(RecorderSettings.TRANSPORT_POWER_SAVE, it).apply()
+                }
+                NakvaliDivider(Modifier.padding(horizontal = NakvaliSpacing.large))
+                SettingToggle(
+                    "Segment vibration",
+                    "Buzz when a segment run starts and finishes, harder for a record.",
+                    segmentHaptics,
+                ) {
+                    segmentHaptics = it
+                    preferences.edit().putBoolean(RecorderSettings.SEGMENT_HAPTICS, it).apply()
+                }
+            }
+        }
+        if (developerMode) {
+            Spacer(Modifier.height(NakvaliSpacing.xxLarge))
+            NakvaliSectionLabel("Developer tools")
+            Spacer(Modifier.height(NakvaliSpacing.medium))
+            NakvaliPanel(Modifier.fillMaxWidth()) {
+                Column {
+                    SettingToggle(
+                        title = "Developer mode",
+                        description = "Show raw track comparison and field diagnostics.",
+                        checked = true,
+                    ) { enabled ->
+                        developerMode = enabled
+                        if (!enabled) {
+                            diagnostics = false
+                            keepScreenOn = false
+                        }
+                        preferences.edit()
+                            .putBoolean(RecorderSettings.DEVELOPER_MODE, enabled)
+                            .putBoolean(RecorderSettings.SENSOR_DIAGNOSTICS, diagnostics)
+                            .putBoolean(RecorderSettings.KEEP_SCREEN_ON, keepScreenOn)
+                            .apply()
+                        (context as? MainActivity)?.applyKeepScreenOn()
+                    }
+                    NakvaliDivider(Modifier.padding(horizontal = NakvaliSpacing.large))
+                    SettingToggle(
+                        "Sensor diagnostics",
+                        "Show GPS accuracy while riding.",
+                        diagnostics,
+                    ) {
+                        diagnostics = it
+                        preferences.edit()
+                            .putBoolean(RecorderSettings.SENSOR_DIAGNOSTICS, it)
+                            .apply()
+                    }
+                    NakvaliDivider(Modifier.padding(horizontal = NakvaliSpacing.large))
+                    SettingToggle(
+                        "Keep screen awake",
+                        "Useful during field tests; consumes more battery.",
+                        keepScreenOn,
+                    ) {
+                        keepScreenOn = it
+                        preferences.edit()
+                            .putBoolean(RecorderSettings.KEEP_SCREEN_ON, it)
+                            .apply()
+                        (context as? MainActivity)?.applyKeepScreenOn()
+                    }
                 }
             }
         }
@@ -117,13 +206,49 @@ internal fun SettingsScreen() {
             )
         }
         Spacer(Modifier.height(NakvaliSpacing.large))
-        Text(
-            "Nakvali recorder · prototype 0.1",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(
+            modifier = Modifier
+                .clickable {
+                    if (developerMode) {
+                        Toast.makeText(context, "Developer mode is already enabled", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val taps = buildNumberTaps + 1
+                        buildNumberTaps = taps
+                        val remaining = DeveloperModeTapCount - taps
+                        when {
+                            remaining <= 0 -> {
+                                developerMode = true
+                                buildNumberTaps = 0
+                                preferences.edit()
+                                    .putBoolean(RecorderSettings.DEVELOPER_MODE, true)
+                                    .apply()
+                                Toast.makeText(context, "Developer mode enabled", Toast.LENGTH_SHORT).show()
+                            }
+                            remaining <= 4 -> Toast.makeText(
+                                context,
+                                "$remaining more tap${if (remaining == 1) "" else "s"} for developer mode",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }
+                .padding(vertical = NakvaliSpacing.small),
+        ) {
+            Text(
+                "Nakvali ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Build ${BuildConfig.VERSION_CODE}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
     }
 }
+
+private const val DeveloperModeTapCount = 7
 
 // --- backup ------------------------------------------------------------------
 

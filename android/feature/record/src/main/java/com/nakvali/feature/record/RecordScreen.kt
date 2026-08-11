@@ -21,10 +21,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +58,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -56,8 +66,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.nakvali.core.recording.ActiveSegmentRun
+import com.nakvali.core.recording.LiveSegmentRun
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordingState
+import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.recording.canContinueRecording
 import com.nakvali.core.recording.needsRecoveryAttention
 import com.nakvali.core.ui.NakvaliControlTone
@@ -70,6 +83,13 @@ import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
 import com.nakvali.core.ui.NakvaliTheme
 import java.util.Locale
+
+/**
+ * Height of the recording sheet at rest: status, both metric rows and the
+ * controls. Everything a rider reads at speed is above this line, so the sheet
+ * never has to be touched mid-run.
+ */
+private val RecordSheetPeekHeight = 320.dp
 
 /** Map-first ride recorder. Platform work stays in the ViewModel/service. */
 @Composable
@@ -86,7 +106,9 @@ fun RecordScreen(
     val lastUsedBikeId by viewModel.lastUsedBikeId.collectAsState()
     val startError by viewModel.startError.collectAsState()
     val diagnosticsEnabled = remember {
-        context.getSharedPreferences("recorder_settings", 0).getBoolean("sensor_diagnostics", false)
+        val preferences = RecorderSettings.preferences(context)
+        preferences.getBoolean(RecorderSettings.DEVELOPER_MODE, false) &&
+            preferences.getBoolean(RecorderSettings.SENSOR_DIAGNOSTICS, false)
     }
 
     var permissionDenied by remember { mutableStateOf(false) }
@@ -190,6 +212,12 @@ fun RecordScreen(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     add(Manifest.permission.POST_NOTIFICATIONS)
                 }
+                // Optional: lets the recorder recognize a vehicle in flat city
+                // traffic and drop to power-saving rates. Declining changes
+                // nothing about recording.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    add(Manifest.permission.ACTIVITY_RECOGNITION)
+                }
             }
             permissionLauncher.launch(permissions.toTypedArray())
         }
@@ -204,7 +232,7 @@ fun RecordScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         val mapOverlayBottomPadding = when (state) {
-            is RecordingState.Recording -> 300.dp
+            is RecordingState.Recording -> RecordSheetPeekHeight
             is RecordingState.Preparing -> 260.dp
             else -> if (interruptedRecording != null) 320.dp else 190.dp
         }
@@ -556,6 +584,7 @@ private fun ReadinessRow(label: String, ready: Boolean, detail: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecordingContent(
     state: RecordingState.Recording,
@@ -570,16 +599,33 @@ private fun RecordingContent(
         state.stationary -> "Still"
         else -> "Moving"
     }
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        skipHiddenState = true,
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
 
-    Box(Modifier.fillMaxSize()) {
-        NakvaliPanel(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(NakvaliSpacing.medium),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(modifier = Modifier.padding(NakvaliSpacing.xLarge)) {
+    // A sheet rather than a fixed panel: the map is the instrument the rider
+    // is actually reading, so it must never be traded away for the run list.
+    // The peek carries everything needed at speed — status, the two metric
+    // rows and the controls — and pulling up reveals the ride's segment runs
+    // without covering the trail permanently.
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = RecordSheetPeekHeight,
+        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        sheetContentColor = MaterialTheme.colorScheme.onSurface,
+        // Transparent so the map drawn beneath this composable stays visible.
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        sheetContent = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = NakvaliSpacing.xLarge)
+                    .padding(bottom = NakvaliSpacing.xLarge)
+                    .navigationBarsPadding(),
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -598,12 +644,26 @@ private fun RecordingContent(
                             MaterialTheme.colorScheme.onPrimaryContainer
                         },
                     )
-                    if (showDiagnostics) {
-                        Text(
-                            state.lastAccuracyM?.let { "GPS ±${it.toInt()} m" } ?: "GPS —",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // The rider should never have to wonder why the track
+                        // got coarse: reduced sampling is always visible.
+                        if (state.powerSaving) {
+                            NakvaliStatusPill(
+                                text = "Transport · saving power",
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        }
+                        if (showDiagnostics) {
+                            Text(
+                                state.lastAccuracyM?.let { "GPS ±${it.toInt()} m" } ?: "GPS —",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(NakvaliSpacing.large))
@@ -613,7 +673,9 @@ private fun RecordingContent(
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     NakvaliMetric(
-                        value = state.lastSpeedMps?.let { String.format(Locale.US, "%.1f", it * 3.6f) } ?: "—",
+                        value = state.lastSpeedMps?.let {
+                            String.format(Locale.US, "%.1f", it * 3.6f)
+                        } ?: "—",
                         label = "km/h",
                         prominent = true,
                     )
@@ -623,7 +685,26 @@ private fun RecordingContent(
                         alignment = Alignment.End,
                     )
                 }
-                Spacer(Modifier.height(NakvaliSpacing.xLarge))
+                Spacer(Modifier.height(NakvaliSpacing.large))
+                // Descent sits beside distance because the product is
+                // downhill-first: the metres dropped are the ride, and the
+                // rider should not have to wait for Finish to read them.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    NakvaliMetric(
+                        value = formatDistance(state.distanceM),
+                        label = "Distance",
+                    )
+                    NakvaliMetric(
+                        value = formatDescent(state.descentM),
+                        label = "Descent",
+                        alignment = Alignment.End,
+                    )
+                }
+                Spacer(Modifier.height(NakvaliSpacing.large))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -643,17 +724,211 @@ private fun RecordingContent(
                     }
                     NakvaliRideControl(
                         icon = if (state.paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                        contentDescription = if (state.paused) "Resume recording" else "Pause recording",
+                        contentDescription = if (state.paused) {
+                            "Resume recording"
+                        } else {
+                            "Pause recording"
+                        },
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             if (state.paused) onResume() else onPause()
                         },
                     )
                 }
+                SegmentRunsSection(
+                    activeSegment = state.activeSegment,
+                    runs = state.segmentRuns,
+                    nowMs = System.currentTimeMillis(),
+                    modifier = Modifier.padding(top = NakvaliSpacing.large),
+                )
             }
-        }
+        },
+    ) {
+        Box(Modifier.fillMaxSize())
+    }
+}
+
+/**
+ * Segment feedback above the ride metrics: what is being timed right now, or
+ * the run just finished with the rest of this ride's runs behind a tap.
+ *
+ * Every time here is provisional — live matching is causal, and the canonical
+ * result after Finish is the one that lands in the segment's leaderboard. The
+ * label says so once, next to the newest run, instead of on every row.
+ */
+@Composable
+private fun SegmentRunsSection(
+    activeSegment: ActiveSegmentRun?,
+    runs: List<LiveSegmentRun>,
+    nowMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    if (activeSegment == null && runs.isEmpty()) return
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    // A finished run is news, not furniture: once it has been read it should
+    // give the map back. Dismissal is per run, so the next one announces
+    // itself again, and a run in progress is never dismissable — that card is
+    // a live clock.
+    var dismissedRunId by rememberSaveable { mutableStateOf<String?>(null) }
+    val latest = runs.firstOrNull()
+    val latestDismissed = latest != null && latest.segmentId + latest.finishedAtMs == dismissedRunId
+    if (activeSegment == null && latestDismissed && runs.size == 1) {
+        DismissedRunsHint(count = runs.size, onShow = { dismissedRunId = null })
+        return
     }
 
+    Column(modifier.fillMaxWidth()) {
+        if (activeSegment != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(NakvaliSpacing.large),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        NakvaliSectionLabel("On segment")
+                        Text(
+                            activeSegment.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        formatSegmentElapsed(nowMs - activeSegment.startedAtMs),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                }
+            }
+        } else if (latestDismissed) {
+            DismissedRunsHint(count = runs.size, onShow = { dismissedRunId = null })
+        } else {
+            val latest = runs.first()
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = if (latest.personalRecord) {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                contentColor = if (latest.personalRecord) {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+            ) {
+                Column(Modifier.padding(NakvaliSpacing.large)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            NakvaliSectionLabel(
+                                if (latest.personalRecord) "Personal record" else "Segment done",
+                            )
+                            Text(
+                                latest.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                formatSegmentElapsed(latest.elapsedMs),
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                            latest.deltaMs?.let { delta ->
+                                Text(
+                                    formatSegmentDelta(delta),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                dismissedRunId = latest.segmentId + latest.finishedAtMs
+                                showAll = false
+                            },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Hide this run",
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        "Provisional — confirmed when the ride is finished",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+
+        val earlier = if (activeSegment != null || latestDismissed) runs else runs.drop(1)
+        if (earlier.isNotEmpty()) {
+            TextButton(onClick = { showAll = !showAll }) {
+                Text(
+                    if (showAll) {
+                        "Hide earlier runs"
+                    } else {
+                        "${earlier.size} earlier ${if (earlier.size == 1) "run" else "runs"}"
+                    },
+                )
+            }
+            if (showAll) {
+                earlier.forEach { run ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = NakvaliSpacing.small),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            run.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            buildString {
+                                append(formatSegmentElapsed(run.elapsedMs))
+                                if (run.personalRecord) append(" · PR")
+                                run.deltaMs?.takeIf { !run.personalRecord }?.let {
+                                    append(" · ${formatSegmentDelta(it)}")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(NakvaliSpacing.large))
+    }
+}
+
+/**
+ * The single line a dismissed run leaves behind, so the ride's runs are always
+ * one tap away instead of gone.
+ */
+@Composable
+private fun DismissedRunsHint(count: Int, onShow: () -> Unit) {
+    TextButton(onClick = onShow) {
+        Text("$count ${if (count == 1) "run" else "runs"} this ride")
+    }
 }
 
 @Composable
@@ -792,6 +1067,8 @@ private fun RecordingContentPreview() {
                     elapsedMs = 1_842_000,
                     lastSpeedMps = 12.4f,
                     lastAccuracyM = 4.8f,
+                    distanceM = 8_240.0,
+                    descentM = 612.0,
                     stationary = false,
                     liveTrack = emptyList(),
                     gpsCount = 1_842,

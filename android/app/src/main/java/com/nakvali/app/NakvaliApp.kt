@@ -3,7 +3,6 @@ package com.nakvali.app
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
@@ -38,6 +37,7 @@ import com.nakvali.feature.record.RecordScreen
 import com.nakvali.feature.record.ActivitiesScreen
 import com.nakvali.feature.record.SaveRecordingScreen
 import com.nakvali.feature.segments.SegmentDetailScreen
+import com.nakvali.feature.segments.SegmentCandidatesScreen
 import com.nakvali.feature.segments.SegmentEditorScreen
 import com.nakvali.feature.segments.SegmentEditorSource
 import com.nakvali.feature.segments.SegmentsScreen
@@ -52,8 +52,11 @@ private enum class NakvaliDestination(
     Activities("activities", "Activities", Icons.AutoMirrored.Filled.List),
     Segments("segments", "Segments", Icons.Filled.Timer),
     Profile("profile", "Profile", Icons.Filled.Person),
-    Settings("settings", "Settings", Icons.Filled.Settings),
 }
+
+private const val SETTINGS_ROUTE = "settings"
+private const val SEGMENT_CANDIDATES_ROUTE = "segment-candidates"
+private const val SEGMENT_EDITOR_ROUTE = "segment-editor/{id}?start={start}&end={end}"
 
 /** App scaffold: bottom navigation bar plus the navigation host. */
 @Composable
@@ -140,6 +143,15 @@ fun NakvaliApp(
                 ActivitiesScreen(
                     onOpenActivity = { id -> navController.navigate("activity/$id") },
                     onFinishSaving = { id -> navController.navigate("save/$id") },
+                    onStartRecording = {
+                        navController.navigate(NakvaliDestination.Record.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(NakvaliDestination.Segments.route) {
@@ -148,6 +160,7 @@ fun NakvaliApp(
                     onEditImportedTrace = { id ->
                         navController.navigate("segment-import-editor/$id")
                     },
+                    onCreateSegment = { navController.navigate(SEGMENT_CANDIDATES_ROUTE) },
                 )
             }
             composable(NakvaliDestination.Profile.route) {
@@ -156,9 +169,12 @@ fun NakvaliApp(
                     onSignIn = onSignIn,
                     onSignOut = onSignOut,
                     onRetrySync = onRetryProfileSync,
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
-            composable(NakvaliDestination.Settings.route) { SettingsScreen() }
+            composable(SETTINGS_ROUTE) {
+                SettingsScreen(onBack = { navController.popBackStack() })
+            }
             // Detail screen for one recorded activity; pushed on top of the
             // Record tab, so system/app back both return to the list.
             composable(
@@ -184,18 +200,42 @@ fun NakvaliApp(
             // Authoring a segment from one ride. On success the editor is
             // replaced by the new segment so Back returns to the ride.
             composable(
-                route = "segment-editor/{id}",
-                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                route = SEGMENT_EDITOR_ROUTE,
+                arguments = listOf(
+                    navArgument("id") { type = NavType.StringType },
+                    navArgument("start") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("end") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
             ) { entry ->
                 SegmentEditorScreen(
                     source = SegmentEditorSource.Ride(
-                        entry.arguments?.getString("id").orEmpty(),
+                        id = entry.arguments?.getString("id").orEmpty(),
+                        initialStartPosition = entry.arguments?.getString("start")?.toDoubleOrNull(),
+                        initialEndPosition = entry.arguments?.getString("end")?.toDoubleOrNull(),
                     ),
                     onBack = { navController.popBackStack() },
                     onCreated = { segmentId ->
                         navController.navigate("segment/$segmentId") {
-                            popUpTo("segment-editor/{id}") { inclusive = true }
+                            popUpTo(SEGMENT_EDITOR_ROUTE) { inclusive = true }
                         }
+                    },
+                )
+            }
+            composable(SEGMENT_CANDIDATES_ROUTE) {
+                SegmentCandidatesScreen(
+                    onBack = { navController.popBackStack() },
+                    onReviewCandidate = { recordingId, start, end ->
+                        navController.navigate(
+                            "segment-editor/$recordingId?start=$start&end=$end",
+                        )
                     },
                 )
             }

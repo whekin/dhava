@@ -5,6 +5,8 @@
 //! mode detector: speed alone can establish movement, but can never establish
 //! motorized transport.
 
+use crate::canonical::ascent_descent;
+use crate::motion::{MotionSample, motion_samples};
 use crate::{CanonicalTrackPoint, ImuSample};
 
 const MAX_CONTIGUOUS_GAP_MS: i64 = 3_000;
@@ -20,15 +22,60 @@ const DOWNHILL_DROP_M: f64 = -1.5;
 const FAST_CLIMB_GRADE: f64 = 0.025;
 const FAST_CLIMB_VERTICAL_SPEED_MPS: f64 = 0.25;
 const FAST_CLIMB_GAIN_M: f64 = 2.5;
+/// Sustained rate of climb no rider produces under their own power.
+///
+/// Elite road climbing tops out near 0.5 m/s (1 800 m/h) and a mountain bike
+/// with pads is well below that; a shuttle van or a bus on the same road
+/// climbs at 1.5–4 m/s. This is the evidence the old rules were missing: they
+/// only recognized a vehicle above 25 km/h, which a switchback fire road never
+/// reaches, so the middle of every shuttle lap fell back to plain transit.
+const VEHICLE_CLIMB_VERTICAL_SPEED_MPS: f64 = 0.6;
+/// Minimum gain behind that rate, so altitude noise alone cannot claim it.
+const VEHICLE_CLIMB_GAIN_M: f64 = 5.0;
 const MIN_SHORT_ISLAND_MS: i64 = 3_000;
 const MIN_DOWNHILL_RUN_MS: i64 = 3_000;
 const MIN_MOTORIZED_RUN_MS: i64 = 12_000;
-const MOTION_SAMPLE_INTERVAL_MS: i64 = 50;
+/// Longest non-descending interruption that still belongs to the same ride in
+/// the same vehicle: a traffic light, a flat stretch, a passenger stop.
+const MAX_MOTORIZED_BRIDGE_MS: i64 = 90_000;
+/// Longest congestion a vehicle span may absorb when the motion evidence keeps
+/// saying "vehicle" throughout. Far beyond a traffic light, far short of a
+/// lunch stop.
+const MAX_MOTORIZED_TRAFFIC_BRIDGE_MS: i64 = 900_000;
+/// Above this share of confirmed STILL the interruption is a stop, not a crawl,
+/// and the rider may well have got out.
+const MAX_TRAFFIC_STILL_FRACTION: f64 = 0.6;
+/// The shortest a genuine "got out, rode down, got back in" can take.
+///
+/// Getting out of a shuttle to ride is not just the descent. It is unloading
+/// the bike, riding, then standing at the bottom until the vehicle comes back
+/// round for you — and that last part dominates. Measured across a real
+/// Kojori shuttle day: every genuine run put 600 s or more between the two
+/// motorized spans on either side of it (a 105–162 s descent followed by
+/// 300–500 s of waiting), while the dips *inside* a shuttle leg — where the
+/// road crosses a ridge and drops into the next valley — took 72 s and 122 s
+/// and the vehicle resumed climbing immediately.
+///
+/// So a gap this short cannot contain a ride, whatever its shape: the rider
+/// had no time to get out and back in. That is the one question geometry
+/// cannot answer here, because those road dips (-35 m, -80 m) are the same
+/// size as a short run.
+///
+/// Set well below the fastest observed turnaround rather than at the midpoint.
+/// The two errors are not equally bad: absorbing a real run into a lift erases
+/// descent, the number the product exists to report, while leaving a road dip
+/// unabsorbed only fragments a transfer.
+const MIN_SHUTTLE_TURNAROUND_MS: i64 = 240_000;
+/// Height a walk between two vehicles cannot give up, but a ridden descent —
+/// even a slow technical one — does.
+const RIDING_DROP_M: f64 = 30.0;
+/// Nobody walks a bike this fast, so sustained rough motion above it is riding.
+const WALKING_SPEED_MAX_MPS: f64 = 2.5;
+const MIN_RIDING_FRACTION: f64 = 0.3;
 const MAX_SMOOTH_IMU_GAP_MS: i64 = 250;
 const MIN_SMOOTH_IMU_SAMPLES: usize = 100;
 const SMOOTH_ACCEL_P90_MPS2: f64 = 0.45;
 const SMOOTH_GYRO_P90_RAD_S: f64 = 0.12;
-const STANDARD_GRAVITY_MPS2: f64 = 9.806_65;
 
 /// Mutually exclusive interpretation of one canonical track point.
 ///
@@ -65,13 +112,6 @@ impl ActivityClassification {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct MotionSample {
-    timestamp_ms: i64,
-    accel_error_mps2: f64,
-    gyro_rad_s: f64,
-}
-
-#[derive(Debug, Clone, Copy)]
 struct AltitudeTrend {
     delta_m: f64,
     vertical_speed_mps: f64,
@@ -101,6 +141,11 @@ pub(crate) fn classify_activity(
     let motion_samples = motion_samples(imu);
     for (start, end) in contiguous_spans(track) {
         classify_span(track, &motion_samples, start, end, &mut output[start..end]);
+        // Bridge before smoothing: a shuttle lap arrives as motorized evidence
+        // separated by traffic lights and flat stretches, and joining those
+        // fragments first is what makes the resulting run long enough to
+        // survive the minimum-duration rule below.
+        bridge_motorized_runs(track, &motion_samples, start, &mut output[start..end]);
         smooth_short_islands(track, start, end, &mut output[start..end]);
     }
     output
@@ -220,11 +265,21 @@ fn classify_evidence(evidence: WindowEvidence) -> ActivityClassification {
     let smooth_vehicle = speed_mps >= SMOOTH_VEHICLE_SPEED_MPS
         && evidence.duration_ms >= TARGET_WINDOW_MS
         && evidence.strongly_smooth;
-    if fast_climb || smooth_vehicle {
+    // Rate of climb is evidence on its own, at any road speed: it is the
+    // product of speed and grade, and no rider sustains it.
+    let vehicle_climb = evidence.altitude.is_some_and(|trend| {
+        trend.vertical_speed_mps >= VEHICLE_CLIMB_VERTICAL_SPEED_MPS
+            && trend.delta_m >= VEHICLE_CLIMB_GAIN_M
+    });
+    if fast_climb || smooth_vehicle || vehicle_climb {
         let confidence = if fast_climb && smooth_vehicle {
             0.94
         } else if fast_climb {
             0.82
+        } else if vehicle_climb && evidence.strongly_smooth {
+            0.88
+        } else if vehicle_climb {
+            0.80
         } else {
             0.76
         };
@@ -297,45 +352,6 @@ fn altitude_trend(
     })
 }
 
-fn motion_samples(imu: &[ImuSample]) -> Vec<MotionSample> {
-    let mut ordered: Vec<_> = imu.iter().collect();
-    ordered.sort_by_key(|sample| sample.timestamp_ms);
-
-    // Raw capture is around 200 Hz. Vehicle smoothness only needs a coarse
-    // envelope, so retain one conservative (max-error) bucket at 20 Hz. This
-    // bounds both memory and rolling-window work on multi-hour recordings.
-    let mut samples = Vec::with_capacity(ordered.len() / 20 + 1);
-    let mut bucket: Option<MotionSample> = None;
-    for sample in ordered {
-        let accel = sample.accel.map(f64::from);
-        let gyro = sample.gyro.map(f64::from);
-        let accel_magnitude = (accel[0].powi(2) + accel[1].powi(2) + accel[2].powi(2)).sqrt();
-        let gyro_magnitude = (gyro[0].powi(2) + gyro[1].powi(2) + gyro[2].powi(2)).sqrt();
-        if !accel_magnitude.is_finite() || !gyro_magnitude.is_finite() {
-            continue;
-        }
-        let candidate = MotionSample {
-            timestamp_ms: sample.timestamp_ms,
-            accel_error_mps2: (accel_magnitude - STANDARD_GRAVITY_MPS2).abs(),
-            gyro_rad_s: gyro_magnitude,
-        };
-        match bucket.as_mut() {
-            Some(current)
-                if candidate.timestamp_ms - current.timestamp_ms < MOTION_SAMPLE_INTERVAL_MS =>
-            {
-                current.accel_error_mps2 = current.accel_error_mps2.max(candidate.accel_error_mps2);
-                current.gyro_rad_s = current.gyro_rad_s.max(candidate.gyro_rad_s);
-            }
-            Some(_) => {
-                samples.push(bucket.replace(candidate).expect("bucket exists"));
-            }
-            None => bucket = Some(candidate),
-        }
-    }
-    samples.extend(bucket);
-    samples
-}
-
 fn strongly_smooth_motion(samples: &[MotionSample], start_ms: i64, end_ms: i64) -> bool {
     let start = samples.partition_point(|sample| sample.timestamp_ms < start_ms);
     let end = samples.partition_point(|sample| sample.timestamp_ms <= end_ms);
@@ -361,6 +377,176 @@ fn strongly_smooth_motion(samples: &[MotionSample], start_ms: i64, end_ms: i64) 
     let gyro: Vec<_> = window.iter().map(|sample| sample.gyro_rad_s).collect();
     percentile(&accel_errors, 0.9).is_some_and(|p90| p90 <= SMOOTH_ACCEL_P90_MPS2)
         && percentile(&gyro, 0.9).is_some_and(|p90| p90 <= SMOOTH_GYRO_P90_RAD_S)
+}
+
+/// Joins motorized runs separated by a short gap of anything that is not a
+/// descent.
+///
+/// A shuttle lap does not produce one continuous block of vehicle evidence: a
+/// bus waits at a light (STILL), rolls a flat kilometre at bicycle speed
+/// (TRANSIT) and loses GPS under trees (UNKNOWN), then climbs again. Those
+/// interruptions are part of the same ride in the same vehicle, so the label
+/// should span them.
+///
+/// Deliberately one-directional: a gap is only filled when motorized evidence
+/// exists on *both* sides, and never across a DOWNHILL point. Getting out at
+/// the top and riding down therefore ends the span, and a single vehicle-like
+/// window can never spread over a ride on its own.
+fn bridge_motorized_runs(
+    track: &[CanonicalTrackPoint],
+    motion_samples: &[MotionSample],
+    span_start: usize,
+    classifications: &mut [ActivityClassification],
+) {
+    let mut index = 0;
+    let mut previous_motorized_end: Option<usize> = None;
+    while index < classifications.len() {
+        if classifications[index].state != ActivityState::LikelyMotorized {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < classifications.len()
+            && classifications[index].state == ActivityState::LikelyMotorized
+        {
+            index += 1;
+        }
+
+        if let Some(gap_start) = previous_motorized_end {
+            let gap = &classifications[gap_start..run_start];
+            let gap_start_ms = track[span_start + gap_start - 1].timestamp_ms;
+            let gap_end_ms = track[span_start + run_start].timestamp_ms;
+            let gap_ms = gap_end_ms - gap_start_ms;
+            let descends = gap
+                .iter()
+                .any(|candidate| candidate.state == ActivityState::Downhill);
+            // A short flat interruption needs nothing more than its brevity.
+            // A descent, or anything long, has to keep looking like a vehicle
+            // all the way through — that is what separates a dip in a shuttle
+            // road from the rider getting out and riding down it.
+            let plain_short_gap = !descends && gap_ms <= MAX_MOTORIZED_BRIDGE_MS;
+            if plain_short_gap
+                || vehicle_like_interruption(track, motion_samples, gap, gap_start_ms, gap_end_ms)
+            {
+                // The bridge is only ever as confident as the weaker side.
+                let confidence = classifications[gap_start - 1]
+                    .confidence
+                    .min(classifications[run_start].confidence);
+                for classification in &mut classifications[gap_start..run_start] {
+                    *classification =
+                        ActivityClassification::new(ActivityState::LikelyMotorized, confidence);
+                }
+            }
+        }
+        previous_motorized_end = Some(index);
+    }
+}
+
+/// Whether an interruption between two vehicle spans is still the vehicle.
+///
+/// This covers the two things a fixed duration limit cannot judge. Congestion:
+/// a bus can crawl and stop for ten minutes without ever producing the speed
+/// or the rate of climb that identifies a vehicle, so the leg arrives as a
+/// mess of short TRANSIT, UNKNOWN and STILL. And a shuttle road that is not
+/// monotonic: a serpentine has dips and flat shelves, and the descent between
+/// two switchbacks was being read as a run and credited to the rider.
+///
+/// Two things separate both from a rider who got out:
+///
+///  * the motion stays vehicle-smooth throughout — a mountain bike descending
+///    a trail, pushing, walking or pedalling never is, and
+///  * the gap is stop *and go*, not one long stop. Waiting at the bottom for
+///    the next shuttle is a real stop and stays STILL.
+///
+/// Without IMU evidence (a GPS-only recording) this is never claimed, so a
+/// descent keeps splitting the span rather than being absorbed on a guess.
+fn vehicle_like_interruption(
+    track: &[CanonicalTrackPoint],
+    motion_samples: &[MotionSample],
+    gap: &[ActivityClassification],
+    start_ms: i64,
+    end_ms: i64,
+) -> bool {
+    if end_ms - start_ms > MAX_MOTORIZED_TRAFFIC_BRIDGE_MS || gap.is_empty() {
+        return false;
+    }
+    let still = gap
+        .iter()
+        .filter(|candidate| candidate.state == ActivityState::Still)
+        .count();
+    if still as f64 / gap.len() as f64 > MAX_TRAFFIC_STILL_FRACTION {
+        return false;
+    }
+    // Too quick to have been a ride at all. The stop test above has already
+    // ruled out the rider standing at the bottom waiting, so what is left is
+    // the vehicle still moving — and it was never empty.
+    if end_ms - start_ms < MIN_SHUTTLE_TURNAROUND_MS {
+        return true;
+    }
+    !contains_riding(track, motion_samples, start_ms, end_ms)
+}
+
+/// Whether the rider was on the bike during an interruption.
+///
+/// A shuttle leg is one leg: nobody gets out mid-transfer, rides down, and
+/// gets back in. What does happen is walking — to a gate, around a barrier,
+/// between two vans — and that is part of the transfer, not a ride. So the
+/// question is not whether the gap looks like a vehicle, it is whether it
+/// contains riding.
+///
+/// Vehicle-smooth motion is never riding. Rough motion is riding only when it
+/// also does something a walk cannot: give up real height, or hold a speed no
+/// one walks at. The height test matters most, because a slow technical
+/// descent is ridden at walking pace and must never be absorbed into a lift.
+fn contains_riding(
+    track: &[CanonicalTrackPoint],
+    motion_samples: &[MotionSample],
+    start_ms: i64,
+    end_ms: i64,
+) -> bool {
+    if strongly_smooth_motion(motion_samples, start_ms, end_ms) {
+        return false;
+    }
+    let window: Vec<CanonicalTrackPoint> = track
+        .iter()
+        .filter(|point| (start_ms..=end_ms).contains(&point.timestamp_ms))
+        .cloned()
+        .collect();
+    if window.is_empty() {
+        // Rough motion with nothing to explain it: treat it as riding rather
+        // than quietly folding it into a lift.
+        return true;
+    }
+    // Net loss, not gross descent. A shuttle road is not monotonic: a
+    // serpentine gives up forty metres between two switchbacks and takes them
+    // straight back, and reading the gross figure called every one of those
+    // dips a run. A rider who gets out to ride does not come back up to the
+    // same height to continue the transfer — they leave, and the interruption
+    // ends hundreds of metres lower.
+    let (ascent_m, descent_m) = ascent_descent(&window);
+    if descent_m - ascent_m >= RIDING_DROP_M {
+        return true;
+    }
+    // Anything else that ends level or higher is the shuttle continuing, and
+    // must not reach the speed test below: that test asks whether motion is
+    // faster than walking, which was built to separate riding from pushing a
+    // bike, and a van holding 20 km/h through a switchback answers yes.
+    if ascent_m >= VEHICLE_CLIMB_GAIN_M || descent_m < RIDING_DROP_M {
+        return false;
+    }
+    let speeds: Vec<f64> = window
+        .iter()
+        .filter_map(|point| point.speed_mps)
+        .filter(|speed| speed.is_finite())
+        .collect();
+    if speeds.is_empty() {
+        return false;
+    }
+    let above_walking = speeds
+        .iter()
+        .filter(|speed| **speed >= WALKING_SPEED_MAX_MPS)
+        .count();
+    above_walking as f64 / speeds.len() as f64 >= MIN_RIDING_FRACTION
 }
 
 /// Removes short non-stationary label islands while preserving every direct
@@ -442,6 +628,7 @@ fn percentile(values: &[f64], fraction: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::motion::STANDARD_GRAVITY_MPS2;
 
     fn point(
         timestamp_ms: i64,
@@ -479,6 +666,26 @@ mod tests {
                     start_altitude_m.map(|altitude| altitude + vertical_speed_mps * second as f64),
                     speed_mps,
                     false,
+                    section_id,
+                )
+            })
+            .collect()
+    }
+
+    /// Standing at the bottom of a run waiting to be picked up.
+    fn waiting_track(
+        start_ms: i64,
+        seconds: i64,
+        altitude_m: f64,
+        section_id: i32,
+    ) -> Vec<CanonicalTrackPoint> {
+        (0..=seconds)
+            .map(|second| {
+                point(
+                    start_ms + second * 1_000,
+                    Some(altitude_m),
+                    0.0,
+                    true,
                     section_id,
                 )
             })
@@ -640,6 +847,220 @@ mod tests {
             classifications
                 .iter()
                 .all(|point| point.state == ActivityState::LikelyMotorized)
+        );
+    }
+
+    #[test]
+    fn a_shuttle_climb_at_road_speed_is_motorized_for_its_whole_length() {
+        // 4 minutes of switchback fire road: 15 km/h, climbing 1.8 m/s. Both
+        // the old speed thresholds (25 and 36 km/h) reject this outright.
+        let track = linear_track(0, 240, Some(300.0), 1.8, 4.2, 0);
+
+        let classified = classify_activity(&track, &[]);
+
+        let motorized = classified
+            .iter()
+            .filter(|point| point.state == ActivityState::LikelyMotorized)
+            .count();
+        assert!(
+            motorized as f64 / classified.len() as f64 > 0.9,
+            "only {motorized}/{} of the shuttle climb was motorized",
+            classified.len(),
+        );
+    }
+
+    #[test]
+    fn a_rider_climbing_hard_is_never_motorized() {
+        // 0.45 m/s of climb at 9 km/h — a strong rider on a steep fire road,
+        // right below the rate the rule treats as impossible.
+        let track = linear_track(0, 240, Some(300.0), 0.45, 2.5, 0);
+
+        let classified = classify_activity(&track, &[]);
+
+        assert!(
+            classified
+                .iter()
+                .all(|point| point.state != ActivityState::LikelyMotorized),
+            "a human climb was called a vehicle",
+        );
+    }
+
+    #[test]
+    fn a_traffic_light_does_not_split_one_bus_ride() {
+        let mut track = linear_track(0, 60, Some(100.0), 1.5, 6.0, 0);
+        // Stopped at a light for 40 s, then climbing again.
+        track.extend((61..=100).map(|second| point(second * 1_000, Some(190.0), 0.0, true, 0)));
+        track.extend(linear_track(101_000, 60, Some(190.0), 1.5, 6.0, 0));
+
+        let classified = classify_activity(&track, &[]);
+
+        let stopped = &classified[61..=100];
+        assert!(
+            stopped
+                .iter()
+                .all(|point| point.state == ActivityState::LikelyMotorized),
+            "the light split the ride: {:?}",
+            stopped.first(),
+        );
+    }
+
+    #[test]
+    fn getting_off_at_the_top_ends_the_motorized_span() {
+        // With the wait for the pickup that a real turnaround always has.
+        // Riding down and being back in the vehicle a minute later is not a
+        // thing a rider can do, and a fixture that claims it describes a road
+        // dip taken at speed by the van rather than anyone getting out.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        track.extend(linear_track(91_000, 60, Some(235.0), -1.5, 6.0, 0));
+        track.extend(waiting_track(152_000, 300, 145.0, 0));
+        track.extend(linear_track(453_000, 90, Some(145.0), 1.5, 6.0, 0));
+
+        let classified = classify_activity(&track, &[]);
+
+        assert!(
+            classified[91..=150]
+                .iter()
+                .any(|point| point.state == ActivityState::Downhill),
+            "the descent between two lifts was swallowed",
+        );
+    }
+
+    /// Vehicle-smooth IMU at the raw 200 Hz rate over a time range.
+    fn smooth_imu(start_ms: i64, end_ms: i64) -> Vec<ImuSample> {
+        (0..)
+            .map(|step| start_ms + step * 5)
+            .take_while(|stamp| *stamp <= end_ms)
+            .map(|timestamp_ms| ImuSample {
+                timestamp_ms,
+                accel: [0.02, -0.01, 9.81],
+                gyro: [0.005, 0.002, -0.004],
+                mag: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_bus_crawling_in_traffic_stays_one_unbroken_span() {
+        // Climb, then six minutes of stop-and-go congestion with no climb at
+        // all, then the climb resumes. The fixed 90 s bridge cannot cover it.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        for step in 0..180 {
+            let second = 91 + step;
+            let crawling = step % 3 != 0;
+            track.push(point(
+                second * 1_000,
+                Some(235.0),
+                if crawling { 1.5 } else { 0.0 },
+                !crawling,
+                0,
+            ));
+        }
+        track.extend(linear_track(271_000, 90, Some(235.0), 1.5, 6.0, 0));
+        let imu = smooth_imu(0, 361_000);
+
+        let classified = classify_activity(&track, &imu);
+
+        let jam = &classified[91..=270];
+        let motorized = jam
+            .iter()
+            .filter(|point| point.state == ActivityState::LikelyMotorized)
+            .count();
+        assert_eq!(
+            motorized,
+            jam.len(),
+            "the jam broke the span into pieces: {motorized}/{} motorized",
+            jam.len(),
+        );
+    }
+
+    #[test]
+    fn waiting_for_the_next_shuttle_is_not_bridged() {
+        // Same shape, but the rider is actually standing still the whole time
+        // between two lifts rather than crawling in traffic.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        track.extend((91..=270).map(|second| point(second * 1_000, Some(235.0), 0.0, true, 0)));
+        track.extend(linear_track(271_000, 90, Some(235.0), 1.5, 6.0, 0));
+        let imu = smooth_imu(0, 361_000);
+
+        let classified = classify_activity(&track, &imu);
+
+        assert!(
+            classified[120..=240]
+                .iter()
+                .all(|point| point.state == ActivityState::Still),
+            "a real wait was labelled as riding in a vehicle",
+        );
+    }
+
+    /// Rough motion at the raw rate: on foot or on a bike, never a vehicle.
+    fn walking_imu(start_ms: i64, end_ms: i64) -> Vec<ImuSample> {
+        (0..)
+            .map(|step| start_ms + step * 5)
+            .take_while(|stamp| *stamp <= end_ms)
+            .map(|timestamp_ms| ImuSample {
+                timestamp_ms,
+                accel: [1.4, -0.9, 11.2],
+                gyro: [0.4, -0.3, 0.2],
+                mag: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn walking_between_two_vehicles_stays_part_of_the_transfer() {
+        // Out at a gate, three minutes on foot, back in. A shuttle leg is one
+        // leg: walking is part of the transfer, not a ride.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        track.extend(linear_track(91_000, 180, Some(235.0), 0.0, 1.2, 0));
+        track.extend(linear_track(272_000, 90, Some(235.0), 1.5, 6.0, 0));
+
+        let classified = classify_activity(&track, &walking_imu(0, 362_000));
+
+        assert!(
+            classified[120..=240]
+                .iter()
+                .all(|point| point.state == ActivityState::LikelyMotorized),
+            "a walk between two vans broke the shuttle leg apart",
+        );
+    }
+
+    #[test]
+    fn a_slow_technical_descent_between_lifts_is_never_absorbed() {
+        // Ridden at walking pace, which is why speed alone cannot settle it —
+        // but it gives up 60 m, and a walk does not.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        track.extend(linear_track(91_000, 180, Some(235.0), -0.35, 2.0, 0));
+        track.extend(waiting_track(272_000, 300, 172.0, 0));
+        track.extend(linear_track(573_000, 90, Some(172.0), 1.5, 6.0, 0));
+
+        let classified = classify_activity(&track, &walking_imu(0, 663_000));
+
+        assert!(
+            classified[120..=240]
+                .iter()
+                .any(|point| point.state != ActivityState::LikelyMotorized),
+            "a ridden descent was swallowed by the lift either side of it",
+        );
+    }
+
+    #[test]
+    fn a_road_dip_too_quick_to_ride_stays_inside_the_shuttle_leg() {
+        // The shape a Kojori shuttle road actually makes: the van climbs, the
+        // road crosses a ridge and gives up 35 m into the next valley, and the
+        // climb resumes at once. Geometry alone cannot tell this from a short
+        // run — the give-up is the same size. The timeline can: there is no
+        // stop, so nobody got out.
+        let mut track = linear_track(0, 90, Some(100.0), 1.5, 6.0, 0);
+        track.extend(linear_track(91_000, 35, Some(235.0), -1.0, 8.0, 0));
+        track.extend(linear_track(127_000, 90, Some(200.0), 1.5, 6.0, 0));
+
+        let classified = classify_activity(&track, &[]);
+
+        assert!(
+            classified[91..=125]
+                .iter()
+                .all(|point| point.state == ActivityState::LikelyMotorized),
+            "a road dip broke the shuttle leg apart",
         );
     }
 }

@@ -28,6 +28,9 @@ import com.nakvali.fusion.RideProfilePoint
 import java.util.Locale
 import kotlin.math.abs
 
+/** See the note in the segment trimmer: gentle ground must read as gentle. */
+private const val MIN_VISIBLE_RELIEF_M = 25.0
+
 /**
  * Pause-aware elevation instrument for Activity Detail.
  *
@@ -124,7 +127,12 @@ internal fun ActivityElevationProfile(
 
             val minimum = profile.minAltitudeM ?: return@Canvas
             val maximum = profile.maxAltitudeM ?: return@Canvas
-            val range = (maximum - minimum).coerceAtLeast(1.0)
+            // Held to a floor and centred inside it: scaling to whatever the
+            // ride contains turned a few metres of undulation on a flat road
+            // into a pump track. Real relief exceeds the floor and still fills
+            // the chart.
+            val range = (maximum - minimum).coerceAtLeast(MIN_VISIBLE_RELIEF_M)
+            val ceiling = (maximum + minimum) / 2.0 + range / 2.0
             val top = 8.dp.toPx()
             val chartHeight = baseline - top
             fun x(point: RideProfilePoint): Float = if (profile.lengthM <= 0.0) {
@@ -133,7 +141,7 @@ internal fun ActivityElevationProfile(
                 (point.distanceM / profile.lengthM * size.width).toFloat()
             }
             fun y(altitude: Double): Float =
-                (top + (maximum - altitude) / range * chartHeight).toFloat()
+                (top + (ceiling - altitude) / range * chartHeight).toFloat()
 
             // A restrained fill gives the profile enough mass without turning
             // the detail sheet into a generic analytics dashboard.

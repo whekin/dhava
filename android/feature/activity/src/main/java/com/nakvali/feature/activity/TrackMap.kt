@@ -68,6 +68,9 @@ private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 15.0
 private const val FUSION_POINTS_MIN_ZOOM = 18f
 internal const val SEMANTIC_TRACK_MAX_GAP_MS = 3_000L
+
+/** Below this, confirmed stillness is not an event worth a map marker. */
+internal const val MIN_RIDER_STOP_MS = 15_000L
 internal const val STOP_DURATION_PROPERTY = "duration_ms"
 
 private val FUSED_LINE_LAYER_IDS = listOf(
@@ -187,8 +190,8 @@ internal fun TrackMap(
                 style.addLayer(
                     LineLayer(FUSED_UNKNOWN_LAYER_ID, FUSED_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(activityStateColors.unknown.toArgb()),
-                        PropertyFactory.lineWidth(3f),
-                        PropertyFactory.lineOpacity(0.72f),
+                        PropertyFactory.lineWidth(2f),
+                        PropertyFactory.lineOpacity(0.4f),
                         PropertyFactory.lineDasharray(arrayOf(0.5f, 1.5f)),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
@@ -199,19 +202,26 @@ internal fun TrackMap(
                         FUSED_LIKELY_MOTORIZED_LAYER_ID,
                         FUSED_SOURCE_ID,
                     ).withProperties(
+                        // A shuttle lap is not the rider's achievement. Kept
+                        // visible enough to explain how they got back up, and
+                        // no more.
                         PropertyFactory.lineColor(activityStateColors.likelyMotorized.toArgb()),
-                        PropertyFactory.lineWidth(4f),
-                        PropertyFactory.lineOpacity(0.86f),
-                        PropertyFactory.lineDasharray(arrayOf(2.2f, 1.6f)),
+                        PropertyFactory.lineWidth(1.8f),
+                        PropertyFactory.lineOpacity(0.22f),
+                        PropertyFactory.lineDasharray(arrayOf(3.0f, 2.6f)),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ).withFilter(activityStateFilter(ACTIVITY_STATE_LIKELY_MOTORIZED)),
                 )
                 style.addLayer(
+                    // Everything that is not a descent is context, not content.
+                    // The transit line still has to be followable — it is how
+                    // the rider reads the shape of the day — but it must never
+                    // compete with a run for attention.
                     LineLayer(FUSED_TRANSIT_LAYER_ID, FUSED_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(activityStateColors.transit.toArgb()),
-                        PropertyFactory.lineWidth(4f),
-                        PropertyFactory.lineOpacity(0.9f),
+                        PropertyFactory.lineWidth(2.4f),
+                        PropertyFactory.lineOpacity(0.42f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ).withFilter(activityStateFilter(ACTIVITY_STATE_TRANSIT)),
@@ -219,7 +229,7 @@ internal fun TrackMap(
                 style.addLayer(
                     LineLayer(FUSED_DOWNHILL_LAYER_ID, FUSED_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(activityStateColors.downhill.toArgb()),
-                        PropertyFactory.lineWidth(5.5f),
+                        PropertyFactory.lineWidth(6f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ).withFilter(activityStateFilter(ACTIVITY_STATE_DOWNHILL)),
@@ -261,12 +271,16 @@ internal fun TrackMap(
                 // the dots remain above fused geometry, while a stop cannot
                 // disappear beneath a dense cloud of stationary raw fixes.
                 style.addLayer(
+                    // A stop is an annotation on the track, not a landmark.
+                    // The old filled cream disks were larger than the trail
+                    // itself and buried the ride at overview zoom.
                     CircleLayer(STOP_LAYER_ID, STOP_SOURCE_ID).withProperties(
                         PropertyFactory.circleColor(palette.roadCasing),
-                        PropertyFactory.circleOpacity(0.78f),
+                        PropertyFactory.circleOpacity(0.35f),
                         PropertyFactory.circleRadius(stopRadiusExpression()),
                         PropertyFactory.circleStrokeColor(activityStateColors.still.toArgb()),
-                        PropertyFactory.circleStrokeWidth(2.5f),
+                        PropertyFactory.circleStrokeWidth(1.2f),
+                        PropertyFactory.circleStrokeOpacity(0.75f),
                     ),
                 )
                 style.addSource(GeoJsonSource(INSPECT_SOURCE_ID).also { source ->
@@ -416,33 +430,56 @@ internal fun List<MapTrackPoint>.semanticLineRuns(): List<SemanticLineRun> {
     return runs
 }
 
+/**
+ * Stops worth drawing on a ride map.
+ *
+ * Two kinds of confirmed stillness are deliberately dropped. A stop shorter
+ * than [MIN_RIDER_STOP_MS] is a track stand or a GPS hesitation, not an event
+ * in the rider's day. And stillness with vehicle evidence on both sides is a
+ * traffic light seen from inside a bus: it belongs to the transport line, not
+ * to a ring over the trail. A shuttle lap through town used to cover the map
+ * in stop markers that had nothing to do with riding.
+ */
 internal fun List<MapTrackPoint>.aggregatedStopMarkers(): List<StopMarker> {
     val markers = mutableListOf<StopMarker>()
     var active = mutableListOf<MapTrackPoint>()
+    var precedingState: ActivityState? = null
+    var pending: Pair<StopMarker, ActivityState?>? = null
 
-    fun flush() {
-        if (active.isEmpty()) return
-        val firstTimestamp = active.first().timestampMs
-        val lastTimestamp = active.last().timestampMs
-        markers += StopMarker(
-            point = active[active.size / 2],
-            durationMs = (lastTimestamp - firstTimestamp).coerceAtLeast(0L),
-            confidence = active.averageConfidence(ActivityState.STILL),
-        )
-        active = mutableListOf()
+    fun flush(followingState: ActivityState?) {
+        if (active.isNotEmpty()) {
+            val firstTimestamp = active.first().timestampMs
+            val lastTimestamp = active.last().timestampMs
+            pending = StopMarker(
+                point = active[active.size / 2],
+                durationMs = (lastTimestamp - firstTimestamp).coerceAtLeast(0L),
+                confidence = active.averageConfidence(ActivityState.STILL),
+            ) to precedingState
+            active = mutableListOf()
+        }
+        val (marker, before) = pending ?: return
+        pending = null
+        if (marker.durationMs < MIN_RIDER_STOP_MS) return
+        if (before == ActivityState.LIKELY_MOTORIZED &&
+            followingState == ActivityState.LIKELY_MOTORIZED
+        ) {
+            return
+        }
+        markers += marker
     }
 
     for (point in this) {
         if (point.activityState != ActivityState.STILL) {
-            flush()
+            flush(point.activityState)
+            precedingState = point.activityState
             continue
         }
         if (active.isNotEmpty() && !active.last().isSemanticallyContinuousWith(point)) {
-            flush()
+            flush(null)
         }
         active += point
     }
-    flush()
+    flush(null)
     return markers
 }
 
@@ -537,7 +574,7 @@ private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
         Expression.stop(20.0, Expression.color(colors.weak.toArgb())),
         // Fusion rejects fixes above 20 m, but Compare still shows every raw
         // sample. Use a sharp red boundary only for those rejected fixes so
-        // the accepted accuracy scale stays distinct from the orange track.
+        // the accepted accuracy scale stays distinct from the green track.
         Expression.stop(20.0001, Expression.color(colors.rejected.toArgb())),
     )
 
@@ -565,13 +602,15 @@ private fun activityStateColorExpression(
     Expression.color(fallback.toArgb()),
 )
 
+/// Duration still sets the size, but over a much narrower range: the point is
+/// to tell a pause from a lunch break, not to draw a target over the trail.
 private fun stopRadiusExpression(): Expression =
     Expression.interpolate(
         Expression.linear(),
         Expression.get(STOP_DURATION_PROPERTY),
-        Expression.stop(0.0, 4.5),
-        Expression.stop(30_000.0, 6.0),
-        Expression.stop(300_000.0, 9.0),
+        Expression.stop(0.0, 2.5),
+        Expression.stop(30_000.0, 3.5),
+        Expression.stop(300_000.0, 5.5),
     )
 
 private fun fusionPointRadiusExpression(): Expression =
