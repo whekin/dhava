@@ -188,13 +188,23 @@ private fun StateLegendItem(
         Canvas(modifier = Modifier.size(width = 24.dp, height = 16.dp)) {
             val centerY = size.height / 2f
             when (kind) {
-                StateSampleKind.Highlight -> drawLine(
-                    color = color.copy(alpha = 0.34f),
-                    start = Offset(0f, centerY),
-                    end = Offset(size.width, centerY),
-                    strokeWidth = 12.dp.toPx(),
-                    cap = StrokeCap.Round,
-                )
+                StateSampleKind.Highlight -> {
+                    // The glow and the line on top of it, as the map draws them.
+                    drawLine(
+                        color = color.copy(alpha = 0.22f),
+                        start = Offset(0f, centerY),
+                        end = Offset(size.width, centerY),
+                        strokeWidth = 12.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                    drawLine(
+                        color = color,
+                        start = Offset(0f, centerY),
+                        end = Offset(size.width, centerY),
+                        strokeWidth = 3.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                }
                 StateSampleKind.Stop -> {
                     drawCircle(
                         color = color,

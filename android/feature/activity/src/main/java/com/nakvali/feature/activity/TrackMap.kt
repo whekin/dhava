@@ -44,7 +44,15 @@ private const val RAW_LAYER_ID = "raw-track-layer"
 private const val RAW_POINTS_SOURCE_ID = "raw-track-points-source"
 private const val RAW_POINTS_LAYER_ID = "raw-track-points-layer"
 private const val SEGMENT_SOURCE_ID = "segment-runs-source"
+private const val SEGMENT_HALO_LAYER_ID = "segment-runs-halo-layer"
 private const val SEGMENT_LAYER_ID = "segment-runs-layer"
+private const val SEGMENT_LABEL_LAYER_ID = "segment-runs-label-layer"
+private const val SEGMENT_NAME_PROPERTY = "name"
+/**
+ * The glyph stack Liberty ships. A name the style has no glyphs for simply
+ * does not draw, which is why this is pinned rather than left to the default.
+ */
+private val SEGMENT_LABEL_FONT = arrayOf("Noto Sans Regular")
 private const val FUSED_SOURCE_ID = "fused-track-source"
 private const val FUSED_CASING_LAYER_ID = "fused-track-casing-layer"
 private const val FUSED_LAYER_ID = "fused-track-layer"
@@ -101,6 +109,12 @@ internal data class MapTrackPoint(
     val speedMps: Double? = null,
 )
 
+/** One timed run at an authored segment, ready to draw and to label. */
+internal data class MapSegmentRun(
+    val name: String,
+    val points: List<MapTrackPoint>,
+)
+
 internal data class SemanticLineRun(
     val activityState: ActivityState?,
     val points: List<MapTrackPoint>,
@@ -120,7 +134,7 @@ internal fun TrackMap(
     mode: TrackMode,
     rawColor: Color,
     fusedColor: Color,
-    segmentRuns: List<List<MapTrackPoint>> = emptyList(),
+    segmentRuns: List<MapSegmentRun> = emptyList(),
     segmentColor: Color = Color.Unspecified,
     inspectedPoint: MapTrackPoint? = null,
     modifier: Modifier = Modifier,
@@ -176,18 +190,17 @@ internal fun TrackMap(
                         fusedPoints.toSemanticLineFeatureCollectionOrNull()?.let(source::setGeoJson)
                     },
                 )
-                // Segments are a highlight, not a category. The wide soft
-                // stroke goes *under* the track so the stretch reads as marked
-                // while whatever the rider was doing there still shows through
-                // in its own colour on top.
+                // A segment gets its own colour on the line itself, plus a
+                // narrow glow under the track so the stretch still stands out
+                // when the line is thin at ride-overview zoom.
                 style.addSource(GeoJsonSource(SEGMENT_SOURCE_ID).also { source ->
-                    segmentRuns.toRunsMultiLineStringOrNull()?.let(source::setGeoJson)
+                    segmentRuns.toFeatureCollectionOrNull()?.let(source::setGeoJson)
                 })
                 style.addLayer(
-                    LineLayer(SEGMENT_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
+                    LineLayer(SEGMENT_HALO_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
                         PropertyFactory.lineColor(segmentColor.toArgb()),
-                        PropertyFactory.lineWidth(16f),
-                        PropertyFactory.lineOpacity(0.34f),
+                        PropertyFactory.lineWidth(12f),
+                        PropertyFactory.lineOpacity(0.22f),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ),
@@ -255,6 +268,17 @@ internal fun TrackMap(
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ).withFilter(activityStateFilter(ACTIVITY_STATE_DOWNHILL)),
+                )
+                style.addLayer(
+                    // Above every state line: on a segment, "this is a segment"
+                    // is what the rider came to see, and the state underneath is
+                    // still legible from the glow and from the sheet.
+                    LineLayer(SEGMENT_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
+                        PropertyFactory.lineColor(segmentColor.toArgb()),
+                        PropertyFactory.lineWidth(6f),
+                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    ),
                 )
                 style.addSource(GeoJsonSource(FUSED_POINTS_SOURCE_ID).also { source ->
                     fusedPoints.toPointFeatureCollectionOrNull()?.let(source::setGeoJson)
@@ -325,6 +349,23 @@ internal fun TrackMap(
                 )
                 style.addImage(START_IMAGE_ID, createStartMarker(palette))
                 style.addImage(FINISH_IMAGE_ID, createFinishMarker(palette))
+                style.addLayer(
+                    SymbolLayer(SEGMENT_LABEL_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
+                        PropertyFactory.textField(Expression.get(SEGMENT_NAME_PROPERTY)),
+                        PropertyFactory.textFont(SEGMENT_LABEL_FONT),
+                        PropertyFactory.textSize(12f),
+                        PropertyFactory.textColor(segmentColor.toArgb()),
+                        PropertyFactory.textHaloColor(palette.background),
+                        PropertyFactory.textHaloWidth(1.6f),
+                        PropertyFactory.symbolPlacement(Property.SYMBOL_PLACEMENT_LINE),
+                        PropertyFactory.symbolSpacing(320f),
+                        PropertyFactory.textPadding(6f),
+                        // Left to collide: a name that cannot fit on screen is
+                        // better dropped than stamped over the trail it labels.
+                        PropertyFactory.textAllowOverlap(false),
+                        PropertyFactory.textIgnorePlacement(false),
+                    ),
+                )
                 style.addSource(GeoJsonSource(START_SOURCE_ID))
                 style.addSource(GeoJsonSource(FINISH_SOURCE_ID))
                 style.addLayer(
@@ -366,14 +407,18 @@ internal fun TrackMap(
 }
 
 /**
- * One line per segment run. Each run is already a contiguous slice of the
- * finalized track, so unlike the track itself it needs no pause splitting —
- * a run that spanned a manual pause would never have been timed at all.
+ * One feature per segment run, each carrying its name for the label layer.
+ *
+ * A run is already a contiguous slice of the finalized track, so unlike the
+ * track itself it needs no pause splitting: a run spanning a manual pause
+ * would never have been timed in the first place.
  */
-private fun List<List<MapTrackPoint>>.toRunsMultiLineStringOrNull(): MultiLineString? {
-    val lines = filter { it.size >= 2 }
-        .map { run -> run.map { Point.fromLngLat(it.lon, it.lat) } }
-    return lines.takeIf { it.isNotEmpty() }?.let(MultiLineString::fromLngLats)
+private fun List<MapSegmentRun>.toFeatureCollectionOrNull(): FeatureCollection? {
+    val features = filter { it.points.size >= 2 }.map { run ->
+        val line = LineString.fromLngLats(run.points.map { Point.fromLngLat(it.lon, it.lat) })
+        Feature.fromGeometry(line).apply { addStringProperty(SEGMENT_NAME_PROPERTY, run.name) }
+    }
+    return features.takeIf { it.isNotEmpty() }?.let(FeatureCollection::fromFeatures)
 }
 
 private fun List<MapTrackPoint>.toMultiLineStringOrNull(): MultiLineString? {
@@ -702,11 +747,13 @@ private fun applyMode(
             ),
         )
     }
-    style.getLayer(SEGMENT_LAYER_ID)?.setProperties(
-        PropertyFactory.visibility(
-            if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
-        ),
-    )
+    listOf(SEGMENT_HALO_LAYER_ID, SEGMENT_LAYER_ID, SEGMENT_LABEL_LAYER_ID).forEach { layerId ->
+        style.getLayer(layerId)?.setProperties(
+            PropertyFactory.visibility(
+                if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
+            ),
+        )
+    }
     style.getLayer(FUSED_CASING_LAYER_ID)?.setProperties(
         PropertyFactory.visibility(
             if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,

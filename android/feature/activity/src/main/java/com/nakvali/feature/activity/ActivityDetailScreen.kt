@@ -296,7 +296,7 @@ private fun ActivityDetailContent(
             if (from < 0 || to < from || to >= fusedPoints.size) {
                 null
             } else {
-                fusedPoints.subList(from, to + 1)
+                MapSegmentRun(name = run.segmentName, points = fusedPoints.subList(from, to + 1))
             }
         }
     } else {
