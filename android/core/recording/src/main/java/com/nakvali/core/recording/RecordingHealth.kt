@@ -4,12 +4,10 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.BatteryManager
-import android.os.Build
 import android.os.Debug
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
-import androidx.annotation.RequiresApi
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -99,11 +97,7 @@ internal object RecordingHealthMetrics {
             processBaroCount = input.baroCount,
             lastGpsAgeMs = input.lastGpsAgeMs,
             paused = input.paused,
-            thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                powerManager?.currentThermalStatus
-            } else {
-                null
-            },
+            thermalStatus = powerManager?.currentThermalStatus,
             batteryPercent = batteryManager
                 ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
                 ?.takeIf { it in 0..100 },
@@ -176,15 +170,10 @@ internal class RecordingHealthLog(private val file: File) {
 }
 
 internal object RecordingExitDiagnostics {
-    fun latestAfter(context: Context, startedAtMs: Long): RecordingHealthEntry? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        return runCatching { latestAfterApi30(context, startedAtMs) }.getOrNull()
-    }
+    fun latestAfter(context: Context, startedAtMs: Long): RecordingHealthEntry? =
+        runCatching { latestExit(context, startedAtMs) }.getOrNull()
 
-    // The version guard lives in the caller, which lint cannot see across a
-    // function boundary; the annotation states the same contract for it.
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun latestAfterApi30(context: Context, startedAtMs: Long): RecordingHealthEntry? {
+    private fun latestExit(context: Context, startedAtMs: Long): RecordingHealthEntry? {
         val activityManager = context.getSystemService(ActivityManager::class.java) ?: return null
         val exit = activityManager
             .getHistoricalProcessExitReasons(context.packageName, 0, 16)

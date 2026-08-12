@@ -22,7 +22,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.os.VibrationEffect
-import android.os.Vibrator
 import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -496,11 +495,10 @@ class RecordingService : Service() {
     )
 
     private fun hasActivityRecognitionPermission(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACTIVITY_RECOGNITION,
-            ) == PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACTIVITY_RECOGNITION,
+        ) == PackageManager.PERMISSION_GRANTED
 
     /**
      * Hands each transition to Rust and records it.
@@ -729,12 +727,7 @@ class RecordingService : Service() {
         ) {
             return
         }
-        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            getSystemService(VibratorManager::class.java)?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            getSystemService(Vibrator::class.java)
-        }
+        val vibrator = getSystemService(VibratorManager::class.java)?.defaultVibrator
         if (vibrator?.hasVibrator() != true) return
         runCatching {
             // Amplitude control is what makes the pattern feel like a shape.

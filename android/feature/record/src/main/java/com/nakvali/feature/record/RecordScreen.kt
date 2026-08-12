@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -160,11 +159,10 @@ fun RecordScreen(
     }
 
     fun hasBackgroundLocation(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
 
     fun continueAfterForegroundLocation() {
         permissionDenied = false
@@ -173,13 +171,6 @@ fun RecordScreen(
         } else {
             startAndMaybeAskBattery()
         }
-    }
-
-    val backgroundPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {
-        showBackgroundLocationDialog = false
-        startAndMaybeAskBattery()
     }
 
     val backgroundSettingsLauncher = rememberLauncherForActivityResult(
@@ -209,15 +200,11 @@ fun RecordScreen(
         } else {
             val permissions = buildList {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    add(Manifest.permission.POST_NOTIFICATIONS)
-                }
+                add(Manifest.permission.POST_NOTIFICATIONS)
                 // Optional: lets the recorder recognize a vehicle in flat city
                 // traffic and drop to power-saving rates. Declining changes
                 // nothing about recording.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    add(Manifest.permission.ACTIVITY_RECOGNITION)
-                }
+                add(Manifest.permission.ACTIVITY_RECOGNITION)
             }
             permissionLauncher.launch(permissions.toTypedArray())
         }
@@ -318,24 +305,18 @@ fun RecordScreen(
 
     if (showBatteryDialog) BatteryExemptionDialog { showBatteryDialog = false }
     if (showBackgroundLocationDialog) {
-        val optionLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.packageManager.backgroundPermissionOptionLabel.toString()
-        } else {
-            "Allow all the time"
-        }
+        val optionLabel = context.packageManager.backgroundPermissionOptionLabel.toString()
         BackgroundLocationDialog(
             optionLabel = optionLabel,
             onAllow = {
-                if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
-                    backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                } else {
-                    backgroundSettingsLauncher.launch(
-                        Intent(
-                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                            Uri.parse("package:${context.packageName}"),
-                        ),
-                    )
-                }
+                // From Android 11 the system stopped granting background
+                // location from a prompt; it can only be chosen in settings.
+                backgroundSettingsLauncher.launch(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
             },
             onRecordAnyway = {
                 showBackgroundLocationDialog = false

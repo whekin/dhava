@@ -12,7 +12,10 @@ compileSdk = "37"
 # opts into runtime behaviour changes of an OS release, which is a deliberate,
 # testable decision and not a side effect of a dependency bump.
 targetSdk = "36"
-minSdk = "26"
+# Android 14. Everything below it was carrying version branches that could
+# never be taken on a supported device; raising the floor is only worth it
+# because those branches went with it.
+minSdk = "34"
 
 # AndroidX
 androidxAnnotation = "1.10.0"
