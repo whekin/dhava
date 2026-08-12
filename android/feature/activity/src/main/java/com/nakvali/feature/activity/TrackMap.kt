@@ -48,6 +48,11 @@ private const val SEGMENT_HALO_LAYER_ID = "segment-runs-halo-layer"
 private const val SEGMENT_LAYER_ID = "segment-runs-layer"
 private const val SEGMENT_LABEL_LAYER_ID = "segment-runs-label-layer"
 private const val SEGMENT_NAME_PROPERTY = "name"
+private const val SEGMENT_GATES_SOURCE_ID = "segment-gates-source"
+private const val SEGMENT_GATES_LAYER_ID = "segment-gates-layer"
+private const val SEGMENT_GATE_PROPERTY = "gate"
+private const val SEGMENT_GATE_START = "start"
+private const val SEGMENT_GATE_FINISH = "finish"
 /**
  * The glyph stack Liberty ships. A name the style has no glyphs for simply
  * does not draw, which is why this is pinned rather than left to the default.
@@ -349,6 +354,26 @@ internal fun TrackMap(
                 )
                 style.addImage(START_IMAGE_ID, createStartMarker(palette))
                 style.addImage(FINISH_IMAGE_ID, createFinishMarker(palette))
+                style.addSource(GeoJsonSource(SEGMENT_GATES_SOURCE_ID).also { source ->
+                    segmentRuns.toGateFeatureCollectionOrNull()?.let(source::setGeoJson)
+                })
+                style.addLayer(
+                    // Where the clock started and stopped. Filled at the start,
+                    // hollow at the finish, so a run reads in the direction it
+                    // was ridden without needing an arrow.
+                    CircleLayer(SEGMENT_GATES_LAYER_ID, SEGMENT_GATES_SOURCE_ID).withProperties(
+                        PropertyFactory.circleRadius(4.5f),
+                        PropertyFactory.circleColor(
+                            Expression.match(
+                                Expression.get(SEGMENT_GATE_PROPERTY),
+                                Expression.color(palette.background),
+                                Expression.stop(SEGMENT_GATE_START, Expression.color(segmentColor.toArgb())),
+                            ),
+                        ),
+                        PropertyFactory.circleStrokeColor(segmentColor.toArgb()),
+                        PropertyFactory.circleStrokeWidth(2f),
+                    ),
+                )
                 style.addLayer(
                     SymbolLayer(SEGMENT_LABEL_LAYER_ID, SEGMENT_SOURCE_ID).withProperties(
                         PropertyFactory.textField(Expression.get(SEGMENT_NAME_PROPERTY)),
@@ -413,6 +438,21 @@ internal fun TrackMap(
  * track itself it needs no pause splitting: a run spanning a manual pause
  * would never have been timed in the first place.
  */
+/** The two gate crossings that bound each run, as points. */
+private fun List<MapSegmentRun>.toGateFeatureCollectionOrNull(): FeatureCollection? {
+    val features = filter { it.points.size >= 2 }.flatMap { run ->
+        listOf(
+            run.points.first() to SEGMENT_GATE_START,
+            run.points.last() to SEGMENT_GATE_FINISH,
+        ).map { (point, gate) ->
+            Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)).apply {
+                addStringProperty(SEGMENT_GATE_PROPERTY, gate)
+            }
+        }
+    }
+    return features.takeIf { it.isNotEmpty() }?.let(FeatureCollection::fromFeatures)
+}
+
 private fun List<MapSegmentRun>.toFeatureCollectionOrNull(): FeatureCollection? {
     val features = filter { it.points.size >= 2 }.map { run ->
         val line = LineString.fromLngLats(run.points.map { Point.fromLngLat(it.lon, it.lat) })
@@ -747,7 +787,12 @@ private fun applyMode(
             ),
         )
     }
-    listOf(SEGMENT_HALO_LAYER_ID, SEGMENT_LAYER_ID, SEGMENT_LABEL_LAYER_ID).forEach { layerId ->
+    listOf(
+        SEGMENT_HALO_LAYER_ID,
+        SEGMENT_LAYER_ID,
+        SEGMENT_GATES_LAYER_ID,
+        SEGMENT_LABEL_LAYER_ID,
+    ).forEach { layerId ->
         style.getLayer(layerId)?.setProperties(
             PropertyFactory.visibility(
                 if (mode == TrackMode.Gps) Property.NONE else Property.VISIBLE,
