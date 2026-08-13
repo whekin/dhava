@@ -51,6 +51,20 @@ Strava is route-first and does downhill badly. Nakvali is **segment-first, downh
   when leaving segment areas.
 - Bad GPS handling: auto-adjustment against trusted segment geometry; graceful
   handling of trails that run close to each other (prompt the user if ambiguous).
+- **Danger alerts.** A fallen tree, a washed-out lip, a broken bridge. The rider stops
+  mid-segment, and the app already knows that: a stop *inside* a segment is unusual and
+  nothing else in the app cares about it. So it offers, right there, "what happened?" —
+  and if the answer is a hazard the rider cannot clear alone, it is marked on the spot,
+  with position and photo, while standing next to it.
+  - Trails carrying a live hazard are flagged on the map, readable before dropping in.
+  - Approaching a marked hazard mid-run, the phone warns by *haptics* — a long, hard
+    buzz. Nobody reads a screen at speed; the wrist and the bars are the only channel.
+  - Must work with zero connectivity, like everything else on the trail: hazards ride
+    along in the offline segment cache.
+  - Open questions, not decided: who clears a hazard and how it expires; how to avoid
+    crying wolf on a stale mark; whether the warning fires on approach or on entering
+    the segment. A warning that distracts a rider mid-descent is itself a hazard, so
+    this needs real care before it is built.
 - Anti-cheat: raw IMU stream is the natural signature — forging a GPX is easy,
   forging a consistent IMU stream is not.
 
