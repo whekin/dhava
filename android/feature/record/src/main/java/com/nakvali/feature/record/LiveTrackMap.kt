@@ -26,6 +26,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.nakvali.core.map.NakvaliMapPalette
 import com.nakvali.core.map.configureNakvaliMapChrome
 import com.nakvali.core.map.initNakvaliMap
+import com.nakvali.core.map.NakvaliMapDetail
+import com.nakvali.core.map.applyNakvaliMapDetail
 import com.nakvali.core.map.rememberNakvaliMapPalette
 import com.nakvali.core.map.setNakvaliMapStyle
 import com.nakvali.core.recording.LiveTrackPoint
@@ -92,6 +94,7 @@ internal fun LiveTrackMap(
     onUserMovedMap: () -> Unit,
     onPreviewAccuracyChanged: (Float?) -> Unit,
     modifier: Modifier = Modifier,
+    detail: NakvaliMapDetail = NakvaliMapDetail.Browse,
 ) {
     val mapView = rememberLiveMapView()
     val context = LocalContext.current
@@ -172,12 +175,20 @@ internal fun LiveTrackMap(
         }
     }
 
+    // The style effect below only re-runs when the palette changes, so a switch
+    // between browsing and recording has to reach the already-loaded style on
+    // its own. A null style here means the load has not finished, and the style
+    // callback applies the same detail itself.
+    LaunchedEffect(mapView, detail) {
+        mapView.getMapAsync { map -> map.style?.applyNakvaliMapDetail(detail) }
+    }
+
     LaunchedEffect(mapView, palette) {
         mapView.getMapAsync { map ->
             map.applyContentPadding(bottomPaddingPx, mapChromeMarginPx, palette)
             // Fallback-aware: the overlay layers below are added even when the
             // remote style cannot load offline, so the live track always draws.
-            mapView.setNakvaliMapStyle(map, palette) { style ->
+            mapView.setNakvaliMapStyle(map, palette, detail) { style ->
                 style.addSource(GeoJsonSource(ACCURACY_SOURCE))
                 style.addLayer(
                     FillLayer(ACCURACY_FILL_LAYER, ACCURACY_SOURCE).withProperties(
