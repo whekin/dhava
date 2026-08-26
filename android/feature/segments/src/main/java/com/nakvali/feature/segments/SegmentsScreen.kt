@@ -1,5 +1,15 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.NakvaliDivider
+import com.nakvali.core.ui.NakvaliEmptyState
+import com.nakvali.core.ui.NakvaliLoading
+import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliScreenHeader
+import com.nakvali.core.ui.NakvaliSecondaryButton
+import com.nakvali.core.ui.NakvaliSectionLabel
+import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliTextAction
 import com.nakvali.core.ui.SegmentFormat
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,22 +35,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
@@ -64,13 +70,6 @@ import com.nakvali.core.map.SegmentLibraryMap
 import com.nakvali.core.map.SegmentMapPoint
 import com.nakvali.core.map.currentLocationFix
 import com.nakvali.core.recording.SegmentSourceKind
-import com.nakvali.core.ui.NakvaliDivider
-import com.nakvali.core.ui.NakvaliEmptyState
-import com.nakvali.core.ui.NakvaliPanel
-import com.nakvali.core.ui.NakvaliScreenHeader
-import com.nakvali.core.ui.NakvaliSectionLabel
-import com.nakvali.core.ui.NakvaliSpacing
-import com.nakvali.core.ui.NakvaliStatusPill
 import kotlinx.coroutines.launch
 
 /**
@@ -120,7 +119,7 @@ fun SegmentsScreen(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            CircularProgressIndicator()
+            NakvaliLoading()
         }
 
         is SegmentsState.Ready -> if (current.summaries.isEmpty()) {
@@ -139,33 +138,29 @@ fun SegmentsScreen(
                         bottom = NakvaliSpacing.large,
                     ),
                 )
-                Box(
+                // No card and no icon. The panel made the empty state a slab
+                // parked in the top third with the rest of the screen left
+                // black, and the icon inside it was the same stopwatch already
+                // showing in the navigation bar. An empty screen is the empty
+                // state; it just needs to be centred in it.
+                NakvaliEmptyState(
+                    title = "No segments yet",
+                    description = "Find downhill candidates across your saved rides or import a GPX trail.",
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(NakvaliSpacing.screen),
-                    contentAlignment = Alignment.TopCenter,
-                ) {
-                    NakvaliPanel(Modifier.fillMaxWidth()) {
-                        NakvaliEmptyState(
-                            title = "No segments yet",
-                            description = "Find downhill candidates across your saved rides or import a GPX trail.",
-                            icon = Icons.Filled.Timer,
-                            action = {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    FilledTonalButton(onClick = onCreateSegment) {
-                                        Text("Find descents")
-                                    }
-                                    TextButton(onClick = launchImport) {
-                                        Icon(Icons.Filled.Add, contentDescription = null)
-                                        Spacer(Modifier.width(NakvaliSpacing.small))
-                                        Text("Import GPX")
-                                    }
-                                }
-                            },
+                    action = {
+                        NakvaliSecondaryButton(text = "Find descents", onClick = onCreateSegment)
+                    },
+                    secondaryAction = {
+                        NakvaliTextAction(
+                            text = "Import GPX",
+                            onClick = launchImport,
+                            icon = Icons.Filled.Add,
                         )
-                    }
-                }
+                    },
+                )
             }
         } else {
             SegmentLibrary(
@@ -242,7 +237,10 @@ private fun SegmentLibrary(
         modifier = modifier.fillMaxSize(),
         sheetPeekHeight = LibrarySheetPeekHeight,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        // A raised container, not `surface`: over a map the sheet has to own its
+        // own edge, and in the light scheme `surface` and the basemap ground sat
+        // close enough in value that the sheet lost its boundary entirely.
+        sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         sheetContentColor = MaterialTheme.colorScheme.onSurface,
         sheetTonalElevation = 0.dp,
         sheetShadowElevation = 8.dp,
@@ -426,9 +424,10 @@ private fun LibrarySheetHeader(
             }
         }
         if (selected != null) {
-            FilledTonalButton(onClick = { onOpenSegment(selected.segment.id) }) {
-                Text("Open")
-            }
+            NakvaliSecondaryButton(
+                text = "Open",
+                onClick = { onOpenSegment(selected.segment.id) },
+            )
         }
     }
 }

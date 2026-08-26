@@ -24,11 +24,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
+import com.nakvali.core.ui.NakvaliDivider
+import com.nakvali.core.ui.NakvaliLoading
+import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliPrimaryButton
+import com.nakvali.core.ui.NakvaliScreenHeader
+import com.nakvali.core.ui.NakvaliSecondaryButton
+import com.nakvali.core.ui.NakvaliSectionLabel
+import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliStatusTone
+import com.nakvali.core.ui.NakvaliTextField
+import com.nakvali.core.ui.NakvaliTheme
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,15 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nakvali.core.recording.Bike
 import com.nakvali.core.recording.BikeType
-import com.nakvali.core.ui.NakvaliDivider
-import com.nakvali.core.ui.NakvaliPanel
-import com.nakvali.core.ui.NakvaliScreenHeader
-import com.nakvali.core.ui.NakvaliSectionLabel
-import com.nakvali.core.ui.NakvaliSizes
-import com.nakvali.core.ui.NakvaliSpacing
-import com.nakvali.core.ui.NakvaliStatusPill
-import com.nakvali.core.ui.NakvaliTextField
-import com.nakvali.core.ui.NakvaliTheme
 
 data class ProfileAccount(
     val displayName: String,
@@ -231,7 +231,7 @@ private fun LoadingAccount() {
             horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            NakvaliLoading(Modifier.size(24.dp))
             Column {
                 Text("Restoring your session", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(NakvaliSpacing.xSmall))
@@ -280,22 +280,23 @@ private fun SignedOutAccount(state: ProfileUiState.SignedOut, onSignIn: () -> Un
                 }
             }
             Spacer(Modifier.height(NakvaliSpacing.xLarge))
-            Button(
-                onClick = onSignIn,
-                enabled = !state.signingIn,
-                modifier = Modifier.fillMaxWidth().height(NakvaliSizes.primaryActionHeight),
-            ) {
-                if (state.signingIn) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
+            // Signing in is optional — the app records, analyses and stores
+            // everything without an account. As a full-width filled button it
+            // was the loudest thing in the app, shouting louder than adding the
+            // bike a new rider actually needs. Secondary weight, sized to its
+            // label rather than to the card.
+            if (state.signingIn) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    NakvaliLoading(modifier = Modifier.size(24.dp))
                     Spacer(Modifier.size(NakvaliSpacing.medium))
-                    Text("Opening Google…")
-                } else {
-                    Text("Continue with Google")
+                    Text(
+                        "Opening Google…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+            } else {
+                NakvaliSecondaryButton(text = "Continue with Google", onClick = onSignIn)
             }
         }
     }
@@ -363,7 +364,7 @@ private fun ServerStatus(server: ProfileServerState, onRetrySync: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            NakvaliLoading(Modifier.size(20.dp))
             Column {
                 Text("Connecting to Nakvali", style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -378,11 +379,7 @@ private fun ServerStatus(server: ProfileServerState, onRetrySync: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NakvaliStatusPill(
-                text = "Synced",
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
+            NakvaliStatusPill(text = "Synced", tone = NakvaliStatusTone.Live)
             Text(
                 "Ready for shared segment results.",
                 modifier = Modifier.weight(1f),
@@ -420,34 +417,46 @@ private fun Garage(
 ) {
     if (bikes.isEmpty()) {
         NakvaliPanel(Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(NakvaliSpacing.xLarge),
-                horizontalAlignment = Alignment.Start,
-            ) {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            // Same internal layout as the account card above — mark on the
+            // left, text beside it. The two cards used to run on different
+            // rules for no reason a reader could see.
+            Column(modifier = Modifier.padding(NakvaliSpacing.xLarge)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.PedalBike, contentDescription = null, Modifier.size(24.dp))
+                    Surface(
+                        modifier = Modifier.size(48.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.PedalBike,
+                                contentDescription = null,
+                                Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("Build your garage", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                        Text(
+                            "Add a bike once and it will be ready when you save a ride.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
-                Spacer(Modifier.height(NakvaliSpacing.large))
-                Text("Build your garage", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(NakvaliSpacing.xSmall))
-                Text(
-                    "Add a bike once and it will be ready when you save a ride.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Spacer(Modifier.height(NakvaliSpacing.xLarge))
+                // The real task on this screen, so it gets the primary weight
+                // that the optional sign-in used to take.
+                NakvaliPrimaryButton(
+                    text = "Add bike",
+                    onClick = onAddBike,
+                    icon = Icons.Filled.Add,
                 )
-                Spacer(Modifier.height(NakvaliSpacing.large))
-                FilledTonalButton(onClick = onAddBike) {
-                    Icon(Icons.Filled.Add, contentDescription = null, Modifier.size(18.dp))
-                    Spacer(Modifier.size(NakvaliSpacing.small))
-                    Text("Add bike")
-                }
             }
         }
         return
@@ -520,11 +529,7 @@ private fun BikeRow(bike: Bike, active: Boolean, onClick: () -> Unit) {
                 )
             }
             if (active) {
-                NakvaliStatusPill(
-                    text = "Active",
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                )
+                NakvaliStatusPill(text = "Active", tone = NakvaliStatusTone.Live)
             }
         }
     }

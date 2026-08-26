@@ -1,5 +1,13 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.NakvaliDivider
+import com.nakvali.core.ui.NakvaliEmptyState
+import com.nakvali.core.ui.NakvaliLoading
+import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliScreenHeader
+import com.nakvali.core.ui.NakvaliSecondaryButton
+import com.nakvali.core.ui.NakvaliSectionLabel
+import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.SegmentFormat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,21 +28,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
@@ -53,12 +57,6 @@ import com.nakvali.core.map.SegmentLibraryCameraAction
 import com.nakvali.core.map.SegmentLibraryCameraRequest
 import com.nakvali.core.map.SegmentLibraryLine
 import com.nakvali.core.map.SegmentLibraryMap
-import com.nakvali.core.ui.NakvaliDivider
-import com.nakvali.core.ui.NakvaliEmptyState
-import com.nakvali.core.ui.NakvaliPanel
-import com.nakvali.core.ui.NakvaliScreenHeader
-import com.nakvali.core.ui.NakvaliSectionLabel
-import com.nakvali.core.ui.NakvaliSpacing
 import java.text.DateFormat
 import java.util.Date
 
@@ -116,7 +114,7 @@ private fun CandidateScanProgress(
         CandidatePageHeader(onBack = onBack)
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator()
+                NakvaliLoading()
                 Spacer(Modifier.height(NakvaliSpacing.large))
                 Text(
                     text = if (state.totalRides == 0) {
@@ -146,21 +144,19 @@ private fun CandidateEmptyState(
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(NakvaliSpacing.screen),
-            contentAlignment = Alignment.TopCenter,
+            contentAlignment = Alignment.Center,
         ) {
-            NakvaliPanel(Modifier.fillMaxWidth()) {
-                NakvaliEmptyState(
-                    title = "No new descents found",
-                    description = candidateEmptyExplanation(state),
-                    icon = Icons.Filled.Timer,
-                    action = {
-                        TextButton(onClick = onRetry) {
-                            Icon(Icons.Outlined.Refresh, contentDescription = null)
-                            Text("Scan again")
-                        }
-                    },
-                )
-            }
+            NakvaliEmptyState(
+                title = "No new descents found",
+                description = candidateEmptyExplanation(state),
+                action = {
+                    NakvaliSecondaryButton(
+                        text = "Scan again",
+                        onClick = onRetry,
+                        icon = Icons.Outlined.Refresh,
+                    )
+                },
+            )
         }
     }
 }
@@ -221,7 +217,10 @@ private fun CandidateMap(
         modifier = modifier.fillMaxSize(),
         sheetPeekHeight = CandidatesSheetPeekHeight,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        // A raised container, not `surface`: over a map the sheet has to own its
+        // own edge, and in the light scheme `surface` and the basemap ground sat
+        // close enough in value that the sheet lost its boundary entirely.
+        sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         sheetContentColor = MaterialTheme.colorScheme.onSurface,
         sheetTonalElevation = 0.dp,
         sheetShadowElevation = 8.dp,
@@ -348,7 +347,8 @@ private fun CandidateSheetHeader(
             )
         }
         if (selected != null) {
-            FilledTonalButton(
+            NakvaliSecondaryButton(
+                text = "Review",
                 onClick = {
                     onReviewCandidate(
                         selected.recordingId,
@@ -356,9 +356,7 @@ private fun CandidateSheetHeader(
                         selected.endPosition,
                     )
                 },
-            ) {
-                Text("Review")
-            }
+            )
         }
     }
 }

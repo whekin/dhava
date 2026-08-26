@@ -20,7 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
+import com.nakvali.core.ui.NakvaliLoading
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -411,7 +411,7 @@ private fun BackupActionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        if (loading) NakvaliLoading(Modifier.size(20.dp))
     }
 }
 
@@ -555,7 +555,7 @@ private fun StorageRow(title: String, description: String, value: String?) {
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (value == null) {
-            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            NakvaliLoading(Modifier.size(16.dp))
         } else {
             Text(value, style = MaterialTheme.typography.bodyMedium)
         }

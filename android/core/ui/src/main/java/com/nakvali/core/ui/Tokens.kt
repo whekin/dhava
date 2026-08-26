@@ -18,6 +18,8 @@ object NakvaliSizes {
     val compactControl = 48.dp
     val mapControl = 56.dp
     val primaryControl = 88.dp
+    /** Stop, and anything else that sits beside the primary ride control. */
+    val secondaryControl = 64.dp
     val primaryActionHeight = 56.dp
 }
 

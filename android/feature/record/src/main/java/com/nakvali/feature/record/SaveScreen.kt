@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -53,11 +52,11 @@ import com.nakvali.core.recording.Bike
 import com.nakvali.core.recording.BikeType
 import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliPrimaryButton
 import com.nakvali.core.ui.NakvaliScreenHeader
 import com.nakvali.core.ui.NakvaliSectionLabel
-import com.nakvali.core.ui.NakvaliTextField
-import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.NakvaliTheme
 import java.time.Instant
 import java.time.ZoneId
@@ -200,15 +199,14 @@ internal fun SaveContent(
         )
         Spacer(modifier = Modifier.height(NakvaliSpacing.large))
 
-        Button(
+        NakvaliPrimaryButton(
+            text = "Save activity",
             onClick = {
                 onSave(title, description, bikes.firstOrNull { it.id == selectedBikeId })
             },
             enabled = title.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(NakvaliSizes.primaryActionHeight),
-        ) {
-            Text("Save activity", style = MaterialTheme.typography.titleMedium)
-        }
+            modifier = Modifier.fillMaxWidth(),
+        )
         TextButton(onClick = { confirmDiscard = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("Discard recording", color = MaterialTheme.colorScheme.error)
         }

@@ -28,7 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
+import com.nakvali.core.ui.NakvaliLoading
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -69,6 +69,7 @@ import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliStatusTone
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -131,7 +132,7 @@ fun SegmentDetailScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
+                    NakvaliLoading()
                     Spacer(Modifier.height(NakvaliSpacing.large))
                     Text(
                         text = "Matching your rides…",
@@ -548,11 +549,7 @@ private fun AttemptFlags(attempt: StoredAttempt) {
         verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
     ) {
         if (!attempt.countable) {
-            NakvaliStatusPill(
-                text = "Not counted",
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
+            NakvaliStatusPill(text = "Not counted", tone = NakvaliStatusTone.Held)
         }
         attempt.flags.forEach { flag ->
             NakvaliStatusPill(text = flag.label())

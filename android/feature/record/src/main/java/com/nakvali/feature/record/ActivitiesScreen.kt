@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,7 +21,6 @@ import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,8 +40,8 @@ import com.nakvali.core.recording.RecordingStatus
 import com.nakvali.core.recording.UploadState
 import com.nakvali.core.recording.needsRecoveryAttention
 import com.nakvali.core.ui.NakvaliEmptyState
-import com.nakvali.core.ui.NakvaliPanel
 import com.nakvali.core.ui.NakvaliScreenHeader
+import com.nakvali.core.ui.NakvaliSecondaryButton
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
 import com.nakvali.core.ui.NakvaliTheme
@@ -113,22 +110,19 @@ private fun ActivitiesContent(
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(NakvaliSpacing.screen),
-                contentAlignment = Alignment.TopCenter,
+                contentAlignment = Alignment.Center,
             ) {
-                NakvaliPanel(Modifier.fillMaxWidth()) {
-                    NakvaliEmptyState(
-                        title = "No rides yet",
-                        description = "Finish a recording and it will stay here on this device.",
-                        icon = Icons.AutoMirrored.Filled.List,
-                        action = {
-                            FilledTonalButton(onClick = onStartRecording) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                                Spacer(Modifier.width(NakvaliSpacing.small))
-                                Text("Record a ride")
-                            }
-                        },
-                    )
-                }
+                NakvaliEmptyState(
+                    title = "No rides yet",
+                    description = "Finish a recording and it will stay here on this device.",
+                    action = {
+                        NakvaliSecondaryButton(
+                            text = "Record a ride",
+                            onClick = onStartRecording,
+                            icon = Icons.Filled.PlayArrow,
+                        )
+                    },
+                )
             }
         } else {
             LazyColumn(
@@ -254,7 +248,9 @@ private fun ActivityRow(
                 recording.status == RecordingStatus.UPLOADED -> Icon(
                     Icons.Filled.Check,
                     contentDescription = "Uploaded",
-                    tint = MaterialTheme.colorScheme.tertiary,
+                    // Done and good is green. The "recovered" line above stays
+                    // ochre on purpose — that one wants a second look.
+                    tint = MaterialTheme.colorScheme.primary,
                 )
                 else -> NakvaliStatusPill(statusLabel(recording, uploadState))
             }

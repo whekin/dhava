@@ -43,15 +43,56 @@ internal fun formatSegmentDelta(deltaMs: Long): String {
     return String.format(Locale.US, "%s%.1f s", sign, kotlin.math.abs(deltaMs) / 1_000.0)
 }
 
+/**
+ * `12:34` under an hour, `1:02:33` above it.
+ *
+ * The zero-padded `00:12:34` the live sheet used before was eight glyphs wide
+ * and ended up as visually heavy as the speed beside it, so nothing on the
+ * screen declared which number was the subject. Dropping an hour that has not
+ * happened yet halves the width and costs no information.
+ */
+internal fun formatElapsedShort(elapsedMs: Long): String {
+    val totalSeconds = elapsedMs.coerceAtLeast(0) / 1_000
+    val hours = totalSeconds / 3_600
+    val minutes = (totalSeconds % 3_600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
+    }
+}
+
+/**
+ * A measurement with its unit kept separate.
+ *
+ * The live sheet sets the number at display size and the unit at label size, on
+ * the same baseline, so the pair reads in one fixation. A pre-joined `"1.2 km"`
+ * cannot be typeset that way.
+ */
+internal data class Measured(val value: String, val unit: String)
+
 /** `480 m` below a kilometre, `1.2 km` above it — the activity screen's rule. */
-internal fun formatDistance(meters: Double): String = when {
-    meters >= 1_000.0 -> String.format(Locale.US, "%.1f km", meters / 1_000.0)
-    else -> String.format(Locale.US, "%.0f m", meters)
+internal fun formatDistance(meters: Double): String =
+    measuredDistance(meters).let { "${it.value} ${it.unit}" }
+
+internal fun measuredDistance(meters: Double): Measured = when {
+    meters >= 1_000.0 -> Measured(String.format(Locale.US, "%.1f", meters / 1_000.0), "km")
+    else -> Measured(String.format(Locale.US, "%.0f", meters), "m")
 }
 
 /** Accumulated descent as a signed drop, e.g. `−182 m`. */
 internal fun formatDescent(meters: Double): String =
-    String.format(Locale.US, "−%.0f m", meters.coerceAtLeast(0.0))
+    measuredDescent(meters).let { "${it.value} ${it.unit}" }
+
+internal fun measuredDescent(meters: Double): Measured =
+    Measured(String.format(Locale.US, "−%.0f", meters.coerceAtLeast(0.0)), "m")
+
+/** Live speed in km/h, or an em dash while the fix is still settling. */
+internal fun measuredSpeed(metersPerSecond: Float?): Measured = Measured(
+    value = metersPerSecond?.let { String.format(Locale.US, "%.1f", it * 3.6f) } ?: "—",
+    unit = "km/h",
+)
 
 internal fun formatSize(bytes: Long): String = when {
     bytes >= 1_048_576 -> String.format(Locale.US, "%.1f MB", bytes / 1_048_576.0)

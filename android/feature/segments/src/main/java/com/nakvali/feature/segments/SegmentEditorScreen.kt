@@ -1,5 +1,13 @@
 package com.nakvali.feature.segments
 
+import com.nakvali.core.ui.NakvaliDivider
+import com.nakvali.core.ui.NakvaliLoading
+import com.nakvali.core.ui.NakvaliMetric
+import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliPrimaryButton
+import com.nakvali.core.ui.NakvaliSectionLabel
+import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.SegmentFormat
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -31,8 +39,6 @@ import androidx.compose.material.icons.outlined.ZoomInMap
 import androidx.compose.material.icons.outlined.ZoomOutMap
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,13 +72,6 @@ import com.nakvali.core.recording.CanonicalPoint
 import com.nakvali.core.recording.normalizeSegmentName
 import com.nakvali.core.recording.segmentNameProblem
 import com.nakvali.core.recording.SegmentDifficulty
-import com.nakvali.core.ui.NakvaliDivider
-import com.nakvali.core.ui.NakvaliMetric
-import com.nakvali.core.ui.NakvaliPanel
-import com.nakvali.core.ui.NakvaliSectionLabel
-import com.nakvali.core.ui.NakvaliSizes
-import com.nakvali.core.ui.NakvaliSpacing
-import com.nakvali.core.ui.NakvaliTextField
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -112,7 +111,7 @@ fun SegmentEditorScreen(
                     .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator()
+                NakvaliLoading()
             }
         }
 
@@ -227,7 +226,10 @@ private fun EditorBody(
         modifier = modifier.fillMaxSize().imePadding(),
         sheetPeekHeight = SegmentEditorSheetPeekHeight,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        // A raised container, not `surface`: over a map the sheet has to own its
+        // own edge, and in the light scheme `surface` and the basemap ground sat
+        // close enough in value that the sheet lost its boundary entirely.
+        sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         sheetContentColor = MaterialTheme.colorScheme.onSurface,
         sheetTonalElevation = 0.dp,
         sheetShadowElevation = 8.dp,
@@ -702,19 +704,16 @@ private fun SegmentEditorDetails(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(NakvaliSpacing.large))
-        Button(
+        NakvaliPrimaryButton(
+            text = if (state.saving) "Saving…" else "Create segment",
             onClick = onSave,
             enabled = valid != null &&
                 state.name.isNotBlank() &&
                 nameProblem == null &&
                 externalUrlValid &&
                 !state.saving,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(NakvaliSizes.primaryActionHeight),
-        ) {
-            Text(if (state.saving) "Saving…" else "Create segment")
-        }
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

@@ -31,7 +31,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.CircularProgressIndicator
+import com.nakvali.core.ui.NakvaliLoading
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,6 +85,7 @@ import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliStatusTone
 import com.nakvali.core.ui.NakvaliTheme
 import com.nakvali.fusion.ActivityState
 import com.nakvali.fusion.RideAnalysis
@@ -363,7 +364,10 @@ private fun ActivityDetailContent(
         modifier = modifier.fillMaxSize(),
         sheetPeekHeight = ActivitySheetPeekHeight,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        // A raised container, not `surface`: over a map the sheet has to own its
+        // own edge, and in the light scheme `surface` and the basemap ground sat
+        // close enough in value that the sheet lost its boundary entirely.
+        sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         sheetContentColor = MaterialTheme.colorScheme.onSurface,
         sheetTonalElevation = 0.dp,
         sheetShadowElevation = 8.dp,
@@ -380,7 +384,7 @@ private fun ActivityDetailContent(
                     Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    NakvaliLoading()
                 }
                 TrackState.Empty -> NakvaliEmptyState(
                     title = "No usable GPS track",
@@ -1031,41 +1035,16 @@ private fun DetailTopBar(onBack: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 private fun RecordingStatusPill(status: RecordingStatus) {
-    val presentation = when (status) {
-        RecordingStatus.UPLOADED -> StatusPresentation(
-            "Uploaded",
-            MaterialTheme.colorScheme.tertiaryContainer,
-            MaterialTheme.colorScheme.onTertiaryContainer,
-        )
-        RecordingStatus.FAILED -> StatusPresentation(
-            "Upload failed",
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer,
-        )
-        RecordingStatus.PENDING_UPLOAD -> StatusPresentation(
-            "Queued",
-            MaterialTheme.colorScheme.secondaryContainer,
-            MaterialTheme.colorScheme.onSecondaryContainer,
-        )
-        RecordingStatus.RECORDED -> StatusPresentation(
-            "Local",
-            MaterialTheme.colorScheme.surfaceContainerHighest,
-            MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        RecordingStatus.RECORDING -> StatusPresentation(
-            "Recording",
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
-        )
+    val presentation: Pair<String, NakvaliStatusTone> = when (status) {
+        RecordingStatus.UPLOADED -> "Uploaded" to NakvaliStatusTone.Live
+        RecordingStatus.FAILED -> "Upload failed" to NakvaliStatusTone.Alert
+        // Queued is unsettled rather than wrong, which is what Held is for.
+        RecordingStatus.PENDING_UPLOAD -> "Queued" to NakvaliStatusTone.Held
+        RecordingStatus.RECORDED -> "Local" to NakvaliStatusTone.Neutral
+        RecordingStatus.RECORDING -> "Recording" to NakvaliStatusTone.Live
     }
-    NakvaliStatusPill(
-        text = presentation.label,
-        containerColor = presentation.container,
-        contentColor = presentation.content,
-    )
+    NakvaliStatusPill(text = presentation.first, tone = presentation.second)
 }
-
-private data class StatusPresentation(val label: String, val container: Color, val content: Color)
 
 @Composable
 private fun ActivityMetrics(

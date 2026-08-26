@@ -33,8 +33,6 @@ import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,23 +70,29 @@ import com.nakvali.core.recording.RecordingState
 import com.nakvali.core.recording.RecorderSettings
 import com.nakvali.core.recording.canContinueRecording
 import com.nakvali.core.recording.needsRecoveryAttention
+import com.nakvali.core.map.NakvaliMapDetail
 import com.nakvali.core.ui.NakvaliControlTone
 import com.nakvali.core.ui.NakvaliMetric
+import com.nakvali.core.ui.NakvaliMetricEmphasis
+import com.nakvali.core.ui.NakvaliMetricRow
 import com.nakvali.core.ui.NakvaliPanel
+import com.nakvali.core.ui.NakvaliPrimaryButton
 import com.nakvali.core.ui.NakvaliRideControl
+import com.nakvali.core.ui.NakvaliRideControlBar
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliStatusTone
 import com.nakvali.core.ui.NakvaliTheme
-import java.util.Locale
+import com.nakvali.core.ui.NakvaliTopScrim
 
 /**
- * Height of the recording sheet at rest: status, both metric rows and the
- * controls. Everything a rider reads at speed is above this line, so the sheet
- * never has to be touched mid-run.
+ * Height of the recording sheet at rest: status, both metric rows, the controls
+ * and the line that says how to finish. Everything a rider reads at speed is
+ * above this line, so the sheet never has to be touched mid-run.
  */
-private val RecordSheetPeekHeight = 320.dp
+private val RecordSheetPeekHeight = 356.dp
 
 /** Map-first ride recorder. Platform work stays in the ViewModel/service. */
 @Composable
@@ -152,10 +156,22 @@ fun RecordScreen(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    fun startAndMaybeAskBattery() {
+    fun beginRecording() {
         pendingContinueId?.let(viewModel::continueRecording) ?: viewModel.startRecording()
         pendingContinueId = null
-        if (viewModel.shouldAskBatteryExemption()) showBatteryDialog = true
+    }
+
+    /**
+     * The battery-manager prompt is asked *before* the recorder starts.
+     *
+     * It used to fire immediately after, which put a modal dialog on top of the
+     * five-second "Finding a clean start" countdown — two things competing for
+     * the rider in the seconds they most want to be riding, with the dialog's
+     * scrim also swallowing any gesture aimed at the screen behind it. Asked
+     * here it sits on the idle screen, where there is nothing to interrupt.
+     */
+    fun startAndMaybeAskBattery() {
+        if (viewModel.shouldAskBatteryExemption()) showBatteryDialog = true else beginRecording()
     }
 
     fun hasBackgroundLocation(): Boolean =
@@ -235,12 +251,27 @@ fun RecordScreen(
                 onUserMovedMap = { mapFollowing = false },
                 onPreviewAccuracyChanged = { previewAccuracyM = it },
                 modifier = Modifier.fillMaxSize(),
+                // Once the recorder is running the basemap becomes an
+                // instrument: the trail, the terrain and the track, without
+                // the cafés and street shields a rider cannot use at speed.
+                detail = if (state is RecordingState.Idle) {
+                    NakvaliMapDetail.Browse
+                } else {
+                    NakvaliMapDetail.Instrument
+                },
             )
         } else {
             Surface(
                 color = MaterialTheme.colorScheme.background,
                 modifier = Modifier.fillMaxSize(),
             ) {}
+        }
+
+        // Basemap labels used to collide with the status-bar clock at the top of
+        // a full-bleed map. Edge-to-edge is right; the scrim is what makes it
+        // legible.
+        if (mapVisible && saveTarget == null) {
+            NakvaliTopScrim(modifier = Modifier.align(Alignment.TopCenter))
         }
 
         if (mapVisible && !mapFollowing && saveTarget == null) {
@@ -303,7 +334,12 @@ fun RecordScreen(
         }
     }
 
-    if (showBatteryDialog) BatteryExemptionDialog { showBatteryDialog = false }
+    if (showBatteryDialog) {
+        BatteryExemptionDialog {
+            showBatteryDialog = false
+            beginRecording()
+        }
+    }
     if (showBackgroundLocationDialog) {
         val optionLabel = context.packageManager.backgroundPermissionOptionLabel.toString()
         BackgroundLocationDialog(
@@ -341,12 +377,18 @@ private fun IdleContent(
 ) {
     val haptics = LocalHapticFeedback.current
     Box(Modifier.fillMaxSize()) {
+        // Over a map the panel has to declare its own edge. `surface` sat at
+        // almost the same value as the basemap in both schemes, so the card
+        // read as a rectangle that had failed to reach the bottom of the
+        // screen rather than as something deliberately floating above the
+        // trail. A raised container plus a hairline settles it.
         NakvaliPanel(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(NakvaliSpacing.medium),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            outlined = true,
         ) {
             if (interruptedRecording != null) {
                 InterruptedRecordingContent(
@@ -381,10 +423,14 @@ private fun IdleContent(
                                 else -> "GPS refining · ±${gpsAccuracyM.toInt()} m"
                             },
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (gpsAccuracyM != null && gpsAccuracyM <= 15f) {
-                                MaterialTheme.colorScheme.tertiary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                            // Green for ready, ochre for still settling. When
+                            // tertiary was a sage green these read the same;
+                            // now that it is the signal ochre, colouring a good
+                            // fix with it would say the opposite of what it means.
+                            color = when {
+                                gpsAccuracyM == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                gpsAccuracyM <= 15f -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.tertiary
                             },
                         )
                     }
@@ -445,15 +491,10 @@ private fun InterruptedRecordingContent(
             }
             NakvaliStatusPill(
                 text = if (recording.recoveryFailed) "Raw only" else "Recovered",
-                containerColor = if (recording.recoveryFailed) {
-                    MaterialTheme.colorScheme.errorContainer
+                tone = if (recording.recoveryFailed) {
+                    NakvaliStatusTone.Alert
                 } else {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                },
-                contentColor = if (recording.recoveryFailed) {
-                    MaterialTheme.colorScheme.onErrorContainer
-                } else {
-                    MaterialTheme.colorScheme.onTertiaryContainer
+                    NakvaliStatusTone.Held
                 },
             )
         }
@@ -478,16 +519,12 @@ private fun InterruptedRecordingContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (recording.canContinueRecording()) {
-                Button(
+                NakvaliPrimaryButton(
+                    text = "Continue ride",
                     onClick = onContinue,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(NakvaliSizes.primaryActionHeight),
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                    Spacer(Modifier.size(NakvaliSpacing.small))
-                    Text("Continue ride")
-                }
+                    icon = Icons.Filled.PlayArrow,
+                    modifier = Modifier.weight(1f),
+                )
             }
             TextButton(
                 onClick = onSave,
@@ -514,18 +551,25 @@ private fun PreparingContent(state: RecordingState.Preparing, onCancel: () -> Un
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(NakvaliSpacing.medium),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            outlined = true,
         ) {
             Column(
                 modifier = Modifier.padding(NakvaliSpacing.xLarge),
                 verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
             ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Column {
                         NakvaliSectionLabel("Preparing")
                         Text("Finding a clean start", style = MaterialTheme.typography.titleLarge)
                     }
-                    NakvaliStatusPill("${remainingSeconds}s max")
+                    // A live countdown, not a disabled control: the neutral
+                    // pill it used to wear made it look switched off.
+                    NakvaliStatusPill("${remainingSeconds}s max", tone = NakvaliStatusTone.Held)
                 }
                 ReadinessRow(
                     label = "GPS lock",
@@ -556,7 +600,8 @@ private fun ReadinessRow(label: String, ready: Boolean, detail: String) {
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
                 contentDescription = null,
-                tint = if (ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline,
+                // A passed readiness check is a green tick, not an ochre one.
+                tint = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                 modifier = Modifier.size(22.dp),
             )
             Text(label, style = MaterialTheme.typography.titleMedium)
@@ -597,7 +642,10 @@ private fun RecordingContent(
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetPeekHeight = RecordSheetPeekHeight,
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
+        // A raised container, not `surface`: over a map the sheet has to own its
+        // own edge, and in the light scheme `surface` and the basemap ground sat
+        // close enough in value that the sheet lost its boundary entirely.
+        sheetContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         sheetContentColor = MaterialTheme.colorScheme.onSurface,
         // Transparent so the map drawn beneath this composable stays visible.
         containerColor = Color.Transparent,
@@ -617,15 +665,13 @@ private fun RecordingContent(
                 ) {
                     NakvaliStatusPill(
                         text = status,
-                        containerColor = if (state.paused) {
-                            MaterialTheme.colorScheme.secondaryContainer
+                        // Paused is held, not wrong, and it has to be
+                        // unmistakable at a glance — hence ochre rather than
+                        // the resting neutral it used to borrow.
+                        tone = if (state.paused) {
+                            NakvaliStatusTone.Held
                         } else {
-                            MaterialTheme.colorScheme.primaryContainer
-                        },
-                        contentColor = if (state.paused) {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onPrimaryContainer
+                            NakvaliStatusTone.Live
                         },
                     )
                     Row(
@@ -637,8 +683,7 @@ private fun RecordingContent(
                         if (state.powerSaving) {
                             NakvaliStatusPill(
                                 text = "Transport · saving power",
-                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                tone = NakvaliStatusTone.Neutral,
                             )
                         }
                         if (showDiagnostics) {
@@ -651,61 +696,68 @@ private fun RecordingContent(
                     }
                 }
                 Spacer(Modifier.height(NakvaliSpacing.large))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom,
-                ) {
+                // Speed leads and everything else follows it. Before, speed and
+                // elapsed time were set at weights close enough that neither
+                // read as the subject, and the two columns pulled to opposite
+                // edges left a ragged gutter down the middle. One emphasis
+                // scale, one alignment.
+                val speed = measuredSpeed(state.lastSpeedMps)
+                NakvaliMetricRow {
                     NakvaliMetric(
-                        value = state.lastSpeedMps?.let {
-                            String.format(Locale.US, "%.1f", it * 3.6f)
-                        } ?: "—",
-                        label = "km/h",
-                        prominent = true,
+                        value = speed.value,
+                        unit = speed.unit,
+                        label = "Speed",
+                        emphasis = NakvaliMetricEmphasis.Hero,
+                        modifier = Modifier.weight(1f),
                     )
                     NakvaliMetric(
-                        value = formatElapsed(state.elapsedMs),
+                        value = formatElapsedShort(state.elapsedMs),
                         label = "Ride time",
-                        alignment = Alignment.End,
+                        emphasis = NakvaliMetricEmphasis.Primary,
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 Spacer(Modifier.height(NakvaliSpacing.large))
                 // Descent sits beside distance because the product is
                 // downhill-first: the metres dropped are the ride, and the
                 // rider should not have to wait for Finish to read them.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom,
-                ) {
+                val distance = measuredDistance(state.distanceM)
+                val descent = measuredDescent(state.descentM)
+                NakvaliMetricRow {
                     NakvaliMetric(
-                        value = formatDistance(state.distanceM),
+                        value = distance.value,
+                        unit = distance.unit,
                         label = "Distance",
+                        emphasis = NakvaliMetricEmphasis.Secondary,
+                        modifier = Modifier.weight(1f),
                     )
                     NakvaliMetric(
-                        value = formatDescent(state.descentM),
+                        value = descent.value,
+                        unit = descent.unit,
                         label = "Descent",
-                        alignment = Alignment.End,
+                        emphasis = NakvaliMetricEmphasis.Secondary,
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 Spacer(Modifier.height(NakvaliSpacing.large))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
+                NakvaliRideControlBar(
+                    secondary = if (state.paused) {
+                        {
+                            NakvaliRideControl(
+                                icon = Icons.Filled.Stop,
+                                contentDescription = "Finish ride",
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onStop()
+                                },
+                                tone = NakvaliControlTone.Destructive,
+                                size = NakvaliSizes.secondaryControl,
+                            )
+                        }
+                    } else {
+                        null
+                    },
                 ) {
-                    if (state.paused) {
-                        NakvaliRideControl(
-                            icon = Icons.Filled.Stop,
-                            contentDescription = "Finish ride",
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onStop()
-                            },
-                            tone = NakvaliControlTone.Destructive,
-                        )
-                        Spacer(Modifier.size(NakvaliSpacing.xLarge))
-                    }
                     NakvaliRideControl(
                         icon = if (state.paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                         contentDescription = if (state.paused) {
@@ -719,6 +771,18 @@ private fun RecordingContent(
                         },
                     )
                 }
+                // Finishing is deliberately behind Pause so a bar-mounted phone
+                // cannot end a run by accident. That guard only works if the
+                // rider knows about it, and nothing on screen used to say so.
+                Text(
+                    text = if (state.paused) "Stop to finish and save" else "Pause to finish",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = NakvaliSpacing.medium),
+                )
                 SegmentRunsSection(
                     activeSegment = state.activeSegment,
                     runs = state.segmentRuns,
