@@ -27,6 +27,9 @@ dependencies {
     api(libs.androidx.compose.material3)
     api(libs.androidx.compose.material.icons.core)
     api(libs.androidx.compose.material.icons.extended)
+    // WindowCompat: the theme drives status/navigation bar icon contrast, since
+    // it is the thing that knows whether the app is running light or dark.
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
