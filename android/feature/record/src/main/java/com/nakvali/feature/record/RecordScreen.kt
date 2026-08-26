@@ -30,7 +30,7 @@ import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -580,9 +580,12 @@ private fun RecordingContent(
         state.stationary -> "Still"
         else -> "Moving"
     }
-    val sheetState = rememberStandardBottomSheetState(
+    val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
-        skipHiddenState = true,
+        // Anchors are named explicitly: from material3 alpha21 the PartiallyExpanded
+        // anchor is no longer dropped by layout, and omitting Hidden is what the old
+        // skipHiddenState flag did. These sheets are peek-or-expand, never dismissable.
+        enabledValues = setOf(SheetValue.PartiallyExpanded, SheetValue.Expanded),
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
 

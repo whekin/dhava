@@ -28,9 +28,11 @@ composeBom = "2026.06.01"
 # Carries the BottomSheet motion fix (b/452071842), which landed in alpha16: sheets now
 # respect MaterialTheme.motionScheme during nested scroll and drag instead of a hardcoded
 # settle, which is what could hold a child scroll gesture while the sheet was moving.
-# Pinned at alpha18 rather than newer: alpha21 deprecates the sheet state APIs this app
-# uses in favour of a unified rememberBottomSheetState, which is its own migration.
-material3 = "1.5.0-alpha18"
+# The alpha21 sheet-state migration this pin was waiting on has been done: every sheet now
+# uses the unified rememberBottomSheetState and names its anchors explicitly, which is what
+# alpha21 requires after it stopped removing the PartiallyExpanded anchor by layout.
+# alpha19 also lets Typography carry one default font family instead of repeating it per style.
+material3 = "1.5.0-alpha26"
 navigationCompose = "2.9.8"
 
 # Recording stack

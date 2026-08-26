@@ -46,7 +46,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -320,9 +320,12 @@ private fun ActivityDetailContent(
         hasAccuracy = hasAccuracy,
     )
     val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true
-    val sheetState = rememberStandardBottomSheetState(
+    val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
-        skipHiddenState = true,
+        // Anchors are named explicitly: from material3 alpha21 the PartiallyExpanded
+        // anchor is no longer dropped by layout, and omitting Hidden is what the old
+        // skipHiddenState flag did. These sheets are peek-or-expand, never dismissable.
+        enabledValues = setOf(SheetValue.PartiallyExpanded, SheetValue.Expanded),
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
 
