@@ -2891,3 +2891,183 @@ in wall-clock time, widening the window in which the sheet holds the gesture. So
 version bump can be right and still leave the real cost in place — the elevation profile
 redraws its whole path inside the scrolling column every frame, 72 km of points on that
 recording. Worth measuring with `gfxinfo` before calling the sheet done.
+
+## 2026-08-25 — iOS port research: the engine is not the problem
+
+Question raised: what does an iOS version need, should the app move to Flutter or React
+Native, and does the Rust engine survive. Findings in `docs/research/ios-port-options.md`.
+
+`fusion-core` survives every option. UniFFI treats Swift as tier-1 alongside Kotlin, and
+the crate has no Android coupling — only `std::fs`, `serde`, `flate2`. An iOS build is a
+new target plus `uniffi-bindgen-swift` and an XCFramework, not a rewrite. So the framework
+question and the Rust question are independent, which is what makes the answer easy.
+
+The cost of iOS is not the UI toolkit, it is Apple's sensor and background model:
+
+- Accelerometer/gyro are capped at ~100 Hz, enforced on purpose (Apple DTS: no entitlement
+  lifts it). Nakvali acquires at 200 Hz. The 50 Hz live path and 20 Hz persisted stream are
+  unaffected; the 200 Hz airtime pre-roll halves in resolution.
+- `CMAltimeter` is fixed at 1 Hz versus 10 Hz on Android, and delivers kPa. Barometric
+  elevation quality will be worse on iOS.
+- There is no foreground service and no background mode for CoreMotion. Motion callbacks
+  survive backgrounding only because a live Core Location session keeps the process alive —
+  an undocumented side effect. Sessions are reported dying after 60–130 min, so a watchdog
+  restarting both managers is mandatory.
+
+Therefore Flutter and React Native buy nothing where it hurts: the recorder must be native
+Swift on iOS and native Kotlin on Android under either. What they would charge is the whole
+21.7 k LOC of hand-written Kotlin, including the recorder that a year of field work made
+trustworthy. Flutter additionally discards the UniFFI surface for a Dart-specific bridge;
+React Native at least keeps the UniFFI annotations but adds a JS runtime to a thermally
+sensitive recorder.
+
+Recommendation: native SwiftUI on iOS sharing `fusion-core`, Android untouched. KMP with
+Gobley is the plausible *second* step for the ~9 k LOC of non-UI Kotlin, once duplication is
+measurable and Gobley is past 0.x — adopting a pre-1.0 bindgen on the working Android build
+first would be trading a real asset for a hypothetical one.
+
+Next concrete step, deliberately cheap and additive: a `fusion/scripts/build-ios.sh`
+producing the XCFramework, then a Swift recorder prototype writing the same `.jsonl.gz`.
+Open question that gates everything: replay existing Android recordings decimated to
+100 Hz IMU / 1 Hz baro and check whether airtime and gate crossings still hold up.
+
+## 2026-08-26 — material3 alpha26, and a design pass that blames the palette rather than Compose
+
+The UI was called out as not good enough, with the suspicion that RN or Flutter would look
+better. Built the app, drove it on emulator-5554 through record → pause → stop → save, and
+reviewed the real screens rather than the source. The three reasons the app reads as generic
+are all inside it:
+
+- `Type.kt` sets `FontFamily.Default` in all fifteen styles. `tnum` is requested but Roboto
+  barely differentiates tabular figures, and the recording screen is four numerals.
+- Material derives secondary/tertiary from the fern-green seed and lands on rose-brown
+  (`DarkSecondaryContainer #443631` over `#F0D8CF`). Every `FilledTonalButton` inherits it,
+  so "Record a ride", "Find descents" and "Add bike" ship as beige-pink pills inside a green
+  identity. `Color.kt` was written for soil and carbon; half of what renders is dusty rose.
+- `Theme.kt` declares `MaterialExpressiveTheme` + `MotionScheme.expressive()` and the catalog
+  pin exists to keep those APIs reachable, yet usage is zero `ButtonGroup`, `SplitButton`,
+  `LoadingIndicator`, `MaterialShapes`, `animateBounds`, `ListItem` and `TopAppBar`, against
+  17 legacy `CircularProgressIndicator`. The alpha is paid for and baseline M3 is delivered.
+
+Plus 71 raw `Button(` and 34 raw `Surface(` against eight shared components, which is why the
+look cannot be changed centrally and every edit feels hopeless.
+
+Two findings are behavioural, not cosmetic. The battery-exemption dialog fires *during* the
+five-second warm-up, on top of "Finding a clean start · 8S MAX", and its scrim eats gestures
+aimed at the screen behind. And the live control moves: Pause is centred while recording, but
+on pause Resume shifts right and Stop appears to its left, so a thumb returning to the
+remembered spot lands between them with Stop's edge adjacent. In gloves on a rough trail that
+mis-tap ends the ride.
+
+Also observed once, worth reproducing before it counts: after another app stole focus during
+the save handoff and the process restarted, Record showed "Ready to ride" with no route back
+to the ride that had just ended. Data was intact (`b96b30ac….jsonl.gz`, 18 KB, health sidecar,
+`activity-artifacts` written), so this is a surfacing gap, not loss. MapLibre also rendered
+blank after that restart while GPS reported ±57 m.
+
+**material3 1.5.0-alpha18 → 1.5.0-alpha26.** The pin comment said the alpha21 sheet-state
+migration was its own job; it is done. Five sheets — Record, ActivityDetail, SegmentEditor,
+SegmentCandidates, Segments — moved from `rememberStandardBottomSheetState(skipHiddenState =
+true)` to `rememberBottomSheetState(initialValue, enabledValues = setOf(PartiallyExpanded,
+Expanded))`. alpha21 stopped removing the `PartiallyExpanded` anchor by layout and handed that
+to the caller, so naming both anchors is what replaces the flag; omitting `Hidden` is what
+`skipHiddenState` did. The parameter is `enabledValues`, not `sheetValues` — read off the
+Kotlin metadata in the published AAR after the compiler rejected the guess.
+
+Zero exposure to the other alpha19–26 breaking changes: no `SearchBar`, `ExposedDropdownMenu`,
+`SplitButtonLayout`, `TonalToggleButton`, `ComponentOverride`, `WideNavigationRail`, `isAtTop`
+or `ListItem` anywhere. Build green, 147 unit tests pass, sheet expand/collapse verified by
+driving a real recording. The only remaining deprecation warning is an unrelated foundation
+`rememberTransformableState`.
+
+Worth watching: the July bottom-sheet cool-down traced to sheet motion under load, and this
+bump lands on the same component. Re-check expand-then-scroll on a multi-hour activity during
+the next field test before calling the version settled.
+
+Useful side effect: alpha19 lets `Typography` carry one default font family merged into every
+style that does not override it, so the largest finding above is now a one-line change plus a
+font file.
+
+Full graded review with screenshots: https://claude.ai/code/artifact/b3bf4847-69cd-449d-a511-71ac41d14fb7
+
+## 2026-08-26 — UI refactor: the causes, not the symptoms
+
+Acted on the design/UX review from earlier today. The work was deliberately ordered by how
+much of the app each change moves, which meant the two files nobody had opened in months
+came first and the screens came after.
+
+**Typeface.** Archivo variable (`wght` 100–900, `wdth` 62–125) replaces `FontFamily.Default`,
+which was set in all fifteen styles. It carries `tnum` *and* `zero`, so the recording screen's
+`tnum` request finally does something and a zero can no longer be misread as a capital O at a
+glance — visible immediately in `0.0`, `0:11`, `−0 m`. The width axis is what separates the
+two voices: `NakvaliText` at width 100 for reading and instruments, `NakvaliSignage` at 113
+for screen headlines and the all-caps eyebrows. One 643 KB file, and alpha19's default font
+family on `Typography` means it is declared once instead of fifteen times.
+
+First attempt regressed the navigation bar: `labelMedium` in the signage voice with 1.4sp
+tracking pushed "Activities" onto two lines. Signage is now restricted to `labelSmall` and
+the headline styles — short strings, which is what lets them carry tracking at all.
+
+**Palette.** Secondary and tertiary are written by hand instead of derived. Material rotates a
+green seed into a desaturated rose, and since every `FilledTonalButton` reads
+`secondaryContainer`, that rose was the resting colour of half the app's controls. The three
+families now have jobs: primary green for action and live state, secondary stone/graphite for
+resting surfaces, tertiary ochre as the second signal. Neutrals lost their warm-red bias for a
+faint green-yellow one — the old bias read as pink once it met the rose.
+
+Changing tertiary had two consequences worth recording, both caught on device rather than in
+review. The map took `vegetation` from `tertiaryContainer`, so every forest turned the colour
+of dry earth; woodland now has its own written-down colour, because vegetation is not a signal
+and should not move when the signal palette does. And `tertiary` had been standing in for
+"good" in three places — GPS ready, readiness ticks, the uploaded checkmark — which was fine
+while it was sage green and says the opposite now. Those are primary; "recovered", "queued"
+and "already covered" stay ochre on purpose.
+
+**Component layer.** `NakvaliMetric` takes a unit and an emphasis (`Hero`/`Primary`/
+`Secondary`) instead of a boolean and an alignment, and everything is start-aligned — the old
+two-alignment grid left a ragged gutter down the middle. `NakvaliStatusPill` takes a tone
+(`Live`/`Held`/`Alert`/`Neutral`) instead of raw colours, so PAUSED stopped wearing the
+muddiest colour in the palette. Added `NakvaliPrimaryButton`/`NakvaliSecondaryButton`/
+`NakvaliTextAction` so call sites pick a role, `NakvaliLoading` over the Expressive
+`LoadingIndicator` (the first component to collect on the alpha pin the theme has been paying
+for), and `NakvaliTopScrim` so basemap labels stop colliding with the status-bar clock.
+
+Correction to the review: the "71 raw `Button(`" figure counted every `*Button(` including
+`IconButton` and `TextButton`. The real number of filled/tonal buttons deciding their own
+weight was five. The finding held — an optional sign-in was louder than anything a rider does
+— but the scale did not.
+
+**Hero screen.** The control no longer moves: `NakvaliRideControlBar` anchors the primary
+control to the centre and offsets the secondary beside it, so a thumb returning to the
+remembered spot after a pause finds Resume rather than the gap next to Stop. Speed is `Hero`
+at 64sp with its unit on the same baseline, ride time is `Primary` and now drops an hour that
+has not happened (`0:11`, not `00:00:11`) — eight glyphs were competing with three. Distance
+and descent sit at the third tier. A line under the controls says how to finish, because the
+pause-then-stop guard is right and was completely undiscoverable.
+
+The battery-manager prompt now fires *before* `startRecording()` rather than after, so it sits
+on the idle screen instead of landing on top of the five-second warm-up with a scrim that ate
+gestures aimed at the screen behind it.
+
+**Map.** `NakvaliMapDetail` splits Browse from Instrument. Browse narrows the style's POI
+layers to classes a rider can use — parking, bike shop, water, shelter, lift, viewpoint —
+instead of the style's own `rank` filter, which ranks town-centre prominence. Instrument, used
+while recording, drops POIs, street names and shields entirely and keeps trail names, water and
+place names. Trails read as dashed ochre against green woodland and grey roads.
+
+**Light scheme.** Kept following the system, but designed rather than tolerated: light spells
+out its own surface-container ramp instead of leaving it to derivation, sheets and panels over
+a map use a raised container plus an optional hairline, and the theme now drives
+`isAppearanceLightStatusBars` — `enableEdgeToEdge()` reads night mode once at startup and was
+leaving white status-bar icons on a light background. Forcing dark would have been wrong for a
+daylight sport; forcing light is wrong at dusk.
+
+Build green, 147 unit tests pass, and every screen was checked on emulator-5554 in both
+schemes, including a driven record → pause → stop → save pass.
+
+**Not done, and why.** The review's "no segment presence on the hero screen before a run" needs
+a nearest-armed-segment distance on every fix. `liveSegmentArms()` already loads the armed set,
+but computing distance-to-next in the recording path is recorder work, not a UI refactor, and
+`RecordingState.Recording` has no field for it. Contour lines and hillshade are blocked on a
+terrain tile source — OpenFreeMap ships neither, and `ne2_shaded` is global relief that says
+nothing at riding zoom. Both want a decision before code.
