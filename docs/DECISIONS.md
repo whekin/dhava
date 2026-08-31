@@ -826,3 +826,17 @@ activity results are always recomputed canonically from the raw on-device file.
   GPS bursts is not a meaningful degraded mode.
 - Health sidecars persist both active `location_power_save_mode` and the stored
   system Power Saving flag so future field failures remain explainable.
+
+## 2026-08-31 — Use MapLibre OpenGL ES and immediate destination replacement
+
+- Pin the same MapLibre 13.4.1 API version to the official `android-sdk-opengl`
+  artifact. The Vulkan artifact reproducibly crashes in `MapRenderer::render`
+  during rapid map-tab replacement on S25, even with destination fades disabled;
+  the OpenGL build survived the same device stress test. Revisit Vulkan only
+  after an upstream fix and physical-device regression pass, not from a build
+  succeeding or a dependency version changing alone.
+- Disable NavHost enter/exit/pop transitions for map-led destination replacement.
+  SurfaceView content and Compose panels otherwise disappear on different frames,
+  leaving old map chrome behind the next screen. This is a visual decision,
+  separate from the renderer crash workaround. Within-screen map gestures and
+  component animations remain unchanged.

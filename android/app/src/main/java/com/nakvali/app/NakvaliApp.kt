@@ -1,5 +1,7 @@
 package com.nakvali.app
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -132,6 +134,14 @@ fun NakvaliApp(
             navController = navController,
             startDestination = NakvaliDestination.Record.route,
             modifier = Modifier.padding(innerPadding),
+            // SurfaceView maps do not fade in lockstep with Compose panels.
+            // Replace destinations immediately so outgoing map chrome cannot
+            // remain visible beneath the next screen. This is a visual policy,
+            // not a fix for the separate native Vulkan renderer crash.
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
         ) {
             composable(NakvaliDestination.Record.route) {
                 RecordScreen(

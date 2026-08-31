@@ -3173,3 +3173,38 @@ Unit regressions cover all four location-changing modes and the charging-masked 
 recording/feature unit tests, both module lints and signed release assembly pass. The signed
 release was installed over the S25 with all ride data preserved. Final rendered-dialog check
 is pending only because the phone locked after installation.
+
+## 2026-08-31 — Tab-switch native crash: OpenGL mitigation and immediate navigation
+
+Reproduced the user's crash on the physical Galaxy S25: the four-tab loop killed PID 26006
+on round two; the reduced Record ↔ Segments pair also crashed, while ten Record ↔ Activities
+rounds survived. Tombstone: null dereference in `mbgl::android::MapRenderer::render()+144`,
+through `SurfaceViewMapRenderer` / `MapLibreVulkanSurfaceView$VulkanThread`, MapLibre 13.4.1.
+
+First experiment disabled Navigation Compose's default destination fades. This removed the
+earlier visual overlap but did **not** fix the native failure: the signed no-transition
+Vulkan build still died on its first fast map-tab round. Therefore simultaneous animated
+destinations are not a sufficient root-cause explanation, and no such claim remains in code.
+
+Second experiment changed only the renderer artifact at the same SDK version, from
+`org.maplibre.gl:android-sdk` (Vulkan) to the officially supported `android-sdk-opengl`.
+Installed the signed release on S25 without uninstalling or clearing data. The previously
+failing pair survived 10 rounds at 200 ms, then 50 rounds at 100 ms: 120 tab-switch taps with
+the same PID 32256. The app's journal showed Adreno OpenGL ES initialization and no native
+crash. A further full Record → Segments → Profile → Activities → Record pass was captured
+on video and inspected as frames; no outgoing map/panel overlap was observed. This is a
+device-verified mitigation, not a proof of the exact Vulkan lifetime defect or all-device
+stability. Upstream reports a matching render offset on Android 16:
+https://github.com/maplibre/maplibre-native/issues/4274.
+
+Added `android/scripts/tab-switch-smoke.rb`: discovers navigation bounds from UIAutomator,
+checks the foreground app and PID, stops immediately on process death, and never installs,
+clears logs/data, or starts a recording. Run from the repo with an unlocked idle Record tab:
+`ruby android/scripts/tab-switch-smoke.rb RFCY904ZXQY 10 0.2`.
+The native race is not covered by a JVM-only test; this device loop is its regression check.
+
+All 153 Android unit tests, app debug lint, debug assembly and signed release assembly pass.
+An extra emulator run could not be completed: the AVD disappeared from ADB after launch.
+S25 verification is complete and the OpenGL release remains installed. The UI skill's
+render-and-inspect requirement informed the separate immediate-navigation visual policy;
+no GPS/fusion, activity files, or map geometry was changed by this crash mitigation.
