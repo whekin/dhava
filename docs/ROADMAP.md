@@ -71,6 +71,33 @@ skeleton and deployment scaffolding.
   discovery; consider a native desktop shell only if background/card-insertion import
   proves valuable
 
+## Future — Wearable enrichment through Health Connect
+
+- Read heart rate for the ride window through Android Health Connect, so one integration
+  covers every wearable whose own app publishes there — Mi Band, Galaxy Watch, Amazfit,
+  Fitbit, Garmin — instead of a reversed per-vendor BLE protocol
+- Treat it strictly as post-ride enrichment: Health Connect exposes no live stream, and
+  the owning app may publish only after its own cloud sync, so the fetch must be
+  re-runnable — on Finish, on opening the activity, and on explicit request — rather
+  than a single attempt whose failure is permanent
+- Keep it out of fusion: heart rate never touches gate timing, uncertainty or the
+  canonical artifact. Store it as a versioned enrichment sidecar beside the activity,
+  preserving the writing package, device and recording method as provenance
+- Report coverage as honestly as GPS accuracy is reported — ride-window coverage and
+  sample interval — because a watch outside a started workout may publish only one
+  sample every few minutes, which is a different product than a per-second trace
+- Never accept it as anti-cheat evidence: it arrives from another app's store and is
+  trivially forged, unlike the phone's own raw IMU
+- Leave live heart rate out of scope until a specific device is confirmed to broadcast
+  the standard BLE Heart Rate Service; Health Connect cannot supply it
+- Raw wearable IMU stays out of fusion entirely: no sanctioned API exposes it, and wrist
+  motion is not frame motion
+- Start with a read-only probe on real watch data — source package, sample count,
+  median and p95 interval, ride-window coverage — and decide on any UI from those
+  numbers, not from the assumption that the watch writes a dense trace
+- Play distribution of health reads needs a declared data type and a rationale/privacy
+  policy intent filter; alpha sideloading does not
+
 ## Future hypothesis — Alternate line variants
 
 - Explore grouping mutually exclusive lines under one rider-facing trail/segment family:

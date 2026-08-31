@@ -3171,8 +3171,9 @@ system Power saving disables locked-screen GPS, links to Battery Saver settings 
 unsafe “record anyway” path. Health now records both active mode and persistent setting.
 Unit regressions cover all four location-changing modes and the charging-masked case;
 recording/feature unit tests, both module lints and signed release assembly pass. The signed
-release was installed over the S25 with all ride data preserved. Final rendered-dialog check
-is pending only because the phone locked after installation.
+release was installed over the S25 with all ride data preserved. Rendered-dialog check was
+completed by the user on the S25 on 2026-09-01 and reported working; this closes the only
+pending item of this entry.
 
 ## 2026-08-31 — Tab-switch native crash: OpenGL mitigation and immediate navigation
 
@@ -3208,3 +3209,51 @@ An extra emulator run could not be completed: the AVD disappeared from ADB after
 S25 verification is complete and the OpenGL release remains installed. The UI skill's
 render-and-inspect requirement informed the separate immediate-navigation visual policy;
 no GPS/fusion, activity files, or map geometry was changed by this crash mitigation.
+
+## 2026-09-01 — Power-save guard confirmed; wearable data scoped to Health Connect
+
+The user ran the power-saving guard on the physical S25 and reported the dialog rendering
+and behaving as intended, which closes the only item left open by the 2026-08-31 entry.
+
+Competitive context, recorded because it will shape later phases. A second local app,
+Bike Yard, is in the same niche, built by an acquaintance, with a social layer and
+leaderboards shaped closely after Strava. It does not collide with the current path:
+shared segments, leaderboards, KOM verification and social features are explicitly frozen,
+and Nakvali is presently an offline recorder with local segments. What separates Nakvali is
+the timing engine — directed gates, crossings interpolated between fixes, reported
+uncertainty, countable-versus-uncountable runs, immutable on-device raw, and the IMU stream
+as a forgery-resistant signature — none of which lives in a social feed. Three collaboration
+shapes were considered and none chosen: Nakvali as a timing engine whose segment results
+(time, uncertainty, algorithm version) another app consumes while it owns the social layer;
+a shared segment identity and geometry with separate leaderboards per app, so one trail is
+not three unrelated boards; or nothing beyond the GPX/FIT export that already exists. The
+decision is deliberately deferred until local segments are field-validated, because before
+that there is nothing to offer, and an unvalidated gate/uncertainty model should not be
+handed out.
+
+Researched what a Mi Band 10 can contribute. There is no official SDK; the three real paths
+are a standard BLE Heart Rate Service broadcast if the firmware exposes one, Health Connect,
+and reversing the proprietary encrypted protocol. Chose the Health Connect direction: it is
+one integration covering every wearable whose own app writes there, rather than a per-vendor
+protocol that breaks with firmware. `minSdk = 34` means the provider ships inside the
+platform, so no install/availability branching is needed beyond `getSdkStatus()` reporting
+`UPDATE_REQUIRED`. The current stable client is `androidx.health.connect:connect-client`
+1.1.0, confirmed against Google Maven metadata. Raw wearable IMU is unavailable through any
+sanctioned API and wrist motion is not frame motion, so it is not a fusion candidate.
+
+Four constraints shaped the recorded design. Health Connect has no live stream, so heart
+rate cannot appear on the recording screen through this path. The owning app may publish
+only after its own cloud sync, so a single fetch at Finish would frequently return nothing
+and the enrichment must be re-runnable. Sample density is unknown and writer-dependent — a
+watch outside a started workout may emit a sample every few minutes — so coverage must be
+surfaced the same way GPS accuracy is. And because the data comes from another app's store,
+it is trivially forged and must never be treated as anti-cheat evidence.
+
+Written up as `Future — Wearable enrichment through Health Connect` in `docs/ROADMAP.md`.
+No code was written and nothing was added to `docs/DECISIONS.md`: this is a recorded
+direction, not an accepted architecture decision, and the numbers that would justify one do
+not exist yet. When picked up, the first step is a read-only probe reporting source package,
+sample count, median and p95 sample interval and ride-window coverage for a real ride,
+measured on the S25. Open question left for later: whether Nakvali should also write an
+`ExerciseSessionRecord` back to Health Connect so rides surface in other apps, which is a
+write into the user's health store and needs explicit opt-in.
