@@ -26,6 +26,14 @@ Common checkpoint fields include:
 - raw file size;
 - GPS/IMU/barometer counts since the current process began;
 - age of the last GPS callback;
+- active location provider and whether Android reports it enabled;
+- Android's active location power-save mode (`0` means unchanged; non-zero
+  modes alter or disable location while the screen is off), plus the persisted
+  system Power Saving switch so charging cannot mask the future ride state;
+- whether the GNSS engine is started, time to first fix, visible satellites
+  and satellites used in the newest fix;
+- whether Nakvali's transport cadence reduction is active (it never changes
+  the provider away from direct GPS);
 - writer critical/IMU queue depths and cumulative IMU overflow count;
 - Android thermal status, battery percentage and charging state;
 - active session time, pause state and restart gap.

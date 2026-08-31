@@ -1,5 +1,6 @@
 package com.nakvali.core.recording
 
+import android.os.PowerManager
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -79,5 +80,32 @@ class RecordingHealthTest {
         assertTrue(""""exit_reason":13""" in encoded)
         assertFalse("pss_kb" in encoded)
         assertFalse("battery_percent" in encoded)
+    }
+
+    @Test
+    fun `gnss provenance and status are encoded without coarse fallback ambiguity`() {
+        val encoded = RecordingHealthJson.encodeToString(
+            RecordingHealthEntry(
+                timestampMs = 1_000,
+                kind = RecordingHealthLog.KIND_HEARTBEAT,
+                locationProvider = "gps",
+                locationProviderEnabled = true,
+                locationPowerSaveMode = PowerManager.LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF,
+                systemPowerSavingConfigured = true,
+                recordingPowerSaving = false,
+                gnssStarted = true,
+                gnssTtffMs = 4_200,
+                gnssSatellitesVisible = 18,
+                gnssSatellitesUsed = 11,
+            ),
+        )
+
+        assertTrue(""""location_provider":"gps""" in encoded)
+        assertTrue(""""location_provider_enabled":true""" in encoded)
+        assertTrue(""""location_power_save_mode":1""" in encoded)
+        assertTrue(""""system_power_saving_configured":true""" in encoded)
+        assertTrue(""""recording_power_saving":false""" in encoded)
+        assertTrue(""""gnss_ttff_ms":4200""" in encoded)
+        assertTrue(""""gnss_satellites_used":11""" in encoded)
     }
 }

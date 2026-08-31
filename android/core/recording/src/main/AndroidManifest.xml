@@ -7,6 +7,7 @@
         declare it. The app already requests this permission, so this adds no
         new capability.
     -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!--

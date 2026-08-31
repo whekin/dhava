@@ -116,6 +116,7 @@ fun RecordScreen(
 
     var permissionDenied by remember { mutableStateOf(false) }
     var showBatteryDialog by remember { mutableStateOf(false) }
+    var showLocationPowerSavingDialog by remember { mutableStateOf(false) }
     var showBackgroundLocationDialog by remember { mutableStateOf(false) }
     var backgroundPromptDeclinedThisRun by remember { mutableStateOf(false) }
     var mapFollowing by remember { mutableStateOf(true) }
@@ -174,6 +175,14 @@ fun RecordScreen(
         if (viewModel.shouldAskBatteryExemption()) showBatteryDialog = true else beginRecording()
     }
 
+    fun startAfterLocationPowerCheck() {
+        if (viewModel.isScreenOffLocationBlocked()) {
+            showLocationPowerSavingDialog = true
+        } else {
+            startAndMaybeAskBattery()
+        }
+    }
+
     fun hasBackgroundLocation(): Boolean =
         ContextCompat.checkSelfPermission(
             context,
@@ -185,7 +194,7 @@ fun RecordScreen(
         if (!hasBackgroundLocation() && !backgroundPromptDeclinedThisRun) {
             showBackgroundLocationDialog = true
         } else {
-            startAndMaybeAskBattery()
+            startAfterLocationPowerCheck()
         }
     }
 
@@ -193,7 +202,14 @@ fun RecordScreen(
         ActivityResultContracts.StartActivityForResult(),
     ) {
         showBackgroundLocationDialog = false
-        startAndMaybeAskBattery()
+        startAfterLocationPowerCheck()
+    }
+
+    val powerSavingSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        showLocationPowerSavingDialog = false
+        startAfterLocationPowerCheck()
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -215,6 +231,7 @@ fun RecordScreen(
             continueAfterForegroundLocation()
         } else {
             val permissions = buildList {
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
                 add(Manifest.permission.POST_NOTIFICATIONS)
                 // Optional: lets the recorder recognize a vehicle in flat city
@@ -340,6 +357,19 @@ fun RecordScreen(
             beginRecording()
         }
     }
+    if (showLocationPowerSavingDialog) {
+        LocationPowerSavingDialog(
+            onOpenSettings = {
+                powerSavingSettingsLauncher.launch(
+                    Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
+                )
+            },
+            onDismiss = {
+                showLocationPowerSavingDialog = false
+                pendingContinueId = null
+            },
+        )
+    }
     if (showBackgroundLocationDialog) {
         val optionLabel = context.packageManager.backgroundPermissionOptionLabel.toString()
         BackgroundLocationDialog(
@@ -357,7 +387,7 @@ fun RecordScreen(
             onRecordAnyway = {
                 showBackgroundLocationDialog = false
                 backgroundPromptDeclinedThisRun = true
-                startAndMaybeAskBattery()
+                startAfterLocationPowerCheck()
             },
         )
     }
@@ -1017,6 +1047,30 @@ private fun BatteryExemptionDialog(onDismiss: () -> Unit) {
             ) { Text("Allow") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
+}
+
+@Composable
+private fun LocationPowerSavingDialog(
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Power saving blocks GPS") },
+        text = {
+            Text(
+                "System Power saving is set to turn off or restrict location when the screen " +
+                    "is locked. Nakvali cannot record the ride reliably, even with unrestricted " +
+                    "app battery access. Turn Power saving off before starting.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenSettings) { Text("Open settings") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
     )
 }
 

@@ -3071,3 +3071,105 @@ but computing distance-to-next in the recording path is recorder work, not a UI 
 `RecordingState.Recording` has no field for it. Contour lines and hillshade are blocked on a
 terrain tile source — OpenFreeMap ships neither, and `ne2_shaded` is global relief that says
 nothing at riding zoom. Both want a decision before code.
+## 2026-08-29 — Galaxy S25 field recording: fragmented GPS and city-wide Activity camera
+
+Diagnosed activity `b61ce822…` from its exported immutable raw recording after Activity
+Detail showed a sparse Fusion trace spanning from the mountain into Tbilisi. The 5 h 3 min
+recording contains 5,100 GPS fixes, but only 2,940 pass the canonical ≤20 m gate. Median raw
+accuracy is 10.8 m; p95 is 1,194 m and the worst reported radius is 4,325 m. Raw contains
+102 consecutive jumps over 500 m (maximum 14.3 km), while current `gps-bounded-0.10`
+correctly rejects those coarse fixes rather than turning them into finalized anchors.
+
+The accepted evidence is still extremely discontinuous: current finalization produces
+8,188 points split into 261 drawable spans at the Activity map's 3 s gap boundary, with a
+longest accepted-fix gap of 52.9 min. The recording stayed active from 16:32 until the only
+pause at about 21:35 and later captured real, accurate movement through the city. Canonical
+classification reports 4.32 km ride and 4.00 km likely-motorized transport, but Activity
+Detail's `cameraBoundsPoints(Fusion)` fits every finalized point regardless of semantic
+state. That combination — honest line breaks plus full-recording bounds — explains the
+apparently scattered, over-zoomed map.
+
+Ruled out Nakvali's transport power profile as the trigger at the two-minute failure point.
+Replaying the accepted GPS altitude through its five-fix median and 45 s climb rule produces
+no qualifying entry until almost the end of the recording, and the raw event stream contains
+no platform `in_vehicle` transition. An initial inference from persisted IMU frequency was
+discarded because confirmed-STILL persistence independently reduces raw rows to 20 Hz and
+therefore cannot identify the active acquisition profile. The remaining source question is
+why the Samsung fused provider stopped supplying GNSS-quality fixes about two minutes into
+this outing (terrain, system behavior, or a provider regression); the phone disconnected
+before current app-op state could be inspected. No production code was changed. A follow-up
+should A/B screen-on versus locked recording while capturing `LocationAvailability`, GNSS
+satellites-used-in-fix and the active recorder power profile, then decide whether recording
+should use Android's direct GPS provider rather than accept fused coarse fallbacks. The UI
+should also decide whether its default camera prioritizes ride/downhill geometry and whether
+severe rejection/gap quality deserves an above-the-fold warning.
+
+Follow-up primary-source review of current Android guidance and OpenTracks, GPSLogger,
+OsmAnd, OwnTracks and Traccar is captured in
+`docs/research/android-gnss-tracker-location-sources.md`. The closest sport recorders use
+an explicit platform `GPS_PROVIDER`; navigation and telemetry apps more often offer both
+fused and platform backends because their continuity requirements differ. Recommendation,
+not yet an accepted architecture decision: make direct GNSS the canonical ride source,
+keep fused location separate for browse/pre-start UX, preserve the existing location FGS
+and partial wakelock, record GNSS-status diagnostics, and validate the change with a paired
+screen-on/screen-off field test on the affected Galaxy S25.
+
+## 2026-08-29 — Android canonical recording moved from FLP to direct GNSS
+
+Implemented the provider boundary selected after the Galaxy S25 field failure. The raw ride
+path no longer owns a `FusedLocationProviderClient`; `RecordingLocationSource` requests the
+platform `GPS_PROVIDER` explicitly with an unbatched high-accuracy request. Normal cadence
+remains 1 s (500 ms minimum). Transport power saving remains 5 s (2.5 s minimum) but changes
+only cadence — both policies are locked to `gps` by unit tests. Browse/live-map preview still
+uses fused location independently. The existing warm-up now reads direct GPS and prefers a
+≤15 m fix; its bounded timeout may still begin IMU/barometer capture with an honest GNSS gap.
+
+Registered `GnssStatus.Callback` beside the direct location listener. Once-per-minute and
+start/stop health records now carry provider name/enabled state, GNSS engine state, TTFF,
+visible/used satellite counts, and Nakvali's transport power-saving state. Missing satellite
+position remains an honest raw gap while IMU and barometer continue. Declared and requests
+the Android 12+ coarse/fine permission pair while continuing to require granted fine location
+before direct GNSS registration. Updated the raw/health contracts and recorded the durable
+architecture decision in `docs/DECISIONS.md`.
+
+Verification: `:core:recording:testDebugUnitTest`, `:core:recording:lintDebug` and full
+`assembleDebug` pass. Installed the APK on emulator-5554, started a recording, injected GPS,
+turned the screen off and inspected system state: Android showed
+`com.nakvali.app → gps`, high accuracy, 1 s / 500 ms, while the location foreground service
+remained active. The resulting raw file contained 33 GPS fixes and finalized successfully;
+the health heartbeat and stop record both reported `location_provider: gps`, provider enabled,
+and GNSS satellite counters. Emulator-injected coordinates naturally used zero satellites.
+Open question requiring the physical device: repeat the paired screen-on/screen-off pass on
+the Galaxy S25 and inspect real satellites-used/TTFF plus cadence before treating the Samsung
+failure as closed.
+
+## 2026-08-31 — The S25 failure was global Power Saving, not permissions or FLP
+
+Diagnosed direct-GNSS activity `a890973e…` from its 58 MB raw export and Android's retained
+battery history. Direct GPS fixed the first failure mode: median accuracy is 10.0 m, p95
+12.6 m, and 987/990 fixes pass the canonical 20 m gate. But only 990 fixes exist across a
+237 min recording, split by 28 gaps longer than 5 s; the longest is 31.1 min.
+
+Battery history supplies the missing causal evidence. Every dense raw burst matches screen
+on, and Android toggles the Nakvali UID's GNSS attribution with the display: for example
+`16:17:12 +screen/+gps`, `16:17:30 -screen/-gps`, then no raw fixes until the next wake at
+`16:48:33 +screen/+gps`. The same sequence repeats throughout the ride. Nakvali remained a
+foreground location service, held `nakvali:recording` as a long partial wake lock and was in
+the device-idle user whitelist. Fine/coarse/background location and background app-op were
+all granted.
+
+The system cause is explicit in `dumpsys power`: Battery Saver was enabled continuously from
+August 23 with policy `location_mode=1`, Android's
+`LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF`. Per-app Unrestricted cannot override it. The
+previous FLP build obscured this by emitting kilometre-scale network estimates after GNSS
+stopped; direct GPS turned the same system behavior into honest gaps.
+
+Added a pre-start/Continue guard for every non-`NO_CHANGE` Android location power-save mode,
+plus the persisted AOSP `low_power` switch because charging temporarily reports `NO_CHANGE`
+even though unplugging will reactivate the unsafe policy. The blocking dialog explains that
+system Power saving disables locked-screen GPS, links to Battery Saver settings and has no
+unsafe “record anyway” path. Health now records both active mode and persistent setting.
+Unit regressions cover all four location-changing modes and the charging-masked case;
+recording/feature unit tests, both module lints and signed release assembly pass. The signed
+release was installed over the S25 with all ride data preserved. Final rendered-dialog check
+is pending only because the phone locked after installation.

@@ -8,6 +8,7 @@ import android.os.Debug
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
+import android.provider.Settings
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -44,6 +45,15 @@ data class RecordingHealthEntry(
     @SerialName("process_imu_count") val processImuCount: Int? = null,
     @SerialName("process_baro_count") val processBaroCount: Int? = null,
     @SerialName("last_gps_age_ms") val lastGpsAgeMs: Long? = null,
+    @SerialName("location_provider") val locationProvider: String? = null,
+    @SerialName("location_provider_enabled") val locationProviderEnabled: Boolean? = null,
+    @SerialName("location_power_save_mode") val locationPowerSaveMode: Int? = null,
+    @SerialName("system_power_saving_configured") val systemPowerSavingConfigured: Boolean? = null,
+    @SerialName("recording_power_saving") val recordingPowerSaving: Boolean? = null,
+    @SerialName("gnss_started") val gnssStarted: Boolean? = null,
+    @SerialName("gnss_ttff_ms") val gnssTtffMs: Int? = null,
+    @SerialName("gnss_satellites_visible") val gnssSatellitesVisible: Int? = null,
+    @SerialName("gnss_satellites_used") val gnssSatellitesUsed: Int? = null,
     val paused: Boolean? = null,
     @SerialName("thermal_status") val thermalStatus: Int? = null,
     @SerialName("battery_percent") val batteryPercent: Int? = null,
@@ -69,6 +79,8 @@ internal data class RecordingHealthInput(
     val imuCount: Int,
     val baroCount: Int,
     val lastGpsAgeMs: Long?,
+    val gnssDiagnostics: RecordingGnssDiagnostics,
+    val recordingPowerSaving: Boolean,
     val paused: Boolean,
     val restartGapMs: Long? = null,
 )
@@ -96,6 +108,19 @@ internal object RecordingHealthMetrics {
             processImuCount = input.imuCount,
             processBaroCount = input.baroCount,
             lastGpsAgeMs = input.lastGpsAgeMs,
+            locationProvider = input.gnssDiagnostics.provider,
+            locationProviderEnabled = input.gnssDiagnostics.providerEnabled,
+            locationPowerSaveMode = powerManager?.locationPowerSaveMode,
+            systemPowerSavingConfigured = Settings.Global.getInt(
+                context.contentResolver,
+                "low_power",
+                0,
+            ) == 1,
+            recordingPowerSaving = input.recordingPowerSaving,
+            gnssStarted = input.gnssDiagnostics.gnssStarted,
+            gnssTtffMs = input.gnssDiagnostics.ttffMs,
+            gnssSatellitesVisible = input.gnssDiagnostics.satellitesVisible,
+            gnssSatellitesUsed = input.gnssDiagnostics.satellitesUsed,
             paused = input.paused,
             thermalStatus = powerManager?.currentThermalStatus,
             batteryPercent = batteryManager

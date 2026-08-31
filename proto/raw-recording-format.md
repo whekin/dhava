@@ -23,6 +23,12 @@ Rules:
   for all sample types (device must map sensor-event timestamps to epoch consistently).
 - Optional fields (`altitude_m`, `accuracy_m`, `speed_mps`, `bearing_deg`, `mag`)
   are omitted or `null` when unavailable.
+- Android ride recordings source `gps` lines from the platform's explicit
+  `LocationManager.GPS_PROVIDER`. They are GNSS-derived evidence; fused,
+  network and passive coordinates must not be written into this stream. If
+  GNSS is unavailable, the raw recording contains a timestamp gap while IMU
+  and barometer capture continue. Fused location may still be used outside
+  the recording contract for browse-map centering or other non-authoritative UI.
 - `meta` line first; order of other lines is best-effort chronological, readers
   must not assume strict global ordering (sensor callbacks interleave).
 - Units: SI. accel m/s² (raw, gravity included), gyro rad/s, mag µT, pressure hPa.
@@ -49,8 +55,8 @@ Rules:
   permission is granted. They are platform hints kept as evidence for later analysis,
   never a substitute for sensor evidence: classification must stay reproducible from
   GPS/IMU/baro alone, and a reader that ignores these lines must reach the same result.
-- While the recorder judges the rider to be in a vehicle, GPS drops to a 5 s balanced
-  fix and accelerometer/gyroscope acquisition to 25 Hz. This is a deliberate, bounded
+- While the recorder judges the rider to be in a vehicle, direct GNSS cadence drops to
+  5 s and accelerometer/gyroscope acquisition to 25 Hz. This is a deliberate, bounded
   loss of transit fidelity; the rate returns to full as soon as a descent, trail-like
   motion, a long stop or a manual pause ends the vehicle state.
 - `event` action `imu_overflow:<count>` is diagnostic only: it reports IMU rows

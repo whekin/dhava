@@ -791,3 +791,38 @@ activity results are always recomputed canonically from the raw on-device file.
   other's anchor as it takes over, so distance restarts from the point where riding
   actually resumed.
 - Versioned as `gps-bounded-0.10`; artifacts are recomputed on device from raw.
+## 2026-08-29 — Canonical Android ride positions come from direct GNSS
+
+- Android raw ride `gps` lines use the platform `LocationManager.GPS_PROVIDER`,
+  not Google Play services fused location. A ride is timing and recomputation
+  evidence, so a GNSS gap is preferable to a temporally fresh network estimate
+  with opaque provenance.
+- Fused location remains appropriate for non-authoritative browse-map and
+  pre-start centering. It must never be silently merged into the immutable raw
+  ride stream. Recording warm-up readiness is established by an acceptable
+  direct-GPS fix; the bounded preparation timeout may still begin sensor capture
+  with an honest GNSS gap rather than block the whole ride.
+- Transport power saving may reduce direct-GPS cadence but never changes the
+  provider. The foreground location service and partial wake lock remain the
+  screen-off lifecycle mechanism.
+- The local health sidecar records GNSS start/stop, TTFF, satellites visible
+  and used, provider-enabled state and Nakvali's active cadence profile. These
+  diagnostics explain a missing fix; they are not fusion input and do not
+  invent coordinates.
+
+## 2026-08-31 — System location power saving blocks ride start
+
+- Per-app Unrestricted battery access, background/fine location, a location
+  foreground service and a partial wake lock do not override Android's global
+  location power-save policy. On the Galaxy S25,
+  `LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF` stopped GNSS at every screen-off
+  boundary while all four of those protections remained active.
+- Record and Continue are blocked whenever Android reports a non-`NO_CHANGE`
+  location power-save mode or the persistent system Power Saving switch is on.
+  The latter must be checked separately because charging temporarily masks the
+  active location mode; the rider normally unplugs immediately before starting.
+- The dialog links to system Battery Saver settings and offers Cancel, not
+  “record anyway”. Starting a multi-hour ride known to contain only screen-on
+  GPS bursts is not a meaningful degraded mode.
+- Health sidecars persist both active `location_power_save_mode` and the stored
+  system Power Saving flag so future field failures remain explainable.

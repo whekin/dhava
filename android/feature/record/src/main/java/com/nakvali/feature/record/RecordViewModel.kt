@@ -2,6 +2,7 @@ package com.nakvali.feature.record
 
 import android.app.Application
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.nakvali.core.recording.Bike
@@ -15,6 +16,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+internal fun blocksReliableScreenOffLocation(
+    locationPowerSaveMode: Int,
+    powerSavingConfigured: Boolean = false,
+): Boolean = powerSavingConfigured || locationPowerSaveMode != PowerManager.LOCATION_MODE_NO_CHANGE
+
 /**
  * Thin bridge between the Record UI and the recording core: observes the
  * repository flows and forwards start/stop/save commands. Manual wiring —
@@ -23,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class RecordViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
+        private const val SYSTEM_POWER_SAVING_SETTING = "low_power"
         /**
          * Process-scoped "asked already" latch for the battery-exemption
          * dialog: at most one prompt per app run, asked again on the next
@@ -77,6 +84,32 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         if (exempt) return false
         batteryExemptionAskedThisRun = true
         return true
+    }
+
+    /**
+     * True when the system-wide battery saver changes location behavior with
+     * the screen off. Per-app Unrestricted access cannot override this policy:
+     * on the Galaxy S25, mode GPS_DISABLED_WHEN_SCREEN_OFF stopped the GNSS
+     * engine at every screen-off boundary while the location FGS and wake lock
+     * both remained active.
+     */
+    fun isScreenOffLocationBlocked(): Boolean {
+        val application = getApplication<Application>()
+        val powerManager = ContextCompat.getSystemService(application, PowerManager::class.java)
+            ?: return false
+        // While charging, Android temporarily reports NO_CHANGE even when the
+        // user's persistent Battery Saver switch remains on. A rider then
+        // unplugs the phone and immediately loses GNSS at screen-off. Read the
+        // stored AOSP setting as well so charging cannot hide the unsafe state.
+        val powerSavingConfigured = Settings.Global.getInt(
+            application.contentResolver,
+            SYSTEM_POWER_SAVING_SETTING,
+            0,
+        ) == 1
+        return blocksReliableScreenOffLocation(
+            locationPowerSaveMode = powerManager.locationPowerSaveMode,
+            powerSavingConfigured = powerSavingConfigured,
+        )
     }
 
     fun stopRecording() = RecordingService.stop(getApplication())

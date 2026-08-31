@@ -13,6 +13,7 @@
         - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: one-time prompt asking the
           user to exempt Nakvali from aggressive battery managers (same incident)
     -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Optional but strongly recommended: lets Android restart the location
          foreground service after an OEM process kill while the screen/app is

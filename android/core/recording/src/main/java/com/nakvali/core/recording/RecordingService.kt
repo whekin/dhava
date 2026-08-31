@@ -16,6 +16,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Location
 import android.os.Build
 import android.os.HandlerThread
 import android.os.IBinder
@@ -33,12 +34,6 @@ import com.google.android.gms.location.ActivityTransition
 import com.google.android.gms.location.ActivityTransitionRequest
 import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import com.nakvali.core.fusion.FusionCore
 import com.nakvali.fusion.LiveFusion
 import com.nakvali.fusion.LiveSegmentEvent
@@ -86,8 +81,6 @@ class RecordingService : Service() {
         private const val ACTION_ACTIVITY_TRANSITION =
             "com.nakvali.core.recording.action.ACTIVITY_TRANSITION"
 
-        private const val GPS_INTERVAL_MS = 1_000L
-        private const val GPS_MIN_INTERVAL_MS = 500L
         private const val LIVE_IMU_INTERVAL_MS = 20L
         private const val RAW_IMU_INTERVAL_US = 5_000
         private const val MAG_INTERVAL_US = 20_000
@@ -111,11 +104,10 @@ class RecordingService : Service() {
          *
          * A transit is secondary data by design: the product tracks descents,
          * and a shuttle lap only has to leave a readable line on the map plus
-         * enough motion to keep proving it was a vehicle. GPS moves to a
-         * 5-second balanced fix and the IMU to 25 Hz, which is where most of
-         * a long lift day's battery goes.
+         * enough motion to keep proving it was a vehicle. Direct GNSS moves
+         * to a 5-second cadence and the IMU to 25 Hz, which is where most of
+         * a long lift day's battery goes. Provider provenance never changes.
          */
-        private const val TRANSPORT_GPS_INTERVAL_MS = 5_000L
         private const val TRANSPORT_IMU_INTERVAL_US = 40_000
 
         /**
@@ -189,7 +181,7 @@ class RecordingService : Service() {
     private val healthWriteMutex = Mutex()
     private lateinit var repository: RecordingRepository
     private lateinit var sensorManager: SensorManager
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var recordingLocationSource: RecordingLocationSource? = null
     private lateinit var notificationManager: NotificationManager
 
     /** All sensor + location callbacks land on this thread. */
@@ -264,6 +256,7 @@ class RecordingService : Service() {
     private val imuPersistenceLock = Any()
     private val imuPersistenceBuffer = StationaryImuPersistenceBuffer()
     @Volatile private var lastGpsReceivedElapsedMs = Long.MIN_VALUE
+    @Volatile private var lastGnssDiagnostics = RecordingGnssDiagnostics()
     private var lastHealthHeartbeatElapsedMs = Long.MIN_VALUE
 
     // Latest gyro/mag samples, paired with accelerometer events (see below).
@@ -285,7 +278,6 @@ class RecordingService : Service() {
         super.onCreate()
         repository = RecordingRepository.getInstance(this)
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
     }
@@ -554,7 +546,6 @@ class RecordingService : Service() {
         Log.i(LOG_TAG, "transport power save ${if (wanted) "on" else "off"}")
         sensorManager.unregisterListener(sensorListener)
         registerSensors()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
         requestLocationUpdates()
     }
 
@@ -792,6 +783,7 @@ class RecordingService : Service() {
         lastLiveImuMs = Long.MIN_VALUE
         lastRawImuNs = Long.MIN_VALUE
         lastGpsReceivedElapsedMs = Long.MIN_VALUE
+        lastGnssDiagnostics = RecordingGnssDiagnostics()
         lastHealthHeartbeatElapsedMs = SystemClock.elapsedRealtime()
         latestGyro = null
         latestMag = null
@@ -889,7 +881,11 @@ class RecordingService : Service() {
 
     private fun tearDownCapture() {
         sensorManager.unregisterListener(sensorListener)
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        recordingLocationSource?.let { source ->
+            lastGnssDiagnostics = source.diagnostics()
+            source.stop()
+        }
+        recordingLocationSource = null
         stopApproachTicks()
         removeActivityRecognition()
         runCatching { unregisterReceiver(activityTransitionReceiver) }
@@ -1100,83 +1096,78 @@ class RecordingService : Service() {
     // --- location ---------------------------------------------------------------
 
     private fun requestLocationUpdates() {
-        val looper = sensorThread?.looper ?: return
-        val request = if (powerSaving) {
-            LocationRequest.Builder(
-                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-                TRANSPORT_GPS_INTERVAL_MS,
-            ).setMinUpdateIntervalMillis(TRANSPORT_GPS_INTERVAL_MS / 2).build()
-        } else {
-            LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, GPS_INTERVAL_MS)
-                .setMinUpdateIntervalMillis(GPS_MIN_INTERVAL_MS)
-                .build()
-        }
+        val thread = sensorThread ?: return
+        val source = recordingLocationSource ?: RecordingLocationSource(
+            context = this,
+            handler = HandlerCompat.createAsync(thread.looper),
+            onLocation = ::onLocation,
+        ).also { recordingLocationSource = it }
         try {
-            fusedLocationClient.requestLocationUpdates(request, locationCallback, looper)
+            source.start(powerSaving)
         } catch (_: SecurityException) {
             // Permission checked in startRecording(); revoked mid-flight —
             // keep recording IMU/baro only.
+        } catch (error: IllegalArgumentException) {
+            // A device without the named GNSS provider records the remaining
+            // sensors and exposes the missing provider in health diagnostics.
+            Log.e(LOG_TAG, "Direct GPS provider unavailable", error)
         }
     }
 
-    private val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            for (location in result.locations) {
-                lastGpsReceivedElapsedMs = SystemClock.elapsedRealtime()
-                if (preparing && location.hasAccuracy() && location.accuracy <= 15f) warmGpsReady = true
-                lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
-                val writer = writer
-                if (writer == null || paused) continue
-                gpsCount++
-                val timestampMs = epochAnchorMs + location.elapsedRealtimeNanos / 1_000_000
-                liveFusion?.pushGps(
-                    timestampMs = timestampMs,
-                    lat = location.latitude,
-                    lon = location.longitude,
-                    altitudeM = if (location.hasAltitude()) location.altitude else null,
-                    accuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else null,
-                    speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
-                    bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
-                )?.let { snapshot ->
-                    lastSpeedMps = snapshot.speedMps.toFloat()
-                    stationary = snapshot.stationary
-                    liveDistanceM = snapshot.distanceM
-                    liveDescentM = snapshot.descentM
-                    // Segment timing consumes the fused position, never the
-                    // raw fix: the live map, the live clock and the canonical
-                    // result must all describe the same track.
-                    segmentTracker?.push(
-                        timestampMs = snapshot.timestampMs,
-                        lat = snapshot.lat,
-                        lon = snapshot.lon,
-                        sectionId = liveSectionId,
-                    )?.forEach(::onSegmentEvent)
-                    appendLiveTrack(
-                        LiveTrackPoint(
-                            timestampMs = snapshot.timestampMs,
-                            lat = snapshot.lat,
-                            lon = snapshot.lon,
-                            speedMps = snapshot.speedMps,
-                            stationary = snapshot.stationary,
-                            sectionId = liveSectionId,
-                        ),
-                    )
-                }
-                writer.write(
-                    RecordLine.Gps(
-                        // elapsedRealtimeNanos is on the same monotonic clock
-                        // as SensorEvent.timestamp — one anchor for everything.
-                        timestampMs = timestampMs,
-                        lat = location.latitude,
-                        lon = location.longitude,
-                        altitudeM = if (location.hasAltitude()) location.altitude else null,
-                        accuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else null,
-                        speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
-                        bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
-                    ),
-                )
-            }
+    private fun onLocation(location: Location) {
+        lastGpsReceivedElapsedMs = SystemClock.elapsedRealtime()
+        if (preparing && location.hasAccuracy() && location.accuracy <= 15f) warmGpsReady = true
+        lastAccuracyM = if (location.hasAccuracy()) location.accuracy else null
+        val writer = writer
+        if (writer == null || paused) return
+        gpsCount++
+        val timestampMs = epochAnchorMs + location.elapsedRealtimeNanos / 1_000_000
+        liveFusion?.pushGps(
+            timestampMs = timestampMs,
+            lat = location.latitude,
+            lon = location.longitude,
+            altitudeM = if (location.hasAltitude()) location.altitude else null,
+            accuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else null,
+            speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
+            bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
+        )?.let { snapshot ->
+            lastSpeedMps = snapshot.speedMps.toFloat()
+            stationary = snapshot.stationary
+            liveDistanceM = snapshot.distanceM
+            liveDescentM = snapshot.descentM
+            // Segment timing consumes the fused position, never the
+            // raw fix: the live map, the live clock and the canonical
+            // result must all describe the same track.
+            segmentTracker?.push(
+                timestampMs = snapshot.timestampMs,
+                lat = snapshot.lat,
+                lon = snapshot.lon,
+                sectionId = liveSectionId,
+            )?.forEach(::onSegmentEvent)
+            appendLiveTrack(
+                LiveTrackPoint(
+                    timestampMs = snapshot.timestampMs,
+                    lat = snapshot.lat,
+                    lon = snapshot.lon,
+                    speedMps = snapshot.speedMps,
+                    stationary = snapshot.stationary,
+                    sectionId = liveSectionId,
+                ),
+            )
         }
+        writer.write(
+            RecordLine.Gps(
+                // elapsedRealtimeNanos is on the same monotonic clock
+                // as SensorEvent.timestamp — one anchor for everything.
+                timestampMs = timestampMs,
+                lat = location.latitude,
+                lon = location.longitude,
+                altitudeM = if (location.hasAltitude()) location.altitude else null,
+                accuracyM = if (location.hasAccuracy()) location.accuracy.toDouble() else null,
+                speedMps = if (location.hasSpeed()) location.speed.toDouble() else null,
+                bearingDeg = if (location.hasBearing()) location.bearing.toDouble() else null,
+            ),
+        )
     }
 
     // --- durable health heartbeat ----------------------------------------------
@@ -1193,6 +1184,7 @@ class RecordingService : Service() {
         restartGapMs: Long? = null,
     ): RecordingHealthInput {
         val nowElapsedMs = SystemClock.elapsedRealtime()
+        val gnssDiagnostics = recordingLocationSource?.diagnostics() ?: lastGnssDiagnostics
         return RecordingHealthInput(
             timestampMs = System.currentTimeMillis(),
             kind = kind,
@@ -1206,6 +1198,8 @@ class RecordingService : Service() {
             lastGpsAgeMs = lastGpsReceivedElapsedMs
                 .takeIf { it != Long.MIN_VALUE }
                 ?.let { (nowElapsedMs - it).coerceAtLeast(0L) },
+            gnssDiagnostics = gnssDiagnostics,
+            recordingPowerSaving = powerSaving,
             paused = paused,
             restartGapMs = restartGapMs,
         )
