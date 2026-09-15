@@ -1,7 +1,7 @@
 //! Transport episodes and explicit rider corrections. All classification and
 //! derived totals stay in Rust; Android persists only the authored intervals.
 use crate::activity::{ActivityClassification, ActivityState, non_motorized_classifications};
-use crate::canonical::{CanonicalTrackPoint, RideTotals, ride_totals};
+use crate::canonical::{CanonicalTrackPoint, ElevationSource, RideTotals, ride_totals};
 use crate::gps_quality::geographic_distance_m;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -38,6 +38,7 @@ pub fn correct_transport(
     mut episodes: Vec<TransportEpisode>,
     started_at_ms: i64,
     ended_at_ms: i64,
+    elevation_source: ElevationSource,
 ) -> Result<TransportCorrection, TransportError> {
     episodes.sort_by_key(|e| e.started_at_ms);
     for (i, episode) in episodes.iter().enumerate() {
@@ -79,7 +80,7 @@ pub fn correct_transport(
         };
         point.activity_confidence = if motorized { 1.0 } else { label.confidence };
     }
-    let ride = ride_totals(&track);
+    let ride = ride_totals(&track, elevation_source);
     Ok(TransportCorrection {
         track,
         ride,
@@ -276,7 +277,9 @@ mod tests {
             .map(|i| point(i * 1_000, i as f64 * 5.0, 0, ActivityState::LikelyMotorized))
             .collect();
         let original = track.clone();
-        let without = correct_transport(track.clone(), vec![], 0, 99_000).unwrap();
+        let without =
+            correct_transport(track.clone(), vec![], 0, 99_000, ElevationSource::Barometric)
+                .unwrap();
         assert!(
             without
                 .track
@@ -292,6 +295,7 @@ mod tests {
             }],
             0,
             99_000,
+            ElevationSource::Barometric,
         )
         .unwrap();
         for (i, (before, after)) in track.iter().zip(&corrected.track).enumerate() {
@@ -356,7 +360,10 @@ mod tests {
                 },
             ],
         ] {
-            assert!(correct_transport(track.clone(), episodes, 0, 99_000).is_err());
+            assert!(
+                correct_transport(track.clone(), episodes, 0, 99_000, ElevationSource::Barometric)
+                    .is_err()
+            );
         }
     }
 

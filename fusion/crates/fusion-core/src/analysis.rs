@@ -37,7 +37,7 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.13";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.14";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;
@@ -146,13 +146,17 @@ pub fn analyze_recording(path: String) -> Result<RideAnalysis, FusionError> {
 /// exactly the accumulators [`analyze`] uses and none of its IMU work.
 ///
 /// This exists so continuing an interrupted ride can restore the live totals
-/// without paying for airtime detection over the full IMU stream.
+/// without paying for airtime detection over the full IMU stream. It therefore
+/// answers on the same signal the live screen is about to resume accumulating
+/// on: the barometer whenever the recording has one, so that a resume neither
+/// repeats nor loses the descent already ridden.
 pub(crate) fn distance_and_descent(recording: &ParsedRecording) -> (f64, f64) {
     let mut gps: Vec<GpsPoint> = recording.gps.clone();
     gps.sort_by_key(|p| p.timestamp_ms);
     let accepted = accuracy_filter(&gps);
     let (distance_m, _, _) = distance_and_moving_time(&accepted, &recording.events);
-    let (_, descent_m) = ascent_descent(&accepted);
+    let descent_m = crate::canonical::barometric_descent(&recording.baro)
+        .unwrap_or_else(|| ascent_descent(&accepted).1);
     (distance_m, descent_m)
 }
 

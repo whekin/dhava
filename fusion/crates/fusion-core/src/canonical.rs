@@ -52,10 +52,17 @@ const BAROMETRIC_EXPONENT: f64 = 0.190_294_957;
 ///
 /// Chosen from the offset's own physics rather than from the GPS cadence, so
 /// changing the fix rate — a power-saving profile, a tunnel — does not change
-/// how hard the offset is filtered. A minute-wide window still tracks weather
-/// drift closely while a treeline altitude excursion, which lasts seconds,
-/// cannot reach the finalized profile.
-const OFFSET_MEDIAN_HALF_WINDOW_MS: i64 = 30_000;
+/// how hard the offset is filtered.
+///
+/// GPS altitude error is not noise around a true value; it wanders, by metres,
+/// over minutes, and a minute-wide window passes that wander straight through
+/// into the anchored profile, where the accumulator reads it as terrain. On the
+/// rider's six-hour shuttle day the offset series spanned 68.5 m end to end and
+/// accumulated 319.5 m of descent entirely by itself at ±30 s. Widening to ±5
+/// minutes leaves 66.5 m of it, and ±15 minutes only 58.2 m — the knee is here.
+/// The window is centred, so a genuinely drifting weather field is tracked
+/// without lag; what a wider median removes is only the wander.
+const OFFSET_MEDIAN_HALF_WINDOW_MS: i64 = 300_000;
 
 /// Half-width of the running median a pressure sample is judged against.
 ///
@@ -276,7 +283,7 @@ pub(crate) fn finalize_observed(
     };
     analysis.algorithm_version = ALGORITHM_VERSION.to_owned();
 
-    let ride = ride_totals(&finalized_track);
+    let ride = ride_totals(&finalized_track, vertical.source);
 
     progress(CanonicalStage::Finalizing);
     Ok(CanonicalActivity {
@@ -517,16 +524,70 @@ fn gps_net_ascent_descent(raw: &[CanonicalTrackPoint]) -> (f64, f64) {
 }
 
 fn median_altitude(anchors: &[AltitudeAnchor]) -> f64 {
-    let mut values: Vec<_> = anchors.iter().map(|anchor| anchor.altitude_m).collect();
+    let values: Vec<_> = anchors.iter().map(|anchor| anchor.altitude_m).collect();
+    median(&values)
+}
+
+/// Median of a non-empty slice. Panics on an empty one, which every caller
+/// here rules out by construction.
+fn median(values: &[f64]) -> f64 {
+    let mut values = values.to_vec();
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
     }
 }
 
+/// Descent carried by the barometer alone, with no GPS anchoring at all.
+///
+/// The anchor supplies an absolute datum, which a descent — a difference —
+/// never needs, so this is the whole of what the sensor says about the ground.
+/// `None` when the recording has no usable pressure trace.
+///
+/// Used to reseed the live totals of a recording that is being continued, so
+/// that what the rider sees after a resume is measured the same way as what
+/// they saw before it.
+pub(crate) fn barometric_descent(baro: &[BaroSample]) -> Option<f64> {
+    let mut series = relative_barometric_altitudes(baro);
+    if series.len() < 2 {
+        return None;
+    }
+    // No airtime windows: this runs before the IMU pass, and the guard only
+    // ever stands the filter down, so leaving it out costs a jump's spike and
+    // never a metre of real ground.
+    reject_pressure_impulses(&mut series, &[]);
+    let mut descent = 0.0;
+    let mut reference = series[0].value;
+    for sample in &series[1..] {
+        let delta = sample.value - reference;
+        if delta.abs() >= ALTITUDE_HYSTERESIS_M {
+            if delta < 0.0 {
+                descent += -delta;
+            }
+            reference = sample.value;
+        }
+    }
+    Some(descent)
+}
+
+/// Height of each pressure sample above the ride's first one, metres.
+///
+/// The reference is the ride's own first sample rather than a fixed sea-level
+/// datum, and that choice sets the scale, because metres per hectopascal
+/// depends on the temperature of the air actually being flown through. Read
+/// against standard sea level, a sample at 1000 m is converted as if the air
+/// there were 8 °C, which is what the standard lapse rate says; read against
+/// the ride's own starting pressure, it is converted as if that air were 15 °C.
+/// For the rides this app is built for — a warm 1000-1400 m in the Caucasus —
+/// the second is much closer, and the rider's own six-hour recording settles
+/// it: measured against GPS altitude over 1000 m of descent, the ride-relative
+/// curve disagreed by 11.9 m rms and the sea-level one by 19.3 m.
+///
+/// The cost is that the scale depends on where a ride starts. Only a real
+/// temperature reading can remove that, and the phone does not have one.
 fn relative_barometric_altitudes(baro: &[BaroSample]) -> Vec<TimedValue> {
     let mut samples: Vec<_> = baro
         .iter()
@@ -536,17 +597,23 @@ fn relative_barometric_altitudes(baro: &[BaroSample]) -> Vec<TimedValue> {
         })
         .collect();
     samples.sort_by_key(|sample| sample.0);
-    let Some(reference_pressure) = samples.first().map(|sample| sample.1) else {
+    let Some(reference_hpa) = samples.first().map(|sample| sample.1) else {
         return Vec::new();
     };
     samples
         .into_iter()
         .map(|(timestamp_ms, pressure)| TimedValue {
             timestamp_ms,
-            value: BAROMETRIC_SCALE_M
-                * (1.0 - (pressure / reference_pressure).powf(BAROMETRIC_EXPONENT)),
+            value: relative_barometric_altitude_m(pressure, reference_hpa),
         })
         .collect()
+}
+
+/// Height of one pressure reading above the level where the barometer read
+/// `reference_hpa`, metres. See [`relative_barometric_altitudes`] for why the
+/// reference is the ride's own first sample.
+pub(crate) fn relative_barometric_altitude_m(pressure_hpa: f64, reference_hpa: f64) -> f64 {
+    BAROMETRIC_SCALE_M * (1.0 - (pressure_hpa / reference_hpa).powf(BAROMETRIC_EXPONENT))
 }
 
 /// Removes pressure impulses the ground cannot have produced.
@@ -786,8 +853,12 @@ fn finalized_speeds(
 /// `LikelyMotorized`, so a boundary is never credited to the rider. Everything
 /// else — including `STILL` and `UNKNOWN` — stays with the ride, because a
 /// stop in the middle of a lap is part of that lap.
-pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
-    ride_breakdown(track, None).0
+///
+/// `source` decides how the vertical metric is measured, exactly as it does for
+/// the whole-recording analysis: accumulated movement when a barometer carried
+/// the profile, net change per span when only GPS altitude did.
+pub(crate) fn ride_totals(track: &[CanonicalTrackPoint], source: ElevationSource) -> RideTotals {
+    ride_breakdown(track, None, source).0
 }
 
 /// Ride figures and the running ride distance at each point, from one walk.
@@ -799,6 +870,7 @@ pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
 pub(crate) fn ride_breakdown(
     track: &[CanonicalTrackPoint],
     bounds: Option<RideBounds>,
+    source: ElevationSource,
 ) -> (RideTotals, Vec<f64>) {
     let motorized =
         |point: &CanonicalTrackPoint| point.activity_state == ActivityState::LikelyMotorized;
@@ -880,12 +952,9 @@ pub(crate) fn ride_breakdown(
         odometer_m[index + 1] = distance_m;
     }
 
-    let ride_only: Vec<CanonicalTrackPoint> = track
-        .iter()
-        .filter(|point| !motorized(point) && within(bounds, point))
-        .cloned()
-        .collect();
-    let (ascent_m, descent_m) = ascent_descent(&ride_only);
+    let (ascent_m, descent_m) = ride_vertical(track, source, |point| {
+        !motorized(point) && within(bounds, point)
+    });
 
     let moving_time_s = moving_time_ms as f64 / 1_000.0;
     let totals = RideTotals {
@@ -906,31 +975,119 @@ pub(crate) fn ride_breakdown(
 }
 
 pub(crate) fn ascent_descent(track: &[CanonicalTrackPoint]) -> (f64, f64) {
+    ride_vertical(track, ElevationSource::Barometric, |_| true)
+}
+
+/// Ascent and descent over the spans of the track that count as the ride.
+///
+/// Two rules — one per elevation source — over one boundary law: the reference
+/// altitude is dropped wherever the ride is not. A shuttle, a manual pause and
+/// a stretch the rider trimmed away all end a span, and the next one starts
+/// from its own first altitude.
+///
+/// That law is the whole point. Filtering the excluded points out and walking
+/// what remains makes the last fix before a forty-minute uplift and the first
+/// fix after it adjacent, and the accumulator charges the entire lift to the
+/// rider as one step of climbing. On a real three-lap shuttle day it reported
+/// 2293 m of ascent, 1851 m of which were exactly two such steps.
+fn ride_vertical(
+    track: &[CanonicalTrackPoint],
+    source: ElevationSource,
+    counts: impl Fn(&CanonicalTrackPoint) -> bool,
+) -> (f64, f64) {
+    if source == ElevationSource::None {
+        return (0.0, 0.0);
+    }
     let mut ascent = 0.0;
     let mut descent = 0.0;
-    let mut reference: Option<(i32, f64)> = None;
-    for point in track {
+    for span in ride_spans(track, counts) {
+        let (span_ascent, span_descent) = match source {
+            // GPS altitude has low-frequency bias that survives short median
+            // filters and looks like real climbing when accumulated, so a
+            // GPS-only span reports only its robust endpoint change — the same
+            // rule [`gps_net_ascent_descent`] applies to the recording as a
+            // whole, narrowed to what the rider actually rode.
+            ElevationSource::GpsInterpolated => net_change(span),
+            ElevationSource::Barometric => accumulated_change(span),
+            ElevationSource::None => (0.0, 0.0),
+        };
+        ascent += span_ascent;
+        descent += span_descent;
+    }
+    (ascent, descent)
+}
+
+/// The contiguous stretches of `track` that count, split at every section
+/// boundary. Borrowed slices: a span is a view, never a copy of the track.
+fn ride_spans(
+    track: &[CanonicalTrackPoint],
+    counts: impl Fn(&CanonicalTrackPoint) -> bool,
+) -> Vec<&[CanonicalTrackPoint]> {
+    let mut spans = Vec::new();
+    let mut open: Option<usize> = None;
+    for (index, point) in track.iter().enumerate() {
+        let included = counts(point);
+        let continues =
+            included && open.is_none_or(|first| track[first].section_id == point.section_id);
+        match (open, continues) {
+            (None, true) => open = Some(index),
+            (Some(first), false) => {
+                spans.push(&track[first..index]);
+                // A section change ends a span and opens the next one on the
+                // same point; an excluded point just ends it.
+                open = included.then_some(index);
+            }
+            _ => {}
+        }
+    }
+    if let Some(first) = open {
+        spans.push(&track[first..]);
+    }
+    spans
+}
+
+/// Accumulated vertical movement behind a hysteresis band, which only lets the
+/// reference move once the profile escapes ±[`ALTITUDE_HYSTERESIS_M`] around it.
+fn accumulated_change(span: &[CanonicalTrackPoint]) -> (f64, f64) {
+    let mut ascent = 0.0;
+    let mut descent = 0.0;
+    let mut reference: Option<f64> = None;
+    for point in span {
         let Some(altitude) = point.altitude_m else {
             continue;
         };
-        let Some((section_id, previous)) = reference else {
-            reference = Some((point.section_id, altitude));
+        let Some(previous) = reference else {
+            reference = Some(altitude);
             continue;
         };
-        if section_id != point.section_id {
-            reference = Some((point.section_id, altitude));
-            continue;
-        }
         let delta = altitude - previous;
         if delta >= ALTITUDE_HYSTERESIS_M {
             ascent += delta;
-            reference = Some((point.section_id, altitude));
+            reference = Some(altitude);
         } else if delta <= -ALTITUDE_HYSTERESIS_M {
             descent += -delta;
-            reference = Some((point.section_id, altitude));
+            reference = Some(altitude);
         }
     }
     (ascent, descent)
+}
+
+/// Endpoint change of one span, each end taken as the median of its edge so a
+/// single wild fix cannot set the answer.
+fn net_change(span: &[CanonicalTrackPoint]) -> (f64, f64) {
+    let altitudes: Vec<f64> = span.iter().filter_map(|point| point.altitude_m).collect();
+    if altitudes.len() < 2 {
+        return (0.0, 0.0);
+    }
+    let edge = GPS_NET_ENDPOINT_WINDOW.min(altitudes.len() / 2).max(1);
+    let delta = median(&altitudes[altitudes.len() - edge..]) - median(&altitudes[..edge]);
+    if delta >= ALTITUDE_HYSTERESIS_M {
+        (delta, 0.0)
+    } else if delta <= -ALTITUDE_HYSTERESIS_M {
+        (0.0, -delta)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 fn finite(value: Option<f64>) -> Option<f64> {
@@ -956,6 +1113,9 @@ mod tests {
         }
     }
 
+    /// Pressure a device would report this far above the level where it reads
+    /// `reference_hpa` — the inverse of [`relative_barometric_altitude_m`], so
+    /// a fixture can state heights and read the same heights back out.
     fn pressure_for_relative_altitude(reference_hpa: f64, altitude_m: f64) -> f32 {
         (reference_hpa * (1.0 - altitude_m / BAROMETRIC_SCALE_M).powf(1.0 / BAROMETRIC_EXPONENT))
             as f32
@@ -1368,32 +1528,34 @@ mod tests {
         assert!(canonical.analysis.ascent_m < 0.01);
     }
 
+    /// One stretch ridden or driven at 8 m/s, climbing or dropping at a
+    /// constant rate, starting `start_m` along the same straight line.
+    fn leg(
+        start_ms: i64,
+        start_m: f64,
+        seconds: i64,
+        start_altitude_m: f64,
+        vertical_speed_mps: f64,
+        state: ActivityState,
+    ) -> Vec<CanonicalTrackPoint> {
+        (0..=seconds)
+            .map(|second| CanonicalTrackPoint {
+                timestamp_ms: start_ms + second * 1_000,
+                lat: 41.7 + ((start_m + second as f64 * 8.0) / 6_371_000.0).to_degrees(),
+                lon: 44.8,
+                altitude_m: Some(start_altitude_m + vertical_speed_mps * second as f64),
+                accuracy_m: Some(4.0),
+                speed_mps: Some(8.0),
+                stationary: Some(false),
+                section_id: 0,
+                activity_state: state,
+                activity_confidence: 0.9,
+            })
+            .collect()
+    }
+
     #[test]
     fn transport_is_excluded_from_the_ride_totals() {
-        fn leg(
-            start_ms: i64,
-            start_m: f64,
-            seconds: i64,
-            start_altitude_m: f64,
-            vertical_speed_mps: f64,
-            state: ActivityState,
-        ) -> Vec<CanonicalTrackPoint> {
-            (0..=seconds)
-                .map(|second| CanonicalTrackPoint {
-                    timestamp_ms: start_ms + second * 1_000,
-                    lat: 41.7 + ((start_m + second as f64 * 8.0) / 6_371_000.0).to_degrees(),
-                    lon: 44.8,
-                    altitude_m: Some(start_altitude_m + vertical_speed_mps * second as f64),
-                    accuracy_m: Some(4.0),
-                    speed_mps: Some(8.0),
-                    stationary: Some(false),
-                    section_id: 0,
-                    activity_state: state,
-                    activity_confidence: 0.9,
-                })
-                .collect()
-        }
-
         // A shuttle up 200 m, then a run down 200 m. Only the run is the ride.
         let mut track = leg(0, 0.0, 100, 300.0, 2.0, ActivityState::LikelyMotorized);
         track.extend(leg(
@@ -1405,7 +1567,7 @@ mod tests {
             ActivityState::Downhill,
         ));
 
-        let totals = ride_totals(&track);
+        let totals = ride_totals(&track, ElevationSource::Barometric);
 
         assert!(
             totals.ascent_m < 5.0,
@@ -1432,9 +1594,15 @@ mod tests {
 
         // The odometer an export writes must land on the number the app shows,
         // and must not move at all while the rider is in the shuttle.
-        let odometer = crate::ride_bounds::ride_within(track.clone(), None, 0, 201_000)
-            .unwrap()
-            .odometer_m;
+        let odometer = crate::ride_bounds::ride_within(
+            track.clone(),
+            None,
+            0,
+            201_000,
+            ElevationSource::Barometric,
+        )
+        .unwrap()
+        .odometer_m;
         assert_eq!(odometer.len(), track.len());
         assert_eq!(odometer.last().copied(), Some(totals.distance_m));
         assert!(odometer.windows(2).all(|pair| pair[1] >= pair[0]));
@@ -1444,5 +1612,98 @@ mod tests {
             "the run's own distance is wrong: {} m",
             odometer[201] - odometer[101],
         );
+    }
+
+    /// The shape the previous test misses, and the one a real shuttle day has:
+    /// riding on *both* sides of the uplift. Removing the lift's points and
+    /// walking what is left made the last fix before it and the first fix after
+    /// it adjacent, and the whole climb was charged to the rider in one step.
+    #[test]
+    fn an_uplift_between_two_runs_is_never_charged_to_the_rider() {
+        let mut track = leg(0, 0.0, 100, 900.0, -2.0, ActivityState::Downhill);
+        track.extend(leg(
+            101_000,
+            808.0,
+            200,
+            700.0,
+            2.0,
+            ActivityState::LikelyMotorized,
+        ));
+        // Where the rider waits at the top, still labelled a stop, not a vehicle.
+        track.extend(leg(302_000, 2_416.0, 30, 1_100.0, 0.0, ActivityState::Still));
+        track.extend(leg(
+            333_000,
+            2_656.0,
+            100,
+            1_100.0,
+            -2.0,
+            ActivityState::Downhill,
+        ));
+
+        let totals = ride_totals(&track, ElevationSource::Barometric);
+
+        assert!(
+            totals.ascent_m < 5.0,
+            "the uplift was charged to the rider: {} m of ascent",
+            totals.ascent_m,
+        );
+        assert!(
+            (390.0..=410.0).contains(&totals.descent_m),
+            "two 200 m runs did not add up: {} m",
+            totals.descent_m,
+        );
+    }
+
+    /// Without a barometer the whole-recording figures switch to net change per
+    /// section, but the ride totals kept accumulating — and the activity screen
+    /// shows the ride totals under a label that says "Net drop".
+    #[test]
+    fn a_gps_only_ride_reports_net_change_and_not_accumulated_wander() {
+        // Fifty metres of GPS wander up and down, ending 20 m below the start.
+        let track: Vec<_> = (0..=200)
+            .map(|second| CanonicalTrackPoint {
+                timestamp_ms: second * 1_000,
+                lat: 41.7 + ((second as f64 * 8.0) / 6_371_000.0).to_degrees(),
+                lon: 44.8,
+                altitude_m: Some(
+                    500.0 - second as f64 * 0.1
+                        + 25.0 * (second as f64 * std::f64::consts::TAU / 4.0).sin(),
+                ),
+                accuracy_m: Some(12.0),
+                speed_mps: Some(8.0),
+                stationary: Some(false),
+                section_id: 0,
+                activity_state: ActivityState::Downhill,
+                activity_confidence: 0.9,
+            })
+            .collect();
+
+        let accumulated = ride_totals(&track, ElevationSource::Barometric);
+        assert!(
+            accumulated.descent_m > 400.0,
+            "the wander should accumulate hugely when it is trusted: {} m",
+            accumulated.descent_m,
+        );
+
+        let net = ride_totals(&track, ElevationSource::GpsInterpolated);
+        assert!(
+            (15.0..=25.0).contains(&net.descent_m),
+            "GPS-only descent should be the net 20 m drop, not the wander: {} m",
+            net.descent_m,
+        );
+        assert_eq!(net.ascent_m, 0.0, "a net drop cannot also be a net climb");
+        assert_eq!(
+            net.distance_m, accumulated.distance_m,
+            "the elevation source changed the horizontal distance",
+        );
+    }
+
+    /// No altitude at all is not zero altitude: a recording with neither sensor
+    /// must report nothing rather than a number built from missing data.
+    #[test]
+    fn a_ride_with_no_elevation_source_reports_no_vertical() {
+        let track = leg(0, 0.0, 100, 500.0, -2.0, ActivityState::Downhill);
+        let totals = ride_totals(&track, ElevationSource::None);
+        assert_eq!((totals.ascent_m, totals.descent_m), (0.0, 0.0));
     }
 }

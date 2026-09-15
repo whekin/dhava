@@ -1050,9 +1050,16 @@ class RecordingService : Service() {
                 Sensor.TYPE_PRESSURE -> {
                     if (writer == null || paused) return
                     baroCount++
+                    val timestampMs = epochAnchorMs + event.timestamp / 1_000_000
+                    // The live vertical metric is barometric: GPS altitude
+                    // wanders by metres over minutes, which the accumulator
+                    // cannot tell from terrain and which showed the rider tens
+                    // of metres of descent while they were pedalling uphill.
+                    // Every sample goes through; the filtering lives in Rust.
+                    liveFusion?.pushBaro(timestampMs, event.values[0].toDouble())
                     writer.write(
                         RecordLine.Baro(
-                            timestampMs = epochAnchorMs + event.timestamp / 1_000_000,
+                            timestampMs = timestampMs,
                             pressureHpa = event.values[0],
                         ),
                     )

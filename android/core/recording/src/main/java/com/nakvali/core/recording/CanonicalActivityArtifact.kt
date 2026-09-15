@@ -215,6 +215,25 @@ internal fun CanonicalActivityState.toFusionActivityState(): ActivityState = whe
     CanonicalActivityState.LIKELY_MOTORIZED -> ActivityState.LIKELY_MOTORIZED
 }
 
+/**
+ * The rule Rust measures this activity's ascent and descent by.
+ *
+ * Every recomputation over a stored track — a trim, a transport correction, an
+ * export — has to be told it, because an anchored track no longer says which
+ * sensor drew it, and a recomputed total measured by a different rule would
+ * disagree with the headline figure for no reason the rider can see.
+ *
+ * An artifact with no quality block predates the field; those are rebuilt by
+ * the schema bump, and until one is, it keeps the behaviour it was written
+ * with — accumulated movement.
+ */
+internal val CanonicalActivityArtifact.elevationSource: ElevationSource
+    get() = when (quality?.elevationSource) {
+        CanonicalElevationSource.GPS_INTERPOLATED -> ElevationSource.GPS_INTERPOLATED
+        CanonicalElevationSource.NONE -> ElevationSource.NONE
+        CanonicalElevationSource.BAROMETRIC, null -> ElevationSource.BAROMETRIC
+    }
+
 private fun QualitySummary.toCanonicalQuality(): CanonicalQuality = CanonicalQuality(
     elevationSource = when (elevationSource) {
         ElevationSource.BAROMETRIC -> CanonicalElevationSource.BAROMETRIC

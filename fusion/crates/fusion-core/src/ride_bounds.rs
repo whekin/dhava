@@ -7,7 +7,7 @@
 //! That is deliberate: a trim is what the rider says the ride was, not a claim
 //! about what the sensors recorded.
 use crate::activity::ActivityState;
-use crate::canonical::{CanonicalTrackPoint, RideTotals, ride_breakdown};
+use crate::canonical::{CanonicalTrackPoint, ElevationSource, RideTotals, ride_breakdown};
 
 /// The span the rider calls the ride. Absolute recording timestamps, inclusive
 /// at both ends, so re-opening the editor round-trips the same boundary.
@@ -59,12 +59,19 @@ pub struct BoundedRide {
 /// Recompute the ride under the rider's bounds. `started_at_ms`/`ended_at_ms`
 /// are the recording's own bounds, which never shrink — validating against the
 /// trimmed span instead would make every edit one-way.
+///
+/// `elevation_source` is the finalized activity's own
+/// [`QualitySummary::elevation_source`](crate::canonical::QualitySummary): the
+/// vertical rule cannot be inferred from a track that has already been anchored,
+/// and a recomputed total that used a different rule from the one behind the
+/// headline figure would disagree with it for no reason the rider can see.
 #[uniffi::export]
 pub fn ride_within(
     track: Vec<CanonicalTrackPoint>,
     bounds: Option<RideBounds>,
     started_at_ms: i64,
     ended_at_ms: i64,
+    elevation_source: ElevationSource,
 ) -> Result<BoundedRide, RideBoundsError> {
     if let Some(bounds) = bounds {
         if bounds.started_at_ms >= bounds.ended_at_ms {
@@ -91,7 +98,7 @@ pub fn ride_within(
         .iter()
         .rposition(|point| within(bounds, point))
         .map_or(0, |last| last as u32 + 1);
-    let (ride, odometer_m) = ride_breakdown(&track, bounds);
+    let (ride, odometer_m) = ride_breakdown(&track, bounds, elevation_source);
     Ok(BoundedRide {
         ride,
         odometer_m,
@@ -127,7 +134,11 @@ pub struct RideRun {
 /// what this returns rather than deciding boundaries again, so the run a rider
 /// taps and the lap that gets written are always the same descent.
 #[uniffi::export]
-pub fn ride_runs(track: Vec<CanonicalTrackPoint>, bounds: Option<RideBounds>) -> Vec<RideRun> {
+pub fn ride_runs(
+    track: Vec<CanonicalTrackPoint>,
+    bounds: Option<RideBounds>,
+    elevation_source: ElevationSource,
+) -> Vec<RideRun> {
     let mut runs: Vec<RideRun> = Vec::new();
     let mut start: Option<usize> = None;
     for index in 0..=track.len() {
@@ -139,7 +150,7 @@ pub fn ride_runs(track: Vec<CanonicalTrackPoint>, bounds: Option<RideBounds>) ->
         match (start, continues) {
             (None, true) => start = Some(index),
             (Some(first), false) => {
-                push_run(&mut runs, &track, first, index);
+                push_run(&mut runs, &track, first, index, elevation_source);
                 start = None;
             }
             _ => {}
@@ -157,13 +168,19 @@ pub fn ride_runs(track: Vec<CanonicalTrackPoint>, bounds: Option<RideBounds>) ->
     runs
 }
 
-fn push_run(runs: &mut Vec<RideRun>, track: &[CanonicalTrackPoint], from: usize, to: usize) {
+fn push_run(
+    runs: &mut Vec<RideRun>,
+    track: &[CanonicalTrackPoint],
+    from: usize,
+    to: usize,
+    elevation_source: ElevationSource,
+) {
     if to - from < 2 {
         return;
     }
     // Measured from the run's own start with the same accumulators the whole
     // ride uses, so a run's distance is never a subtraction of two odometers.
-    let (totals, _) = ride_breakdown(&track[from..to], None);
+    let (totals, _) = ride_breakdown(&track[from..to], None, elevation_source);
     runs.push(RideRun {
         index: runs.len() as u32,
         started_at_ms: track[from].timestamp_ms,
@@ -206,7 +223,7 @@ mod tests {
             point.section_id = 1;
         }
 
-        let runs = ride_runs(track, None);
+        let runs = ride_runs(track, None, ElevationSource::Barometric);
 
         assert_eq!(runs.len(), 3, "{runs:#?}");
         assert_eq!(runs[0].from_index, 0);
@@ -236,7 +253,7 @@ mod tests {
     #[test]
     fn bounds_drop_the_runs_they_exclude_and_shorten_the_one_they_cut() {
         let track = shuttle_day();
-        let whole = ride_runs(track.clone(), None);
+        let whole = ride_runs(track.clone(), None, ElevationSource::Barometric);
         assert_eq!(whole.len(), 2);
 
         // Keep only the second half of the closing descent.
@@ -244,7 +261,7 @@ mod tests {
             started_at_ms: 500_000,
             ended_at_ms: 599_000,
         });
-        let trimmed = ride_runs(track, bounds);
+        let trimmed = ride_runs(track, bounds, ElevationSource::Barometric);
 
         assert_eq!(trimmed.len(), 1);
         assert_eq!(trimmed[0].index, 0, "the kept run is renumbered from zero");
@@ -256,12 +273,12 @@ mod tests {
     #[test]
     fn bounds_recompute_the_totals_and_leave_the_odometer_flat_outside() {
         let track = shuttle_day();
-        let whole = ride_within(track.clone(), None, 0, 599_000).unwrap();
+        let whole = ride_within(track.clone(), None, 0, 599_000, ElevationSource::Barometric).unwrap();
         let bounds = RideBounds {
             started_at_ms: 400_000,
             ended_at_ms: 599_000,
         };
-        let trimmed = ride_within(track.clone(), Some(bounds), 0, 599_000).unwrap();
+        let trimmed = ride_within(track.clone(), Some(bounds), 0, 599_000, ElevationSource::Barometric).unwrap();
 
         assert_eq!(trimmed.kept_from, 400);
         assert_eq!(trimmed.kept_to, 600);
@@ -306,7 +323,7 @@ mod tests {
             },
         ] {
             assert!(
-                ride_within(track.clone(), Some(bounds), 0, 599_000).is_err(),
+                ride_within(track.clone(), Some(bounds), 0, 599_000, ElevationSource::Barometric).is_err(),
                 "{bounds:?} was accepted",
             );
         }
@@ -321,11 +338,11 @@ mod tests {
             started_at_ms: 500_000,
             ended_at_ms: 550_000,
         };
-        ride_within(track.clone(), Some(narrow), 0, 599_000).unwrap();
+        ride_within(track.clone(), Some(narrow), 0, 599_000, ElevationSource::Barometric).unwrap();
         let wider = RideBounds {
             started_at_ms: 10_000,
             ended_at_ms: 590_000,
         };
-        ride_within(track, Some(wider), 0, 599_000).unwrap();
+        ride_within(track, Some(wider), 0, 599_000, ElevationSource::Barometric).unwrap();
     }
 }

@@ -802,6 +802,8 @@ internal open class UniffiVTableCallbackInterfaceCanonicalObserver(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -860,6 +862,8 @@ fun uniffi_fusion_core_checksum_func_selection_overlap(
 fun uniffi_fusion_core_checksum_method_canonicalobserver_on_progress(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_motorized_hint(
+): Short
+fun uniffi_fusion_core_checksum_method_livefusion_push_baro(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_push_gps(
 ): Short
@@ -945,6 +949,8 @@ fun uniffi_fusion_core_fn_constructor_livefusion_new(uniffi_out_err: UniffiRustC
 ): Pointer
 fun uniffi_fusion_core_fn_method_livefusion_motorized_hint(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Byte
+fun uniffi_fusion_core_fn_method_livefusion_push_baro(`ptr`: Pointer,`timestampMs`: Long,`pressureHpa`: Double,uniffi_out_err: UniffiRustCallStatus,
+): Unit
 fun uniffi_fusion_core_fn_method_livefusion_push_gps(`ptr`: Pointer,`timestampMs`: Long,`lat`: Double,`lon`: Double,`altitudeM`: RustBuffer.ByValue,`accuracyM`: RustBuffer.ByValue,`speedMps`: RustBuffer.ByValue,`bearingDeg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_method_livefusion_push_imu(`ptr`: Pointer,`timestampMs`: Long,`accel`: RustBuffer.ByValue,`gyro`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -975,7 +981,7 @@ fun uniffi_fusion_core_fn_func_build_segment_continuous(`id`: RustBuffer.ByValue
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_build_segment_continuous_with_gates(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,`gateCenters`: RustBuffer.ByValue,`minLengthM`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun uniffi_fusion_core_fn_func_correct_transport(`track`: RustBuffer.ByValue,`episodes`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_fusion_core_fn_func_correct_transport(`track`: RustBuffer.ByValue,`episodes`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,`elevationSource`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -995,9 +1001,9 @@ fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniff
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_ride_profile(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun uniffi_fusion_core_fn_func_ride_runs(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_fusion_core_fn_func_ride_runs(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,`elevationSource`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
-fun uniffi_fusion_core_fn_func_ride_within(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_fusion_core_fn_func_ride_within(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,`elevationSource`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_segment_match_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1146,7 +1152,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_build_segment_continuous_with_gates() != 50296.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_fusion_core_checksum_func_correct_transport() != 30279.toShort()) {
+    if (lib.uniffi_fusion_core_checksum_func_correct_transport() != 9122.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
@@ -1176,10 +1182,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_ride_profile() != 57811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_fusion_core_checksum_func_ride_runs() != 45108.toShort()) {
+    if (lib.uniffi_fusion_core_checksum_func_ride_runs() != 19182.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_fusion_core_checksum_func_ride_within() != 64000.toShort()) {
+    if (lib.uniffi_fusion_core_checksum_func_ride_within() != 62336.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_segment_match_version() != 63275.toShort()) {
@@ -1195,6 +1201,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_motorized_hint() != 56027.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_method_livefusion_push_baro() != 45363.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_push_gps() != 56011.toShort()) {
@@ -1973,6 +1982,25 @@ public interface LiveFusionInterface {
      */
     fun `motorizedHint`(): kotlin.Boolean
 
+    /**
+     * Feeds one barometer sample into the live vertical channel.
+     *
+     * The barometer is the only sensor on the phone that measures the ground
+     * going up and down rather than inferring it. GPS altitude wanders by
+     * metres over minutes, which a hysteresis accumulator cannot tell from
+     * terrain: replaying a real ride whose first ten minutes were pedalled
+     * uphill, the GPS-fed live number reported 38.7 m of descent, while the
+     * same ten minutes off the barometer reported 4.5 m.
+     *
+     * So once a pressure sample has arrived, descent comes from this series and
+     * the GPS one stands down. Devices without a barometer are unaffected, and
+     * so is a device whose barometer stalls for longer than
+     * [`BARO_STALE_AFTER_MS`].
+     *
+     * Call it with every sample the recorder writes; the filtering is here.
+     */
+    fun `pushBaro`(`timestampMs`: kotlin.Long, `pressureHpa`: kotlin.Double)
+
     fun `pushGps`(`timestampMs`: kotlin.Long, `lat`: kotlin.Double, `lon`: kotlin.Double, `altitudeM`: kotlin.Double?, `accuracyM`: kotlin.Double?, `speedMps`: kotlin.Double?, `bearingDeg`: kotlin.Double?): LiveSnapshot?
 
     fun `pushImu`(`timestampMs`: kotlin.Long, `accel`: List<kotlin.Double>, `gyro`: List<kotlin.Double>): kotlin.Boolean
@@ -2121,6 +2149,34 @@ open class LiveFusion: Disposable, AutoCloseable, LiveFusionInterface
     }
     )
     }
+
+
+
+    /**
+     * Feeds one barometer sample into the live vertical channel.
+     *
+     * The barometer is the only sensor on the phone that measures the ground
+     * going up and down rather than inferring it. GPS altitude wanders by
+     * metres over minutes, which a hysteresis accumulator cannot tell from
+     * terrain: replaying a real ride whose first ten minutes were pedalled
+     * uphill, the GPS-fed live number reported 38.7 m of descent, while the
+     * same ten minutes off the barometer reported 4.5 m.
+     *
+     * So once a pressure sample has arrived, descent comes from this series and
+     * the GPS one stands down. Devices without a barometer are unaffected, and
+     * so is a device whose barometer stalls for longer than
+     * [`BARO_STALE_AFTER_MS`].
+     *
+     * Call it with every sample the recorder writes; the filtering is here.
+     */override fun `pushBaro`(`timestampMs`: kotlin.Long, `pressureHpa`: kotlin.Double)
+        =
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_method_livefusion_push_baro(
+        it, FfiConverterLong.lower(`timestampMs`),FfiConverterDouble.lower(`pressureHpa`),_status)
+}
+    }
+
 
 
     override fun `pushGps`(`timestampMs`: kotlin.Long, `lat`: kotlin.Double, `lon`: kotlin.Double, `altitudeM`: kotlin.Double?, `accuracyM`: kotlin.Double?, `speedMps`: kotlin.Double?, `bearingDeg`: kotlin.Double?): LiveSnapshot? {
@@ -6034,11 +6090,11 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
          * Replace automatic transport labels, restoring ordinary downhill/transit/still
          * outside the user's intervals. Empty means explicitly no transport.
          */
-    @Throws(TransportException::class) fun `correctTransport`(`track`: List<CanonicalTrackPoint>, `episodes`: List<TransportEpisode>, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long): TransportCorrection {
+    @Throws(TransportException::class) fun `correctTransport`(`track`: List<CanonicalTrackPoint>, `episodes`: List<TransportEpisode>, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long, `elevationSource`: ElevationSource): TransportCorrection {
             return FfiConverterTypeTransportCorrection.lift(
     uniffiRustCallWithError(TransportException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_correct_transport(
-        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterSequenceTypeTransportEpisode.lower(`episodes`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),_status)
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterSequenceTypeTransportEpisode.lower(`episodes`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),FfiConverterTypeElevationSource.lower(`elevationSource`),_status)
 }
     )
     }
@@ -6179,11 +6235,11 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
          * This is the single definition of a run. Kotlin labels its export points from
          * what this returns rather than deciding boundaries again, so the run a rider
          * taps and the lap that gets written are always the same descent.
-         */ fun `rideRuns`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?): List<RideRun> {
+         */ fun `rideRuns`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?, `elevationSource`: ElevationSource): List<RideRun> {
             return FfiConverterSequenceTypeRideRun.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_runs(
-        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),_status)
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),FfiConverterTypeElevationSource.lower(`elevationSource`),_status)
 }
     )
     }
@@ -6193,12 +6249,18 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
          * Recompute the ride under the rider's bounds. `started_at_ms`/`ended_at_ms`
          * are the recording's own bounds, which never shrink — validating against the
          * trimmed span instead would make every edit one-way.
+         *
+         * `elevation_source` is the finalized activity's own
+         * [`QualitySummary::elevation_source`](crate::canonical::QualitySummary): the
+         * vertical rule cannot be inferred from a track that has already been anchored,
+         * and a recomputed total that used a different rule from the one behind the
+         * headline figure would disagree with it for no reason the rider can see.
          */
-    @Throws(RideBoundsException::class) fun `rideWithin`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long): BoundedRide {
+    @Throws(RideBoundsException::class) fun `rideWithin`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long, `elevationSource`: ElevationSource): BoundedRide {
             return FfiConverterTypeBoundedRide.lift(
     uniffiRustCallWithError(RideBoundsException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_within(
-        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),_status)
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),FfiConverterTypeElevationSource.lower(`elevationSource`),_status)
 }
     )
     }

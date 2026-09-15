@@ -493,7 +493,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
         val automatic = canonicalStore.loadOrCreate(id, recordingFile(id))
         val correction = episodes?.let {
             com.nakvali.fusion.correctTransport(automatic.finalizedTrack.toCanonicalTrack(),
-                it.map { episode -> episode.toFusion() }, automatic.analysis.startedAtMs, automatic.analysis.endedAtMs)
+                it.map { episode -> episode.toFusion() }, automatic.analysis.startedAtMs, automatic.analysis.endedAtMs,
+                automatic.elevationSource)
         }
         val normalized = correction?.episodes?.map { it.toStored() }
         updateEntry(id) {
@@ -523,6 +524,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
             com.nakvali.fusion.rideWithin(
                 automatic.finalizedTrack.toCanonicalTrack(), it.toFusion(),
                 automatic.analysis.startedAtMs, automatic.analysis.endedAtMs,
+                automatic.elevationSource,
             )
         }
         updateEntry(id) { if (it.rideBounds == bounds) it else it.copy(rideBounds = bounds) }

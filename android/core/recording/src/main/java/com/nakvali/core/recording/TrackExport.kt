@@ -108,7 +108,9 @@ object TrackExport {
 
 /** The riding runs of this activity, under whatever trim the rider applied. */
 fun CanonicalActivityArtifact.ridingRuns(): List<RideRun> =
-    com.nakvali.fusion.rideRuns(finalizedTrack.toCanonicalTrack(), rideBounds?.toFusion())
+    com.nakvali.fusion.rideRuns(
+        finalizedTrack.toCanonicalTrack(), rideBounds?.toFusion(), elevationSource,
+    )
 
 /**
  * Build the export samples for this activity. [runs] comes from [ridingRuns] on
@@ -121,7 +123,7 @@ fun CanonicalActivityArtifact.exportPoints(
 ): List<TrackExportPoint> {
     val bounded = com.nakvali.fusion.rideWithin(
         finalizedTrack.toCanonicalTrack(), rideBounds?.toFusion(),
-        analysis.startedAtMs, analysis.endedAtMs,
+        analysis.startedAtMs, analysis.endedAtMs, elevationSource,
     )
     return TrackExport.processedPoints(
         points = finalizedTrack,

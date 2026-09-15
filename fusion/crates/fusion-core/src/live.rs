@@ -47,6 +47,25 @@ const ALTITUDE_HYSTERESIS_M: f64 = 2.0;
 /// sample it has not received yet, so the accumulator simply trails the newest
 /// fix by two: the median it consumes is the canonical one, two fixes late.
 const ALTITUDE_MEDIAN_WINDOW: usize = 5;
+/// Trailing width of the pressure filter. Canonical centres a ±1.5 s mean on
+/// each sample; live can only look backwards, so it takes the same width out of
+/// the past and lags the ground by about a second and a half.
+const PRESSURE_WINDOW_MS: i64 = 3_000;
+/// Fixed part of how far a pressure sample may sit from the one before it and
+/// still be believed — the sensor's own noise plus a gust, neither of which
+/// scales with the time between samples.
+const PRESSURE_OUTLIER_M: f64 = 3.0;
+/// Rate part of the same allowance: nothing a rider does, drops included,
+/// takes them down faster than this, so anything steeper is the phone moving
+/// rather than the ground.
+const MAX_VERTICAL_SPEED_MPS: f64 = 10.0;
+/// A hole in the pressure trace longer than this ends the filter's window: what
+/// arrives afterwards is not continuous with what came before it.
+const MAX_PRESSURE_GAP_MS: i64 = 3_000;
+/// How long the vertical channel keeps trusting a barometer that has stopped
+/// reporting. Past it the GPS series takes over again rather than leaving the
+/// rider watching a descent that silently stopped counting.
+const BARO_STALE_AFTER_MS: i64 = 30_000;
 /// Live transport hint. The thresholds mirror the post-ride classifier's
 /// vehicle evidence: a rate of climb no rider produces, held long enough that
 /// altitude noise cannot fake it. See `activity.rs` for why 0.6 m/s is the
@@ -130,6 +149,22 @@ struct State {
     altitude_reference: Option<f64>,
     /// Trailing median window over accepted GPS altitudes.
     altitude_window: VecDeque<f64>,
+    /// Pressure of the ride's first barometer sample. It sets the height scale
+    /// as well as the datum; see `canonical::relative_barometric_altitudes`.
+    baro_reference_hpa: Option<f64>,
+    /// Trailing window of relative barometric altitudes, newest last.
+    baro_window: VecDeque<(i64, f64)>,
+    /// Hysteresis reference for descent on the filtered barometric series.
+    baro_altitude_reference: Option<f64>,
+    /// Timestamp of the last accepted pressure sample.
+    last_baro_ms: Option<i64>,
+    /// Which series currently owns the vertical channel. The two carry
+    /// different quantities — one absolute, one relative to the ride's first
+    /// pressure — so a handover clears everything measured in the old one.
+    baro_drives_vertical: bool,
+    /// Last barometric altitude handed to the transport hint, which wants one
+    /// reading a second and not the sensor's full rate.
+    last_baro_hint_ms: Option<i64>,
     /// Filtered altitude over the recent past, for the transport hint.
     climb_window: VecDeque<(i64, f64)>,
     /// Mean |accel| error over the stationary window — the roughness channel.
@@ -173,6 +208,12 @@ impl LiveFusion {
                 distance_anchor: None,
                 altitude_reference: None,
                 altitude_window: VecDeque::new(),
+                baro_reference_hpa: None,
+                baro_window: VecDeque::new(),
+                baro_altitude_reference: None,
+                last_baro_ms: None,
+                baro_drives_vertical: false,
+                last_baro_hint_ms: None,
                 climb_window: VecDeque::new(),
                 recent_roughness: 0.0,
                 motorized: false,
@@ -229,6 +270,115 @@ impl LiveFusion {
         let mut s = self.state.lock().expect("live fusion mutex poisoned");
         s.distance_m += distance_m.max(0.0);
         s.descent_m += descent_m.max(0.0);
+    }
+
+    /// Feeds one barometer sample into the live vertical channel.
+    ///
+    /// The barometer is the only sensor on the phone that measures the ground
+    /// going up and down rather than inferring it. GPS altitude wanders by
+    /// metres over minutes, which a hysteresis accumulator cannot tell from
+    /// terrain: replaying a real ride whose first ten minutes were pedalled
+    /// uphill, the GPS-fed live number reported 38.7 m of descent, while the
+    /// same ten minutes off the barometer reported 4.5 m.
+    ///
+    /// So once a pressure sample has arrived, descent comes from this series and
+    /// the GPS one stands down. Devices without a barometer are unaffected, and
+    /// so is a device whose barometer stalls for longer than
+    /// [`BARO_STALE_AFTER_MS`].
+    ///
+    /// Call it with every sample the recorder writes; the filtering is here.
+    pub fn push_baro(&self, timestamp_ms: i64, pressure_hpa: f64) {
+        if !pressure_hpa.is_finite() || pressure_hpa <= 0.0 {
+            return;
+        }
+        let mut s = self.state.lock().expect("live fusion mutex poisoned");
+        if !s.baro_drives_vertical {
+            // Taking the channel over from GPS: its reference altitude and the
+            // climb history it filled are in the wrong quantity now.
+            s.baro_drives_vertical = true;
+            s.altitude_reference = None;
+            s.climb_window.clear();
+        }
+        let reference_hpa = *s.baro_reference_hpa.get_or_insert(pressure_hpa);
+        let measured_m =
+            crate::canonical::relative_barometric_altitude_m(pressure_hpa, reference_hpa);
+
+        // A hole in the trace is not a measurement: nothing before it may be
+        // averaged with what comes after, and the altitude the accumulator
+        // resumes from is the first sample on the far side.
+        let since_last_ms = s.last_baro_ms.map(|last| timestamp_ms - last);
+        if since_last_ms.is_some_and(|elapsed| elapsed > MAX_PRESSURE_GAP_MS) {
+            s.baro_window.clear();
+            s.baro_altitude_reference = None;
+        }
+
+        // A sample that has moved further than a rider could in the time since
+        // the last one is the phone moving, not the ground under it: pulled out
+        // of a mount, it swings the pressure by ten metres in under a second.
+        //
+        // Judged against the previous sample and a physical rate, never against
+        // the window's own median: the window trails the newest sample by half
+        // its width, so on a sustained steep descent every real sample disagrees
+        // with the median, and rejecting them froze the live descent for eighty
+        // minutes of a replayed shuttle day.
+        //
+        // A rejected sample is dropped rather than replaced, and the clock is
+        // not advanced with it, so the allowance widens while the disturbance
+        // lasts. A barometer that has genuinely stepped is therefore followed
+        // within a second, and one that was knocked is simply not believed.
+        if let (Some(previous), Some(elapsed_ms)) =
+            (s.baro_window.back().map(|(_, value)| *value), since_last_ms)
+        {
+            let allowance_m = MAX_VERTICAL_SPEED_MPS * (elapsed_ms.max(0) as f64 / 1_000.0)
+                + PRESSURE_OUTLIER_M;
+            if (measured_m - previous).abs() > allowance_m {
+                return;
+            }
+        }
+        s.last_baro_ms = Some(timestamp_ms);
+        while s
+            .baro_window
+            .front()
+            .is_some_and(|(stamp, _)| timestamp_ms - stamp > PRESSURE_WINDOW_MS)
+        {
+            s.baro_window.pop_front();
+        }
+
+        // The window's mean carries the sub-metre pressure hash away. A mean is
+        // transparent to a constant grade, so this costs no real descent; all it
+        // adds is a trailing filter's lag of half the window.
+        s.baro_window.push_back((timestamp_ms, measured_m));
+        let altitude = s.baro_window.iter().map(|(_, value)| value).sum::<f64>()
+            / s.baro_window.len() as f64;
+
+        match s.baro_altitude_reference {
+            Some(reference) => {
+                let delta = altitude - reference;
+                if delta >= ALTITUDE_HYSTERESIS_M {
+                    s.baro_altitude_reference = Some(altitude);
+                } else if delta <= -ALTITUDE_HYSTERESIS_M {
+                    s.descent_m += -delta;
+                    s.baro_altitude_reference = Some(altitude);
+                }
+            }
+            None => s.baro_altitude_reference = Some(altitude),
+        }
+
+        // The transport hint reads a rate of climb, so it wants one reading a
+        // second, not the sensor's full rate — and it wants the better signal.
+        if s.last_baro_hint_ms
+            .is_none_or(|last| timestamp_ms - last >= 1_000)
+        {
+            s.last_baro_hint_ms = Some(timestamp_ms);
+            s.climb_window.push_back((timestamp_ms, altitude));
+            while s
+                .climb_window
+                .front()
+                .is_some_and(|(stamp, _)| timestamp_ms - stamp > TRANSPORT_CLIMB_HISTORY_MS)
+            {
+                s.climb_window.pop_front();
+            }
+        }
     }
 
     pub fn push_imu(&self, timestamp_ms: i64, accel: Vec<f64>, gyro: Vec<f64>) -> bool {
@@ -711,6 +861,22 @@ fn accumulate_totals(
         None => state.distance_anchor = Some(position),
     }
 
+    // The barometer owns the vertical channel whenever it is reporting; see
+    // [`LiveFusion::push_baro`] for why GPS altitude is the worse of the two.
+    if state
+        .last_baro_ms
+        .is_some_and(|last| timestamp_ms - last <= BARO_STALE_AFTER_MS)
+    {
+        return;
+    }
+    if state.baro_drives_vertical {
+        // The barometer stalled. Hand the channel back without letting the
+        // first GPS altitude be read as a step away from a relative one.
+        state.baro_drives_vertical = false;
+        state.baro_altitude_reference = None;
+        state.climb_window.clear();
+    }
+
     let Some(sample) = altitude_m.filter(|value| value.is_finite()) else {
         return;
     };
@@ -819,6 +985,11 @@ impl LiveFusion {
         state.distance_anchor = None;
         state.altitude_reference = None;
         state.altitude_window.clear();
+        // The barometer keeps its datum across a pause — the reference pressure
+        // is the ride's, not the section's — but not its accumulator: the
+        // height gained while the sensors were off was not ridden.
+        state.baro_altitude_reference = None;
+        state.baro_window.clear();
         // A pause is a hard boundary for the transport hint too: full rates
         // resume with the ride, and the climb has to prove itself again.
         state.climb_window.clear();
@@ -1506,6 +1677,98 @@ mod tests {
         assert!(
             (260.0..=290.0).contains(&snapshot.descent_m),
             "descent {} m does not match a 290 m drop",
+            snapshot.descent_m,
+        );
+    }
+
+    /// Pressure a device reports this many metres above where the fixture
+    /// starts — the inverse of what the accumulator computes, so a test can
+    /// state heights relative to its own start and read them back unchanged.
+    fn pressure_at(relative_m: f64) -> f64 {
+        // What a barometer reads at roughly 1000 m, where these rides begin.
+        898.7 * (1.0 - relative_m / 44_330.0).powf(1.0 / 0.190_294_957)
+    }
+
+    /// The rider's complaint, as a test: ten minutes of pedalling uphill, with
+    /// GPS altitude wandering by metres the way it really does. Fed only GPS,
+    /// the live screen reported 38.7 m of descent on this ride.
+    #[test]
+    fn a_climb_with_wandering_gps_altitude_reports_no_descent() {
+        let fusion = LiveFusion::new();
+        let mut last = None;
+        for step in 0..600i64 {
+            let climbed = step as f64 * 0.1;
+            // GPS wander: metres, over minutes, which no short median removes.
+            let wander = 6.0 * (step as f64 * std::f64::consts::TAU / 120.0).sin();
+            fusion.push_baro(step * 1_000, pressure_at(climbed));
+            last = fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 2.0),
+                44.8,
+                Some(1_000.0 + climbed + wander),
+                Some(6.0),
+                Some(2.0),
+                Some(0.0),
+            );
+        }
+        let snapshot = last.expect("moving fixes produce snapshots");
+        assert!(
+            snapshot.descent_m < 2.0,
+            "a pure climb reported {} m of descent",
+            snapshot.descent_m,
+        );
+    }
+
+    /// And the barometer must still report a real descent in full.
+    #[test]
+    fn the_barometric_channel_reports_a_real_drop() {
+        let fusion = LiveFusion::new();
+        let mut last = None;
+        for step in 0..300i64 {
+            fusion.push_baro(step * 1_000, pressure_at(-(step as f64)));
+            last = fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 8.0),
+                44.8,
+                Some(1_000.0 - step as f64),
+                Some(4.0),
+                Some(8.0),
+                Some(0.0),
+            );
+        }
+        let snapshot = last.expect("moving fixes produce snapshots");
+        assert!(
+            (290.0..=300.0).contains(&snapshot.descent_m),
+            "a 299 m drop was reported as {} m",
+            snapshot.descent_m,
+        );
+    }
+
+    /// A barometer that stops reporting hands the channel back rather than
+    /// freezing the descent at whatever it had counted.
+    #[test]
+    fn a_stalled_barometer_hands_the_channel_back_to_gps() {
+        let fusion = LiveFusion::new();
+        for step in 0..10i64 {
+            fusion.push_baro(step * 1_000, pressure_at(0.0));
+        }
+        let mut last = None;
+        for step in 10..200i64 {
+            // No more pressure samples; the fixes keep dropping 1 m each.
+            last = fusion.push_gps(
+                step * 1_000,
+                north_of(41.7, step as f64 * 8.0),
+                44.8,
+                Some(1_000.0 - (step - 10) as f64),
+                Some(4.0),
+                Some(8.0),
+                Some(0.0),
+            );
+        }
+        let snapshot = last.expect("moving fixes produce snapshots");
+        assert!(
+            snapshot.descent_m > 100.0,
+            "the stalled barometer froze the descent at {} m",
             snapshot.descent_m,
         );
     }

@@ -53,13 +53,13 @@ internal fun CanonicalActivityArtifact.applyCorrections(
     val corrected = episodes?.let {
         withTransportCorrection(com.nakvali.fusion.correctTransport(
             finalizedTrack.toCanonicalTrack(), it.map { episode -> episode.toFusion() },
-            analysis.startedAtMs, analysis.endedAtMs,
+            analysis.startedAtMs, analysis.endedAtMs, elevationSource,
         ))
     } ?: this
     return bounds?.let {
         corrected.withRideBounds(it, com.nakvali.fusion.rideWithin(
             corrected.finalizedTrack.toCanonicalTrack(), it.toFusion(),
-            analysis.startedAtMs, analysis.endedAtMs,
+            analysis.startedAtMs, analysis.endedAtMs, corrected.elevationSource,
         ))
     } ?: corrected
 }

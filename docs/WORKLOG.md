@@ -3609,3 +3609,117 @@ views and the canonical math is untouched.
 Not verified on device: no build has been installed or driven this iteration, so
 both sheets are unexercised in the hand. Still open from the previous entry: one
 real Strava upload to confirm it honours TCX `DistanceMeters`.
+
+## 2026-09-15 — Where the fake descent comes from (diagnosis)
+
+The rider reported 39 m of descent on the record screen after a stretch that was
+only pedalled uphill, and did not believe the descent on the finished activity
+either. Both were measured against his own six-hour recording
+(`nakvali-be697d95`, 37 km ridden, 55.6 km shuttled, barometric elevation source)
+with a new `fusion-core` example, `descent_probe`, which finalizes a raw file and
+then re-accumulates the vertical metric several ways for comparison.
+
+**The live number is GPS-only and fabricates about 4 m per minute of climbing.**
+Replaying the recording's GPS and IMU through `LiveFusion` reproduces the
+complaint exactly: 38.7 m of descent at t+10 min, while the altitude went from
+1305 m to 1353 m — nothing had gone downhill yet. At t+20 min it was 82.4 m.
+`live.rs` never reads the barometer, although the same recording carries 284282
+baro samples at ~12.5 Hz; it accumulates the EKF's GPS-driven altitude behind a
+5-sample median and a 2 m band. Over the same window, raw GPS altitude
+accumulates 43.2 m of descent and the baro-anchored canonical profile only 4.5 m.
+
+**The finished activity's descent is mostly real.** Three shuttle laps of roughly
+930 m each account for about 2870 m of the reported 3188 m. The remainder tracks
+the GPS anchor: the barometric profile is offset to GPS by a ±30 s median, and
+that offset series wanders 68.5 m end to end, accumulating 319.5 m of descent
+entirely on its own. Widening the median to ±300 s drops that to 66.5 m, ±900 s
+to 58.2 m. High-frequency noise is not the problem — the finalized altitude sits
+0.39 m rms against its own ±5 s median, and excluding stationary points changes
+the total by 22 m.
+
+**The activity's *ascent* is the badly wrong number: 2293 m for a shuttle day.**
+Attributing one accumulation walk by activity state shows 1894 m of it charged to
+points labelled `Still` — the rider sitting in the shuttle. `ride_breakdown`
+excludes transport by the per-point test `activity_state == LikelyMotorized`
+only, so the `Still` stretches inside a coalesced uplift episode still count as
+ridden climbing.
+
+Also noted while reading: the activity tile prefers `ride.descentM` and falls
+back to `analysis.descentM`, but labels itself from the elevation source. For a
+GPS-only recording `analysis` switches to net-per-section while `ride` keeps
+accumulating, so the tile shows an accumulated figure under the label "Net drop".
+
+Nothing is fixed yet; no algorithm version bump. Candidate fixes, in the order
+their evidence is strongest: feed the barometer into the live vertical; freeze or
+rate-limit the GPS anchor offset instead of the ±30 s median; exclude transport
+by coalesced episode rather than per-point label; make `ride_totals` honour the
+elevation source the way `analysis` does.
+
+### The four fixes
+
+`ALGORITHM_VERSION` is now `gps-bounded-0.14`: three of the four change what a
+finished activity reports, so every cached artifact rebuilds.
+
+**The uplift is no longer charged to the rider.** `ride_breakdown` built a
+filtered copy of the track and accumulated over it, which made the last fix
+before a shuttle and the first fix after it adjacent. New `ride_vertical` walks
+the real track and drops its reference altitude at every point the ride does not
+include, so a span ends at a vehicle, a manual pause or a trim boundary and the
+next one starts from its own first altitude. On the rider's recording the ride's
+ascent fell from 2293 m to 372 m; the two phantom steps were +930.1 m and
++921.5 m, each closing a 39-minute hole.
+
+**Ride totals now honour the elevation source.** The whole-recording analysis
+switches to net change per section without a barometer, but the ride totals —
+which is what the activity screen actually shows — kept accumulating, under a
+label reading "Net drop". `ride_totals`, `ride_breakdown`, `ride_within`,
+`ride_runs` and `correct_transport` all take an `ElevationSource` now; Kotlin
+passes the artifact's own `quality.elevationSource` through a new
+`CanonicalActivityArtifact.elevationSource`, since an anchored track no longer
+says which sensor drew it.
+
+**The GPS anchor no longer shapes the barometric profile.**
+`OFFSET_MEDIAN_HALF_WINDOW_MS` goes from ±30 s to ±5 min. GPS altitude error
+wanders over minutes rather than jittering, and a minute-wide median passed that
+wander into the anchored profile: measured on the rider's day, the offset series
+alone accumulated 319.5 m of descent at ±30 s, 66.5 m at ±5 min and 58.2 m at
+±15 min. Reported descent went from 3188.7 m to 3124.4 m.
+
+**The live screen reads the barometer.** `LiveFusion::push_baro` takes every
+pressure sample the recorder writes; `RecordingService` now feeds it alongside
+the raw line. Descent accumulates off that series, and the GPS one stands down
+until the barometer has been silent for 30 s, with a handover that clears the
+climb history because the two series carry different quantities. Replaying the
+rider's file through the real `LiveFusion`: 38.7 m of descent at t+10 min
+before, 2.0 m after, against a barometer that says 2.3 m and a climb of 43 m.
+`live_totals_from_recording` reseeds a resumed ride from the barometer too, so a
+resume measures what the screen was already measuring.
+
+Two things were found by testing rather than looked for. The live filter first
+judged each sample against its own trailing median, which lags a trailing window
+by half its width — on a sustained descent every real sample disagreed with it
+and was rejected, freezing the replayed live descent for eighty minutes. It now
+judges a sample against the previous one and a physical rate (10 m/s plus 3 m),
+and drops a rejected sample without advancing the clock, so the allowance widens
+while a disturbance lasts.
+
+And the barometric height scale was briefly changed to a fixed sea-level datum
+and changed back. Metres per hectopascal depend on the temperature of the air
+being ridden through: read against standard sea level a sample at 1000 m is
+converted as if that air were 8 °C, read against the ride's own first sample as
+if it were 15 °C. Against GPS altitude over 1000 m of descent the ride-relative
+curve disagreed by 11.9 m rms and the sea-level one by 19.3 m, so the original
+choice stands, now with the reasoning written down where it can be checked. Only
+a real temperature reading removes the ambiguity, and the phone has none.
+
+168 Rust tests and strict Clippy pass, `assembleDebug`, `testDebugUnitTest` and
+`lintDebug` pass, and bindings and both native libraries were regenerated. New
+regression tests: an uplift between two runs, a GPS-only ride that must report
+net and not wander, a ride with no elevation source, a climb under wandering GPS
+altitude, a real barometric drop, and a stalled barometer handing the channel
+back. `fusion-core`'s new `descent_probe` example is the measuring instrument
+for all of the above — it finalizes a raw file, re-accumulates the vertical
+metric several ways, and replays the live accumulator.
+
+Not verified on device: no build has been installed since these changes, so the
+numbers above are all from replaying the rider's recording on the desktop.
