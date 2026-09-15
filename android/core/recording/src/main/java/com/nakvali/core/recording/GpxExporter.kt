@@ -14,6 +14,38 @@ data class GpxTrackPoint(
 
 /** Creates a standards-friendly GPX 1.1 track without bridging pauses. */
 object GpxExporter {
+    /** Uses Rust's labels; never reclassifies motion or changes source timestamps. */
+    fun processedPoints(
+        points: List<CanonicalPoint>,
+        excludeTransport: Boolean = false,
+    ): List<GpxTrackPoint> {
+        val result = ArrayList<GpxTrackPoint>(points.size)
+        var previous: CanonicalPoint? = null
+        var section = -1
+        for (point in points) {
+            if (excludeTransport && point.activityState == CanonicalActivityState.LIKELY_MOTORIZED) {
+                previous = null
+                continue
+            }
+            val prior = previous
+            // Preserve real gaps even within one manual recording section.
+            if (prior == null || prior.sectionId != point.sectionId ||
+                point.timestampMs - prior.timestampMs !in 1L..3_000L
+            ) {
+                section++
+            }
+            result.add(GpxTrackPoint(
+                timestampMs = point.timestampMs,
+                lat = point.lat,
+                lon = point.lon,
+                altitudeM = point.altitudeM,
+                sectionId = section,
+            ))
+            previous = point
+        }
+        return result
+    }
+
     fun write(points: List<GpxTrackPoint>, name: String, output: File): File {
         output.parentFile?.mkdirs()
         output.bufferedWriter().use { out ->

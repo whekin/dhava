@@ -22,3 +22,6 @@ deploy/secrets/*
 
 # Claude Code local
 .claude/settings.local.json
+
+# Local ride evidence and diagnostic outputs (never publish raw recordings).
+/tmp/

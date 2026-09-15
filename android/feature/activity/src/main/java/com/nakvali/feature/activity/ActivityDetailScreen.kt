@@ -1,6 +1,10 @@
 package com.nakvali.feature.activity
 
+import android.app.Activity
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.clickable
@@ -121,9 +125,55 @@ fun ActivityDetailScreen(
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val stravaConnection by viewModel.stravaConnection.collectAsState()
+    val exportState by viewModel.exportState.collectAsState()
     val context = LocalContext.current
     val developerMode = remember(context) {
         RecorderSettings.developerModeEnabled(context)
+    }
+
+    // Save the source path with the activity-result registration so rotation or
+    // process recreation while the system picker is open can finish the copy.
+    var pendingSavePath by rememberSaveable(recordingId) { mutableStateOf<String?>(null) }
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val path = pendingSavePath
+        pendingSavePath = null
+        val uri = result.data?.data
+        if (result.resultCode == Activity.RESULT_OK && uri != null && path != null) {
+            viewModel.saveExport(File(path), uri)
+        } else {
+            viewModel.exportFeedback(message = "Save cancelled")
+        }
+    }
+    LaunchedEffect(exportState.prepared) {
+        val prepared = exportState.prepared ?: return@LaunchedEffect
+        try {
+            when (prepared.destination) {
+                ExportDestination.SAVE -> {
+                    pendingSavePath = prepared.file.absolutePath
+                    saveFileLauncher.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = prepared.kind.mimeType
+                        putExtra(Intent.EXTRA_TITLE, prepared.file.name)
+                    })
+                    viewModel.exportFeedback()
+                }
+                ExportDestination.SHARE -> {
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", prepared.file)
+                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                        type = prepared.kind.mimeType
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = android.content.ClipData.newRawUri(prepared.file.name, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }, "Share file"))
+                    viewModel.exportFeedback()
+                }
+            }
+        } catch (error: Exception) {
+            pendingSavePath = null
+            viewModel.exportFeedback(error = error.message ?: "Could not open the selected action")
+        }
     }
 
     // Pops the screen once the entry disappears (deleted here or elsewhere).
@@ -152,33 +202,8 @@ fun ActivityDetailScreen(
         stravaConnection = stravaConnection,
         developerMode = developerMode,
         onBack = onBack,
-        onExport = { kind ->
-            viewModel.export(kind) { result ->
-                val file = result.getOrElse { error ->
-                    Toast.makeText(
-                        context,
-                        error.message ?: "Export failed",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                    return@export
-                }
-                val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-                context.startActivity(
-                    Intent.createChooser(
-                        Intent(Intent.ACTION_SEND).apply {
-                            type = kind.mimeType
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        },
-                        when (kind) {
-                            ActivityExportKind.RAW_RECORDING -> "Share raw recording"
-                            ActivityExportKind.HEALTH_LOG -> "Share recording health log"
-                            else -> "Share GPX"
-                        },
-                    ),
-                )
-            }
-        },
+        exportState = exportState,
+        onExport = viewModel::prepareExport,
         onCreateSegment = onCreateSegment,
         onOpenSegment = onOpenSegment,
         onAddBike = viewModel::addBike,
@@ -227,7 +252,8 @@ private fun ActivityDetailContent(
     stravaConnection: StravaConnectionState,
     developerMode: Boolean,
     onBack: () -> Unit,
-    onExport: (ActivityExportKind) -> Unit,
+    exportState: ActivityExportState,
+    onExport: (ActivityExportKind, ExportDestination) -> Unit,
     onCreateSegment: () -> Unit,
     onOpenSegment: (String) -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
@@ -350,6 +376,7 @@ private fun ActivityDetailContent(
                 processedExportAvailable = processedExportAvailable,
                 healthLogAvailable = healthLogAvailable,
                 stravaConnection = stravaConnection,
+                exportState = exportState,
                 onExport = onExport,
                 onCreateSegment = onCreateSegment,
                 onOpenSegment = onOpenSegment,
@@ -495,7 +522,8 @@ private fun ActivityDetailsSheet(
     processedExportAvailable: Boolean,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
-    onExport: (ActivityExportKind) -> Unit,
+    exportState: ActivityExportState,
+    onExport: (ActivityExportKind, ExportDestination) -> Unit,
     onCreateSegment: () -> Unit,
     onOpenSegment: (String) -> Unit,
     onConnectStrava: () -> Unit,
@@ -540,7 +568,7 @@ private fun ActivityDetailsSheet(
                     }
                 }
                 recording?.let { RecordingStatusPill(it.status) }
-                ExportMenu(
+                ActivityExportButton(
                     rawGpsAvailable = track is TrackState.Loaded,
                     processedAvailable = processedExportAvailable,
                     processedLoading = diagnostics is DiagnosticTrackState.Loading,
@@ -551,6 +579,8 @@ private fun ActivityDetailsSheet(
                     healthLogAvailable = healthLogAvailable,
                     stravaConnection = stravaConnection,
                     recording = recording,
+                    ride = ride,
+                    exportState = exportState,
                     onExport = onExport,
                     onConnectStrava = onConnectStrava,
                     onExportStrava = onExportStrava,
@@ -690,206 +720,6 @@ private fun ActivityOverflowMenu(
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun ExportMenu(
-    rawGpsAvailable: Boolean,
-    processedAvailable: Boolean,
-    processedLoading: Boolean,
-    rawRecordingAvailable: Boolean,
-    healthLogAvailable: Boolean,
-    stravaConnection: StravaConnectionState,
-    recording: LocalRecording?,
-    initiallyExpanded: Boolean = false,
-    onExport: (ActivityExportKind) -> Unit,
-    onConnectStrava: () -> Unit,
-    onExportStrava: () -> Unit,
-    onRetryStrava: () -> Unit,
-    onViewStrava: (Long) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(initiallyExpanded) }
-    Box {
-        IconButton(
-            onClick = { expanded = true },
-            enabled = rawGpsAvailable || rawRecordingAvailable || healthLogAvailable,
-        ) {
-            Icon(Icons.Filled.Share, contentDescription = "Export")
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuItem(
-                text = {
-                    ExportOptionText(
-                        title = "Processed · 5 Hz",
-                        description = when {
-                            processedAvailable -> "GPS-bounded finalized track"
-                            processedLoading -> "Preparing finalized track…"
-                            else -> "Not available for this ride"
-                        },
-                    )
-                },
-                enabled = processedAvailable,
-                onClick = {
-                    expanded = false
-                    onExport(ActivityExportKind.PROCESSED_5_HZ)
-                },
-            )
-            DropdownMenuItem(
-                text = {
-                    ExportOptionText(
-                        title = "Raw GPS",
-                        description = "Original recorded fixes",
-                    )
-                },
-                enabled = rawGpsAvailable,
-                onClick = {
-                    expanded = false
-                    onExport(ActivityExportKind.RAW_GPS)
-                },
-            )
-            StravaExportMenuItem(
-                connection = stravaConnection,
-                recording = recording,
-                processedAvailable = processedAvailable,
-                onClick = { action ->
-                    expanded = false
-                    when (action) {
-                        StravaMenuAction.Connect -> onConnectStrava()
-                        StravaMenuAction.Export -> onExportStrava()
-                        StravaMenuAction.Retry -> onRetryStrava()
-                        is StravaMenuAction.View -> onViewStrava(action.activityId)
-                    }
-                },
-            )
-            DropdownMenuItem(
-                text = {
-                    ExportOptionText(
-                        title = "Recording health (.jsonl)",
-                        description = "Memory, thermal, writer and restart diagnostics",
-                    )
-                },
-                enabled = healthLogAvailable,
-                onClick = {
-                    expanded = false
-                    onExport(ActivityExportKind.HEALTH_LOG)
-                },
-            )
-            DropdownMenuItem(
-                text = {
-                    ExportOptionText(
-                        title = "Raw recording (.jsonl.gz)",
-                        description = "Full sensor data for diagnostics",
-                    )
-                },
-                enabled = rawRecordingAvailable,
-                onClick = {
-                    expanded = false
-                    onExport(ActivityExportKind.RAW_RECORDING)
-                },
-            )
-        }
-    }
-}
-
-private sealed interface StravaMenuAction {
-    data object Connect : StravaMenuAction
-    data object Export : StravaMenuAction
-    data object Retry : StravaMenuAction
-    data class View(val activityId: Long) : StravaMenuAction
-}
-
-@Composable
-private fun StravaExportMenuItem(
-    connection: StravaConnectionState,
-    recording: LocalRecording?,
-    processedAvailable: Boolean,
-    onClick: (StravaMenuAction) -> Unit,
-) {
-    val exportStatus = recording?.stravaExportStatus
-    val activityId = recording?.stravaActivityId
-    val title: String
-    val description: String
-    val enabled: Boolean
-    val action: StravaMenuAction
-
-    when {
-        exportStatus == StravaExportStatus.UPLOADED && activityId != null -> {
-            title = "View on Strava"
-            description = "Open the uploaded activity"
-            enabled = true
-            action = StravaMenuAction.View(activityId)
-        }
-        exportStatus == StravaExportStatus.QUEUED -> {
-            title = "Strava upload queued"
-            description = "Will send when a network is available"
-            enabled = false
-            action = StravaMenuAction.Export
-        }
-        exportStatus == StravaExportStatus.PROCESSING -> {
-            title = "Sending to Strava…"
-            description = "The upload is being processed"
-            enabled = false
-            action = StravaMenuAction.Export
-        }
-        exportStatus == StravaExportStatus.FAILED &&
-            connection is StravaConnectionState.Connected -> {
-            title = "Retry Strava export"
-            description = recording.stravaError ?: "The previous upload failed"
-            enabled = processedAvailable
-            action = StravaMenuAction.Retry
-        }
-        connection is StravaConnectionState.Connected -> {
-            title = "Export to Strava"
-            description = connection.athleteName
-                .takeIf(String::isNotBlank)
-                ?.let { "Connected as $it" }
-                ?: "Send the processed 5 Hz track"
-            enabled = recording != null && processedAvailable
-            action = StravaMenuAction.Export
-        }
-        connection == StravaConnectionState.Loading ||
-            connection == StravaConnectionState.Connecting -> {
-            title = "Strava"
-            description = "Checking connection…"
-            enabled = false
-            action = StravaMenuAction.Connect
-        }
-        else -> {
-            title = "Connect Strava"
-            description = (connection as? StravaConnectionState.Unavailable)?.message
-                ?: "Set up one-tap activity uploads"
-            enabled = true
-            action = StravaMenuAction.Connect
-        }
-    }
-
-    DropdownMenuItem(
-        text = {
-            ExportOptionText(
-                title = title,
-                description = description,
-            )
-        },
-        enabled = enabled,
-        onClick = { onClick(action) },
-    )
-}
-
-@Composable
-private fun ExportOptionText(title: String, description: String) {
-    Column {
-        Text(text = title, style = MaterialTheme.typography.labelLarge)
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -1295,7 +1125,8 @@ private fun ActivityDetailContentPreview() {
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),
             developerMode = false,
             onBack = {},
-            onExport = { _ -> },
+            exportState = ActivityExportState(),
+            onExport = { _, _ -> },
             onCreateSegment = {},
             onOpenSegment = {},
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
@@ -1320,7 +1151,7 @@ private fun ExportMenuPreview() {
                     .padding(NakvaliSpacing.xLarge),
                 contentAlignment = Alignment.TopEnd,
             ) {
-                ExportMenu(
+                ActivityExportButton(
                     rawGpsAvailable = true,
                     processedAvailable = true,
                     processedLoading = false,
@@ -1332,7 +1163,9 @@ private fun ExportMenuPreview() {
                         startedAtMs = 1_767_000_000_000,
                     ),
                     initiallyExpanded = true,
-                    onExport = {},
+                    exportState = ActivityExportState(),
+                    ride = null,
+                    onExport = { _, _ -> },
                     onConnectStrava = {},
                     onExportStrava = {},
                     onRetryStrava = {},

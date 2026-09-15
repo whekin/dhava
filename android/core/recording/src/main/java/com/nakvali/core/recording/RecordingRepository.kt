@@ -1050,15 +1050,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
             "strava/nakvali-${recording.id.take(8)}-processed.gpx",
         )
         GpxExporter.write(
-            points = artifact.finalizedTrack.map { point ->
-                GpxTrackPoint(
-                    timestampMs = point.timestampMs,
-                    lat = point.lat,
-                    lon = point.lon,
-                    altitudeM = point.altitudeM,
-                    sectionId = point.sectionId,
-                )
-            },
+            points = GpxExporter.processedPoints(artifact.finalizedTrack, excludeTransport = true)
+                .also { check(it.size >= 2) { "No riding track remains after excluding transport" } },
             name = recording.title ?: "Nakvali ride",
             output = output,
         )

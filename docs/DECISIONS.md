@@ -840,3 +840,44 @@ activity results are always recomputed canonically from the raw on-device file.
   leaving old map chrome behind the next screen. This is a visual decision,
   separate from the renderer crash workaround. Within-screen map gestures and
   component animations remain unchanged.
+
+## 2026-09-15 — Activity classification recognizes sparse transport cadence
+
+- The recorder's five-second GPS power profile is evidence cadence, not a repeated
+  loss of recording continuity. Activity classification accepts intervals up to
+  7.5 s only when at least two coarse intervals occur in the surrounding 30 s on
+  either side, within the same manual section. Isolated gaps in dense recording,
+  missing full coarse fixes and manual pauses still split classification.
+- Sparse classification windows expand from 10 s to at most 30 s when needed to
+  retain the existing five-point minimum. No coordinates are invented; geometry,
+  timing and segment matching keep their existing stricter gap boundaries.
+- This fixes the observed shuttle road dips without increasing the 240 s vehicle
+  interruption heuristic. That heuristic remains a contextual assumption, not a
+  physical guarantee. Algorithm `gps-bounded-0.11` invalidates derived caches.
+
+## 2026-09-15 — Riding-only GPX export excludes canonical transport
+
+- Direct Strava delivery exports only points not labelled `LikelyMotorized` by
+  Rust. Manual Share exposes `Riding only · GPX` alongside the complete processed
+  GPX and raw GPS. Unknown, still and ordinary transit remain included.
+- Filtering never changes source recordings or original timestamps/elevations.
+  Every excluded span, manual pause and gap over 3 s starts a new GPX `trkseg`;
+  a file with fewer than two remaining points is rejected before sharing/upload.
+- Existing uploaded Strava activities are not rewritten. GPX segment boundaries
+  express discontinuities, but Strava's own distance/moving-time interpretation
+  still needs a real import check; elapsed time is not artificially compressed.
+
+## 2026-09-15 — Export separates file contents from destination
+
+- Activity export opens a modal task sheet. GPX is the default, with an explicit
+  transport-exclusion switch and Rust-derived transport distance/time. Complete
+  GPX remains available by turning the switch off. Strava is a separate action
+  with its always-exclude-transport policy stated beside it.
+- Save file opens Android's `ACTION_CREATE_DOCUMENT` picker; Share opens
+  `ACTION_SEND`. The same choices work for GPX, original GPS, raw sensor recordings
+  and health logs. Diagnostics are progressively disclosed and never required to
+  understand ordinary export. No broad storage permission is requested.
+- Preparation and destination writes expose busy/error/success states. A prepared
+  file path survives activity-result recreation while the picker is open; provider
+  I/O runs off the main thread and success is emitted only after streams close.
+  Content scrolls independently above pinned Save/Share actions.

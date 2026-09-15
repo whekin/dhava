@@ -1,6 +1,7 @@
 package com.nakvali.feature.activity
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,7 @@ import com.nakvali.fusion.CanonicalTrackPoint
 import com.nakvali.fusion.RideAnalysis
 import com.nakvali.fusion.RideProfile
 import com.nakvali.fusion.RecordingReplay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -73,6 +75,7 @@ data class ActivityRideInsights(
 
 /** What the share menu can produce; the mime type drives the share intent. */
 enum class ActivityExportKind(val mimeType: String) {
+    RIDING_ONLY("application/gpx+xml"),
     PROCESSED_5_HZ("application/gpx+xml"),
     RAW_GPS("application/gpx+xml"),
     /** The raw sensor recording as-is, for diagnostics/bug reports. */
@@ -185,7 +188,44 @@ class ActivityDetailViewModel(
         repository.retryStravaExport(recordingId)
     }
 
-    fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {
+    private val _exportState = MutableStateFlow(ActivityExportState())
+    val exportState: StateFlow<ActivityExportState> = _exportState.asStateFlow()
+
+    fun prepareExport(kind: ActivityExportKind, destination: ExportDestination) {
+        if (_exportState.value.busy || _exportState.value.prepared != null) return
+        _exportState.value = ActivityExportState(busy = true, message = "Preparing file…")
+        export(kind) { result ->
+            _exportState.value = result.fold(
+                onSuccess = { ActivityExportState(prepared = PreparedActivityExport(it, kind, destination)) },
+                onFailure = { ActivityExportState(error = it.message ?: "Could not prepare the file. Try again.") },
+            )
+        }
+    }
+
+    fun exportFeedback(message: String? = null, error: String? = null) {
+        _exportState.value = ActivityExportState(message = message, error = error)
+    }
+
+    fun saveExport(file: File, uri: Uri) {
+        _exportState.value = ActivityExportState(busy = true, message = "Saving file…")
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    copyExportFile(file) {
+                        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
+                    }
+                }
+                exportFeedback(message = "Saved ${file.name}")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.w("ActivityExport", "Document save failed", error)
+                exportFeedback(error = "Could not save the file. Choose another location and try again.")
+            }
+        }
+    }
+
+    private fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {
         if (kind == ActivityExportKind.RAW_RECORDING) {
             exportRawRecording(onResult)
             return
@@ -198,17 +238,11 @@ class ActivityDetailViewModel(
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
         val artifact = canonicalArtifact
         val points = when (kind) {
-            ActivityExportKind.PROCESSED_5_HZ -> artifact?.finalizedTrack
-                ?.takeIf { it.isNotEmpty() }
-                ?.map { point ->
-                    GpxTrackPoint(
-                        timestampMs = point.timestampMs,
-                        lat = point.lat,
-                        lon = point.lon,
-                        altitudeM = point.altitudeM,
-                        sectionId = point.sectionId,
-                    )
-                }
+            ActivityExportKind.RIDING_ONLY, ActivityExportKind.PROCESSED_5_HZ -> artifact
+                ?.let { GpxExporter.processedPoints(
+                    it.finalizedTrack,
+                    excludeTransport = kind == ActivityExportKind.RIDING_ONLY,
+                ) }
             ActivityExportKind.RAW_GPS -> {
                 artifact?.rawTrack?.map { point ->
                     GpxTrackPoint(point.timestampMs, point.lat, point.lon, point.altitudeM, point.sectionId)
@@ -231,11 +265,15 @@ class ActivityDetailViewModel(
             ActivityExportKind.RAW_RECORDING -> null // handled above
             ActivityExportKind.HEALTH_LOG -> null // handled above
         }
-        if (points.isNullOrEmpty()) {
-            onResult(Result.failure(IllegalStateException("The selected GPX track is unavailable")))
+        if (points.isNullOrEmpty() || (kind == ActivityExportKind.RIDING_ONLY && points.size < 2)) {
+            onResult(Result.failure(IllegalStateException(
+                if (kind == ActivityExportKind.RIDING_ONLY) "No riding track remains after excluding transport"
+                else "The selected GPX track is unavailable",
+            )))
             return
         }
         val suffix = when (kind) {
+            ActivityExportKind.RIDING_ONLY -> "riding-only"
             ActivityExportKind.PROCESSED_5_HZ -> "processed-5hz"
             ActivityExportKind.RAW_GPS -> "raw-gps"
             ActivityExportKind.RAW_RECORDING -> error("unreachable")

@@ -9,8 +9,14 @@ use crate::canonical::ascent_descent;
 use crate::motion::{MotionSample, motion_samples};
 use crate::{CanonicalTrackPoint, ImuSample};
 
+// Activity labels tolerate the recorder's five-second transport cadence plus
+// scheduling jitter. Geometry and segment timing keep their stricter gap rules.
 const MAX_CONTIGUOUS_GAP_MS: i64 = 3_000;
+const MAX_SPARSE_CADENCE_MS: i64 = 7_500;
+const CADENCE_CONTEXT_MS: i64 = 30_000;
 const TARGET_WINDOW_MS: i64 = 10_000;
+// Allow sparse transport fixes to meet the unchanged evidence minimum.
+const SPARSE_WINDOW_MS: i64 = 30_000;
 const MIN_EVIDENCE_DURATION_MS: i64 = 6_000;
 const MIN_EVIDENCE_POINTS: usize = 5;
 const CLEAR_MOVEMENT_SPEED_MPS: f64 = 1.2;
@@ -156,8 +162,10 @@ fn contiguous_spans(track: &[CanonicalTrackPoint]) -> Vec<(usize, usize)> {
     let mut start = 0;
     for index in 1..track.len() {
         let gap_ms = track[index].timestamp_ms - track[index - 1].timestamp_ms;
+        let sparse_cadence = (MAX_CONTIGUOUS_GAP_MS + 1..=MAX_SPARSE_CADENCE_MS).contains(&gap_ms)
+            && has_sparse_cadence(track, index);
         if track[index].section_id != track[index - 1].section_id
-            || !(1..=MAX_CONTIGUOUS_GAP_MS).contains(&gap_ms)
+            || (!(1..=MAX_CONTIGUOUS_GAP_MS).contains(&gap_ms) && !sparse_cadence)
         {
             spans.push((start, index));
             start = index;
@@ -165,6 +173,26 @@ fn contiguous_spans(track: &[CanonicalTrackPoint]) -> Vec<(usize, usize)> {
     }
     spans.push((start, track.len()));
     spans
+}
+
+/// Recognize repeated coarse intervals near a fix, including transitions back
+/// to dense recording. An isolated dropout in an otherwise dense trace still
+/// splits classification; a missing full coarse fix (>7.5 s) also splits it.
+fn has_sparse_cadence(track: &[CanonicalTrackPoint], index: usize) -> bool {
+    let point = &track[index];
+    let start = track.partition_point(|p| p.timestamp_ms < point.timestamp_ms - CADENCE_CONTEXT_MS);
+    let end = track.partition_point(|p| p.timestamp_ms <= point.timestamp_ms + CADENCE_CONTEXT_MS);
+    track[start..end]
+        .windows(2)
+        .filter(|pair| {
+            pair[0].section_id == point.section_id
+                && pair[1].section_id == point.section_id
+                && (MAX_CONTIGUOUS_GAP_MS + 1..=MAX_SPARSE_CADENCE_MS)
+                    .contains(&(pair[1].timestamp_ms - pair[0].timestamp_ms))
+        })
+        .take(2)
+        .count()
+        == 2
 }
 
 fn classify_span(
@@ -198,6 +226,21 @@ fn classify_span(
         let window_start =
             span.partition_point(|candidate| candidate.timestamp_ms < window_start_ms);
         let window_end = span.partition_point(|candidate| candidate.timestamp_ms <= window_end_ms);
+        let (window_start, window_end, window_start_ms, window_end_ms) =
+            if window_end - window_start < MIN_EVIDENCE_POINTS {
+                let duration = SPARSE_WINDOW_MS.min(span_duration_ms);
+                let start_ms = (point.timestamp_ms - duration / 2)
+                    .clamp(span_start_ms, span_end_ms - duration);
+                let end_ms = start_ms + duration;
+                (
+                    span.partition_point(|p| p.timestamp_ms < start_ms),
+                    span.partition_point(|p| p.timestamp_ms <= end_ms),
+                    start_ms,
+                    end_ms,
+                )
+            } else {
+                (window_start, window_end, window_start_ms, window_end_ms)
+            };
         let window = &span[window_start..window_end];
         let Some(evidence) =
             window_evidence(window, motion_samples, window_start_ms, window_end_ms)
@@ -1061,6 +1104,104 @@ mod tests {
                 .iter()
                 .all(|point| point.state == ActivityState::LikelyMotorized),
             "a road dip broke the shuttle leg apart",
+        );
+    }
+
+    #[test]
+    fn transport_power_cadence_keeps_a_road_dip_inside_the_shuttle() {
+        // Transport power saving gives accepted anchors every five seconds;
+        // descending restores dense recording. Geometry must stay gapped, but
+        // that cadence change must not erase the surrounding vehicle evidence.
+        let mut track: Vec<_> = linear_track(0, 90, Some(100.0), 1.5, 12.0, 0)
+            .into_iter()
+            .step_by(5)
+            .collect();
+        track.extend(linear_track(95_000, 60, Some(235.0), -0.8, 12.0, 0));
+        track.extend(
+            linear_track(160_000, 90, Some(187.0), 1.5, 12.0, 0)
+                .into_iter()
+                .step_by(5),
+        );
+        let classified = classify_activity(&track, &[]);
+        assert!(
+            classified
+                .iter()
+                .all(|p| p.state == ActivityState::LikelyMotorized),
+            "five-second transport anchors split the shuttle: {:?}",
+            classified.iter().map(|p| p.state).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sparse_transport_cadence_does_not_absorb_the_ride_after_unloading() {
+        let mut track: Vec<_> = linear_track(0, 90, Some(100.0), 1.5, 12.0, 0)
+            .into_iter()
+            .step_by(5)
+            .collect();
+        track.extend(waiting_track(95_000, 60, 235.0, 0));
+        track.extend(linear_track(156_000, 600, Some(235.0), -0.3, 6.0, 0));
+        let labels = classify_activity(&track, &[]);
+        for (point, label) in track.iter().zip(labels) {
+            if point.timestamp_ms >= 165_000 {
+                assert_eq!(label.state, ActivityState::Downhill);
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_cadence_never_bridges_a_pause_or_a_missing_full_fix() {
+        for (start_ms, section) in [(100_000, 0), (95_000, 1)] {
+            let mut track: Vec<_> = linear_track(0, 90, Some(100.0), 1.5, 12.0, 0)
+                .into_iter()
+                .step_by(5)
+                .collect();
+            let split = track.len();
+            track.extend(
+                linear_track(start_ms, 90, Some(235.0), -0.5, 6.0, section)
+                    .into_iter()
+                    .step_by(5),
+            );
+            assert_eq!(
+                contiguous_spans(&track),
+                vec![(0, split), (split, track.len())]
+            );
+            let labels = classify_activity(&track, &[]);
+            assert!(
+                labels[split..]
+                    .iter()
+                    .all(|label| label.state == ActivityState::Downhill)
+            );
+        }
+    }
+
+    #[test]
+    fn field_cadence_transition_keeps_the_shuttle_road_dip_motorized() {
+        // Location-free extract of be697d95: a one-minute road dip bracketed
+        // by the transport recorder's irregular five-second cadence.
+        let track: Vec<_> = include_str!("../testdata/transport-cadence.csv")
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let columns: Vec<_> = line.split(',').collect();
+                point(
+                    columns[0].parse().unwrap(),
+                    Some(columns[1].parse().unwrap()),
+                    columns[2].parse().unwrap(),
+                    false,
+                    0,
+                )
+            })
+            .collect();
+        let labels = classify_activity(&track, &[]);
+        let dip: Vec<_> = track
+            .iter()
+            .zip(&labels)
+            .filter(|(point, _)| (90_000..130_000).contains(&point.timestamp_ms))
+            .collect();
+        assert!(!dip.is_empty());
+        assert!(
+            dip.iter()
+                .all(|(_, label)| label.state == ActivityState::LikelyMotorized)
         );
     }
 }

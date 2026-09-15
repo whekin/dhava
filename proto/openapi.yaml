@@ -194,7 +194,10 @@ paths:
       description: >
         Raw GPS, IMU, barometer and health data are never accepted. Repeating the
         same external_id polls the existing Strava upload instead of submitting
-        a second activity.
+        a second activity. The client excludes canonical LikelyMotorized points,
+        preserving original timestamps and separate GPX track segments across
+        excluded transport, manual pauses and recording gaps. No remaining riding
+        track is an export error on the client; existing uploads are not replaced.
       operationId: exportActivityToStrava
       security:
         - privateAlphaAccessKey: []

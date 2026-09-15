@@ -3257,3 +3257,109 @@ sample count, median and p95 sample interval and ride-window coverage for a real
 measured on the S25. Open question left for later: whether Nakvali should also write an
 `ExerciseSessionRecord` back to Health Connect so rides surface in other apps, which is a
 write into the user's health store and needs explicit opt-in.
+## 2026-09-07 — Fresh-eyes product and measurement assessment
+
+Reviewed vision, roadmap, recent field failures, decisions, bounded fusion, segment
+uncertainty/PR selection and transport classification. This is an assessment, not an
+accepted architecture change; no production code was changed and no tests were run.
+
+Main concerns: the gate uncertainty model assumes independent endpoint errors and
+uses horizontal accuracy divided by speed without field calibration; countable PRs
+are ordered by elapsed time even when their difference is unresolved by the reported
+margins. The 240 s shuttle interruption rule can accept a vehicle bridge before
+checking riding evidence, generalizing one Kojori day's turnaround times. Raw IMU
+adds consistency evidence but does not itself authenticate a ride. GPS-bounded
+interpolation is a sensible existing limit, not proof that IMU improves timing.
+
+Recommended next milestone: a small multi-device, multi-mount field corpus with
+independent gate timing, GNSS-only versus IMU-assisted comparisons, held-out rides,
+recording continuity/battery metrics and explicit false-rejection rates. Keep public
+leaderboards and new enrichment work deferred while testing whether local lap review
+and trustworthy personal comparisons provide enough user value. Revisit the absolute
+300 m floor as a quality heuristic rather than a universal timing limit. User has not
+yet selected or authorized an implementation direction from these recommendations.
+
+## 2026-09-15 — Shuttle cadence regression and riding-only GPX
+
+Replayed the owner's latest `be697d95` recording locally. The false downhill spans
+around 12:28, 12:36 and 14:25 were not longer than the existing 240 s bridge: the
+recorder's five-second transport GPS cadence repeatedly broke the classifier's
+3 s continuity boundary, and its 10 s evidence window lacked five points. A
+synthetic cadence-transition regression failed with Unknown climbs surrounding
+Downhill before the fix. A location-free field extract now covers the irregular
+cadence transition too; raw GPS/IMU and diagnostic outputs stay in ignored `tmp/`.
+
+Classification now recognizes repeated sparse cadence (up to 7.5 s with nearby
+coarse-interval support) and extends undersampled evidence windows to 30 s. Dense
+isolated gaps, pauses and missing full coarse fixes remain boundaries. The 240 s
+bridge policy was not broadened. Version `gps-bounded-0.11` rebuilds old artifacts.
+On the full recording the three identified dips become motorized; labels in the
+12:50–13:50 and 14:59–16:35 riding intervals are unchanged. All 72,500 canonical
+coordinates, timestamps, altitudes, speeds and section IDs are identical. Riding
+distance changes from 63.37 to 37.89 km and transport from 29.30 to 54.78 km.
+
+Added shared processed-GPX selection and a `Riding only · GPX` export option.
+Direct Strava delivery uses the same exclusion of canonical LikelyMotorized points.
+The complete processed and raw exports remain available. Tests cover transport at
+both ends/in the middle, pauses, GNSS gaps, unchanged timestamps/elevation/input,
+empty results and parsed XML track-segment boundaries. No Strava upload was made.
+Updated the API description without changing request fields or backend behavior.
+
+Verification so far: 147 Rust unit tests plus two real-fixture integration tests,
+strict Clippy, Android recording/activity unit tests, activity lint, full debug
+and signed release assembly passed. Both shipped Android native libraries were
+rebuilt. Device export verification is recorded below when complete.
+
+Final export probe used the production Kotlin GpxExporter on all 72,500 newly
+classified canonical points: 53,975 points remain in 32 XML track segments; all
+18,525 LikelyMotorized points are absent. The generated 8.1 MiB file is available
+locally as `tmp/nakvali-be697d95-riding-only.gpx`. The temporary probe and CSV
+inspection example were moved into ignored `tmp/`; only the small location-free
+regression fixture is tracked.
+
+Visual verification remains pending: the S25 was locked, the shared emulator was
+being driven by another project's instrumentation (so it was left alone), and no
+compatible Android Studio preview instance was available. The debug APK was
+installed and the field recording copied into the emulator without removing its
+existing rides; no release was installed on the S25 and no activity was sent to
+Strava. The signed release APK is ready for the follow-up device check. Remaining
+product limitation: filtering removes detected transport, not proof of every vehicle
+metre; ambiguous residuals stay included and the full GPX remains available.
+
+## 2026-09-15 — Export UX and explicit Save file
+
+Replaced the mixed GPX/Strava/debug dropdown with a dedicated export task sheet.
+Default GPX offers an Exclude transport switch, detected transport distance/time
+and riding-distance summary. Save file and Share are distinct pinned actions;
+Strava remains independent and raw GPS/sensor/health choices live in an expandable
+Original files & diagnostics section. Unavailable data, preparing, saving, failure,
+cancellation and successful filename feedback are represented explicitly.
+
+Save uses ACTION_CREATE_DOCUMENT and copies the prepared file through the selected
+provider without storage permissions. Preparation state lives in the ViewModel;
+the pending source path is saveable while the system picker owns the foreground.
+Unit tests verify exact copying, closed streams, missing-source protection, null
+providers and propagated write failures. Activity tests, lint, full debug and signed
+release assembly pass.
+
+Created an independent temporary AVD on emulator-5556 because emulator-5554 was in
+use by another project's tests. Imported a verified copy of be697d95 there, saved
+GPX (8.46 MB) and raw (93.68 MB) into Downloads through the actual UI, and matched
+SHA-256 against the prepared GPX and original raw respectively. GPX saving also
+succeeded after `am kill com.nakvali.app` while the document picker was open; the
+sheet restored and reported the saved filename. Verified picker cancellation,
+raw-file Sharesheet without sending it, light/dark themes, 360 dp compact width,
+1.3 font scale, and scrolling diagnostics with pinned actions. Render inspection
+caught clipping from Strava's capsule TextButton; replaced it with a semantic
+clickable row and inspected the corrected rendering. Screenshots are in ignored
+`tmp/export-panel-final.png` and `tmp/export-panel-large-font.png` (the latter
+records the pre-fix clipping). Native PreviewActivity provided the final isolated
+render after the fix. No Strava activity was published and the S25 was not updated.
+
+## 2026-09-15 — Owner-requested Samsung installation and commit
+
+Confirmed no Nakvali recording service was running on Galaxy S25 RFCY904ZXQY,
+then installed the verified signed release with `adb install -r`; Android returned
+Success. Existing application data was preserved. The installed build includes
+`gps-bounded-0.11`, transport-free GPX and the new Save/Share export workflow.
+Fetched origin and confirmed main was neither ahead nor behind before committing.
