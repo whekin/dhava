@@ -290,7 +290,7 @@ func TestExportIsIdempotentAndPollsExistingUpload(t *testing.T) {
 		Title:      "Forest ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
-		GPX:        []byte("<gpx/>"),
+		File:       []byte("<gpx/>"),
 	}
 
 	first, err := service.Export(context.Background(), testDeviceToken, input)
@@ -337,7 +337,7 @@ func TestExportPersistsRotatedRefreshToken(t *testing.T) {
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
-		GPX:        []byte("<gpx/>"),
+		File:       []byte("<gpx/>"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestDuplicateAfterAmbiguousRetryBecomesUploaded(t *testing.T) {
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
-		GPX:        []byte("<gpx/>"),
+		File:       []byte("<gpx/>"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -397,7 +397,7 @@ func TestUnauthorizedRefreshRevokesConnection(t *testing.T) {
 		Title:      "Ride",
 		SportType:  "MountainBikeRide",
 		Filename:   "ride.gpx",
-		GPX:        []byte("<gpx/>"),
+		File:       []byte("<gpx/>"),
 	})
 	if !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("error = %v, want ErrNotConnected", err)

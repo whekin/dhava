@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +33,7 @@ class CanonicalActivityStoreTest {
         val cached = store.loadOrCreate("ride", raw)
         assertEquals(1, produceCalls)
         assertEquals(first, cached)
+        assertSame("warm loads must not decompress and allocate the entire artifact again", first, cached)
         assertEquals(
             CanonicalActivityState.DOWNHILL,
             cached.finalizedTrack.single().activityState,
@@ -49,6 +51,30 @@ class CanonicalActivityStoreTest {
         val changedAlgorithm = store.loadOrCreate("ride", raw)
         assertEquals(3, produceCalls)
         assertEquals("gps-bounded-0.3", changedAlgorithm.algorithmVersion)
+    }
+
+    @Test fun `old analysis is previewed before rebuild but changed raw is never previewed`() = runBlocking {
+        val root = Files.createTempDirectory("nakvali-preview").toFile()
+        val raw = root.resolve("ride.gz").apply { writeText("raw") }
+        var version = "old"
+        val steps = mutableListOf<String>()
+        val store = CanonicalActivityStore(root.resolve("artifacts"), { version }, {
+            steps += "produce"
+            payload(version, 10.0)
+        })
+        store.loadOrCreate("ride", raw)
+        steps.clear()
+        version = "new"
+        val result = store.loadOrCreate("ride", raw, onPreview = {
+            assertEquals("old", it.algorithmVersion)
+            steps += "preview"
+        })
+        assertEquals(listOf("preview", "produce"), steps)
+        assertEquals("new", result.algorithmVersion)
+        steps.clear()
+        raw.appendText("changed")
+        store.loadOrCreate("ride", raw, onPreview = { steps += "preview" })
+        assertEquals(listOf("produce"), steps)
     }
 
     @Test fun `artifact with an older schema version is recomputed`() = runBlocking {

@@ -881,3 +881,118 @@ activity results are always recomputed canonically from the raw on-device file.
   file path survives activity-result recreation while the picker is open; provider
   I/O runs off the main thread and success is emitted only after streams close.
   Content scrolls independently above pinned Save/Share actions.
+
+## 2026-09-15 — Vehicle identity can survive one missed GPS fix
+
+Position/elevation evidence windows retain their existing gap boundaries. A second
+label-only pass can join independently detected vehicle spans across a gap of at
+most 12 s (one missed five-second transport fix plus jitter) when the IMU covers
+that gap with no interval over 250 ms. Manual pauses, longer GPS holes and missing
+IMU remain boundaries. Existing limits on the duration/shape of an interruption
+still apply. No positions are interpolated across the hole and segment timing
+keeps its previous continuity contract. Version: `gps-bounded-0.12`.
+
+## 2026-09-15 — Transport episodes replace window-island bridging
+
+Adopted whole transport episodes and explicit rider overrides; see
+`docs/adr/0003-transport-episodes-and-rider-overrides.md`. This supersedes the
+240 s vehicle-island and 0.12 label-bridge approach. Rust produces episode bounds
+alongside classified points; canonical schema v5 persists those bounds instead of
+reconstructing identity from line colours. Manual annotations live in the backed-up
+recording index and remain authoritative through algorithm upgrades. Algorithm
+`gps-bounded-0.13`; geometry and timing gap rules are unchanged.
+
+## 2026-09-15 — Progressive activity loading shows evidence before results
+
+Canonical loading reports actual stages and a bounded raw GPS preview from the
+same Rust parsing pass. The reader emits its first fix immediately and refreshes
+at roughly 500 ms intervals, with at most 2,000 preview points. Only reading has a
+percentage, based on compressed bytes consumed; later stages do not invent a
+percentage or ETA. Preview points are display-only and never enter metrics,
+segment timing, editing or processed GPX export.
+
+The repository retains bounded progress snapshots so Activity Detail can observe
+work already started at Finish. Finished snapshots are distinguished from active
+work. A source-fingerprint-matching cached artifact can supply previous GPS geometry
+while a new algorithm runs; its old measurements are not published as current.
+One in-memory canonical artifact avoids repeated gzip/JSON work, while source,
+algorithm/schema and persisted-file fingerprints still govern reuse.
+
+Activity Detail prioritizes its canonical data before rematching the segment
+library. It publishes track/totals before the optional profile, then fills segment
+results. Map sources update in place instead of reloading the style for each
+snapshot; user camera gestures suspend automatic fits and Fit activity restores
+the overview. The progress API does not change math or invalidate valid 0.13 caches.
+
+## 2026-09-15 — TCX is the preferred export; GPX cannot state a distance
+
+GPX has no distance field, so every reader derives kilometres from coordinates
+and bridges the gap left by each excluded transport episode with a straight line.
+A shared lift-served day exported at 36.9 km of riding was published by Strava as
+48.91 km — the 12.08 km of teleports charged to the rider. No GPX-side change can
+fix this; `<trkseg>` boundaries are ignored for distance.
+
+TCX states `DistanceMeters` per trackpoint and per lap, so the reader uses our
+number instead of measuring. Nakvali now offers TCX alongside GPX and uses TCX for
+the in-app Strava upload; GPX stays for readers that want nothing else. The
+straight lines still appear on Strava's map, which is a rendering choice we cannot
+reach; only the distance is now correct.
+
+The odometer comes from `ride_odometer_m` in `fusion-core`, derived from the same
+walk as `ride_totals`, so the uploaded figure cannot drift from the one the app
+shows. Each riding run becomes one `<Lap>`, keyed on a new `runId` that breaks only
+on transport or a manual pause — a dropped fix mid-descent is still the same run.
+
+The upload data type is taken from the file extension server-side; an unknown
+extension still means GPX so older clients keep working.
+
+## 2026-09-15 — Transport episodes are coalesced before they are published
+
+Label flicker around unloading split one uplift into seven throwaway episodes with
+single-point riding runs stranded between them, scattering one descent across the
+export. `label_episodes` now merges episodes separated by an insubstantial riding
+gap (under 60 s and 100 m), then discards episodes that are themselves under 60 s
+and 150 m. Merging is first on purpose: a real uplift chopped by a stray riding
+blip must be reassembled before anything is judged too small to keep.
+
+Both thresholds require the interval to be small in time *and* distance, so a
+vehicle stuck in traffic and a fast brief shuttle both survive. A discarded episode
+is relabelled from `non_motorized_classifications`, since the evidence that opened
+it still reads as a vehicle. On the recording that prompted this, 19 episodes became
+3 — the two real shuttles and one long stop — and 20 exported segments became 4.
+
+## 2026-09-15 — Ride bounds trim the ride, not the recording
+
+The rider can narrow an activity from its front and back so the walk to the
+trailhead and the standing around at the bottom stop counting. See
+`docs/adr/0004-ride-bounds-and-riding-runs.md`. A trim is a rider annotation of
+the same class as a transport override: absolute recording timestamps in the
+backed-up recording index, validated and applied in Rust, raw and geometry
+untouched, reset by discarding the annotation.
+
+Bounds narrow accounting, never the track. `ride_within` recomputes totals and
+the odometer over the kept span while the finalized track keeps every point and
+label, because the app's index correspondences — profile positions, segment
+attempt slices, odometer alignment — all assume the track keeps its length. A
+span outside the bounds counts toward neither the ride nor the transport.
+
+Segment matching does not see the trim, so a timed crossing in a trimmed head
+still stands and no rider can shop for a faster time by trimming. A trim
+therefore needs no revision counter. Displayed duration follows the trim
+explicitly, since it comes from the index entry rather than from Rust totals, and
+what the trim leaves out is stated on the activity beside the transport line.
+
+## 2026-09-15 — A riding run is a Rust object, and export can be one run
+
+Run enumeration moved into `ride_runs` in fusion-core, returning each run's
+bounds, index range and figures. It had been invented in Kotlin while
+`ride_breakdown` decided the same boundaries in Rust — tolerable while a run was
+an internal TCX detail, not once the rider picks one. Kotlin now labels export
+points from that list rather than deciding boundaries again.
+
+The export sheet offers the whole activity or one run. A run is addressed by its
+start time, never its ordinal, because any annotation edit renumbers runs. A
+single-run file rebases its odometer to zero, since TCX states an absolute
+distance per trackpoint. Strava stays whole-activity: the index entry holds one
+export status and the worker's unique work is per recording, so a single run is
+file-only and the sheet says so.

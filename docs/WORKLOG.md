@@ -3363,3 +3363,249 @@ then installed the verified signed release with `adb install -r`; Android return
 Success. Existing application data was preserved. The installed build includes
 `gps-bounded-0.11`, transport-free GPX and the new Save/Share export workflow.
 Fetched origin and confirmed main was neither ahead nor behind before committing.
+
+## 2026-09-15 — Remaining transport/transit island and first-open delay
+
+User clarified that the approximately 15 s activity delay occurred only on first
+open after the update. CanonicalActivityStore explicitly invalidates old algorithm
+artifacts and recomputes raw once, then reuses the persisted artifact; the report
+is consistent with that path. No recurring-latency regression was established and
+no loading optimization was made in this change.
+
+Reproduced a remaining vehicle-to-transit island with a failing Rust test: a short
+gently climbing section before a ten-second missing GPS fix loses the independently
+identified vehicle context on the far side despite continuous IMU. Added a bounded
+label-only context pass, retaining separate strict position evidence windows.
+It requires IMU coverage across each short GPS hole, rejects manual pauses and
+holes over 12 s, and reuses existing vehicle-bridge rules. Negative regressions
+cover missing IMU, interrupted IMU, manual pause and a longer GPS hole.
+
+Replayed the full be697d95 field recording: exactly nine sparse points at
+12:33:52–12:34:32 change from Transit to LikelyMotorized. All other labels and every
+position/time/elevation/speed/section remain unchanged. Riding distance becomes
+37.32 km rather than 37.89 km; transport becomes 55.35 rather than 54.78 km. Other
+reported mixed areas await a time/location example from the user; Transit remains
+ordinary movement outside a downhill, not a synonym for motorized transport.
+
+148 Rust unit tests plus two integration fixtures and strict Clippy pass. Native
+Android libraries and the release build are being refreshed below. No phone UI was
+interrupted: the S25 was in another application's workflow during inspection.
+
+Both Android native libraries were regenerated and full debug/signed release
+assembly passed. The 0.12 APK is ready; this follow-up has not been installed on
+the S25 or committed. Installing it will require one new canonical recomputation
+per previously cached ride, as with every algorithm-version change.
+
+## 2026-09-15 — Whole transport episodes and rider-editable boundaries
+
+The owner accepted a boarding-to-unloading episode model and manual correction of
+ambiguous bounds. Replaced window-island bridging with a stateful Rust episode
+pass: vehicle evidence establishes entry, road descents/flat stretches/short stops
+do not independently end transport, and stops plus subsequent motion resolve exit.
+Conservative descending-tail handling preserves riding when unloading was missed.
+The tuning choices are documented as estimates, not physical guarantees, in
+`docs/adr/0003-transport-episodes-and-rider-overrides.md`; glossary terms added to
+CONTEXT.md. This supersedes the uncommitted 0.12 bridge-only follow-up.
+
+Rust now returns explicit automatic episode bounds with canonical results; schema
+v5 persists them, rather than recreating identity from adjacent line colours.
+Algorithm gps-bounded-0.13 yields exactly three episodes on be697d95:
+12:02:38–12:41:15, 14:01:02–14:38:17 and 16:42:51–16:58:32. No DH/Transit islands
+remain within them. Known riding blocks 12:50–13:50 and 14:59–16:35 retain all their
+labels, and positions/timestamps/elevation are unchanged. Riding is 37.05 km;
+transport is 55.62 km. Broader field validation remains necessary, especially for
+missed unloading or a vehicle journey that itself ends downhill.
+
+Added Activity → More actions → Transport episodes: a selected-episode map, elapsed
+HH:MM:SS boundaries, coarse range slider, add/remove and Use automatic. Drafts stay
+separate until Apply. Rust validates intervals, applies the complete override and
+recomputes ride totals from the canonical positions. Corrections live in the backed-up
+recording index (null=automatic, empty=no transport) with a revision checked by
+segment-result caches and live PR arming. A bounded in-memory corrected projection
+feeds maps, statistics, discovery, matching and GPX; automatic artifacts/raw stay
+untouched. Basic activity data now publishes before the optional profile finishes.
+
+Validation: 151 Rust unit tests plus two integration fixtures, strict Clippy,
+Android recording/activity unit tests, activity lint and debug/release builds pass.
+Both Android native libraries and Kotlin bindings regenerated. On an isolated
+emulator, verified all three episodes, rejected a reversed interval without writing
+the index, moved the first start from 12:02:38 to 12:02:43, and confirmed revision 1
+persisted after a cold app restart. The GPX produced by the real Share workflow
+contains 53,633 points: 26 newly included points before the edited start and zero
+points inside the stored transport intervals. Use automatic removed the override
+and advanced revision to 2. Raw SHA-256 stayed identical throughout. Light/dark,
+360 dp width, font scale 1.3, keyboard visibility and scrolling to fields/reset
+were inspected; Apply remains pinned. Screenshots: tmp/transport-editor.png and
+tmp/transport-editor-dark.png. Test copies remain local; no external upload occurred.
+
+The Samsung disconnected before the final installation check, so this iteration
+is provided as a signed APK and has not been installed on the phone or committed.
+As with other algorithm changes, existing rides need one new canonical rebuild.
+
+## 2026-09-15 — Progressive activity loading and warm-cache reuse
+
+Replaced the blocking centre loader with a growing GPS preview and real processing
+stages. Native progress comes from the same gzip parsing pass, so no second raw
+scan competes with fusion. It emits the first GPS fix and bounded snapshots (up to
+2,000 points), throttles normal refreshes to 500 ms, and reports actual compressed
+bytes read. The UI shows a preview-through clock, reading percentage and subsequent
+stage names; metrics remain unavailable until canonical completion. Original/raw
+exports remain distinct from the display-only preview.
+
+The repository now broadcasts bounded progress by recording, including calculations
+started at Finish before the activity is opened. A finished retained preview is not
+presented as a currently running calculation. Valid source fingerprints allow old
+GPS geometry to be shown while an algorithm update runs. Added a one-entry in-memory
+canonical cache with disk/source invalidation checks, and deferred segment-library
+matching until the focused activity is usable. Profile publication and segment
+results are guarded against newer transport edits superseding their inputs.
+
+TrackMap now retains its style and updates GeoJSON sources in place, uses the latest
+snapshot when style loading completes, and preserves a user-moved viewport through
+subsequent data updates. Fit activity restores automatic framing. Data/appearance
+changes are separated so progress-label recompositions do not rebuild map geometry.
+
+Measurements: initial host probe on be697d95 was 3,067 ms parsing + 1,274 ms canonical
+processing. A later callback probe under concurrent build/emulator load took 11,216
+ms overall, with the first preview available at 0.90 ms. These host timings are not
+a valid before/after CPU-speed comparison. The improvement claimed here is early
+useful content, warm reuse and removed scheduling/rendering work, not an unmeasured
+speedup of the underlying math.
+
+On the isolated emulator, the real 6 h / 93.7 MB recording showed its partial map at
+38% read while still processing. The 30 s screen recording captures progressive
+reading through final geometry; later reopening did not generate another READING
+stage. Observed stages reached FINALIZING around 20.4 s on this emulator. Inspected
+video frame tmp/activity-loading-preview.png and final activity, exercised pan/Fit,
+and found no AndroidRuntime errors. Artifacts: tmp/nakvali-loading-qa.mp4 and
+tmp/activity-ready.png. Snapshot and cache tests cover partial GPS before completion,
+monotonic read counters, bounded previews, unchanged canonical results, reuse by
+identity, stale-version preview, raw-change rejection and completed-event semantics.
+153 Rust unit tests + 2 integration fixtures, strict Clippy, Android unit tests,
+activity lint and debug/signed-release assembly passed. Generated Android bindings
+and both native libraries were refreshed. Algorithm version remains 0.13 because
+measurement math is unchanged. No new Samsung installation or commit was made.
+
+The S25 reconnected at the end of this iteration. Confirmed no Nakvali recording
+service was active, then installed the verified signed release with `adb install
+-r`; Android returned Success and existing data was preserved. This build includes
+the transport-episode editor and progressive loading. No commit was created in
+this iteration. The dedicated loading-test emulator was stopped after verification.
+
+## 2026-09-15 — Continuous transport display
+
+Removed the transport layer's explicit dash pattern. Semantic map geometry now
+connects adjacent motorized fixes at the normal five-second power-saving cadence
+(up to 7.5 seconds with jitter), retaining recorded vertices exactly. Section
+boundaries, longer gaps, riding states and transitions keep their existing break
+policy. This is display-only; canonical classification, raw data and GPX are unchanged.
+
+Two new regression tests failed before the fix; all activity unit tests, activity
+lint and signed release assembly passed afterward. A third test protects strict
+riding/transition gap handling. Installed the signed release on Samsung S25 with
+`adb install -r` (Success), after confirming no recording service was running.
+Physical-device screenshot capture returned a black frame, so visual verification
+of this iteration remains incomplete.
+
+### Transport editor preview follow-up
+
+Applied the same sparse transport display cadence to the selected draft in
+Transport episodes. A display-only flag preserves its selected color and avoids
+assigning a canonical state before Apply. Added coverage for five-second fixes,
+cadence jitter, real gaps, manual pauses and the unclassified highlight state.
+Activity unit tests, lint and signed release assembly passed. Visual confirmation
+remains pending because the physical phone was locked during the prior check.
+Installed this follow-up release on Samsung S25 with `adb install -r`: Success.
+
+## 2026-09-15 — Honest export distance: episode coalescing and TCX
+
+Measuring a shared `riding-only` export showed two separate problems. Strava
+published 48.91 km for a ride whose 20 track segments sum to 36.90 km: the 12.08 km
+of straight lines across the excluded shuttles. And nine of those segments were
+degenerate — single points a few seconds apart — because transport labels flickered
+around unloading while the fixes were sparse.
+
+**Episode coalescing.** `label_episodes` now collects index ranges and coalesces
+them before publishing: merge across a riding gap under 60 s and 100 m, then drop
+episodes under 60 s and 150 m. Dropped ranges are relabelled from
+`non_motorized_classifications` rather than left motorized. Replaying the measured
+gaps of that recording: 19 episodes to 3, 20 exported segments to about 4. Two
+pre-existing activity fixtures asserted that a 12-second synthetic climb classifies
+as motorized; they were extended to 120 s, which is what "sustained" was meant to mean.
+
+**TCX export.** New `TcxExporter` writes a Garmin TCX v2 activity with one `<Lap>`
+per riding run and a stated `DistanceMeters` on every trackpoint. The odometer comes
+from a new `ride_odometer_m` in `fusion-core`, factored out of `ride_totals` through
+a shared `ride_breakdown` so the exported total cannot drift from the displayed one;
+a test asserts the last odometer value equals `RideTotals::distance_m` and that the
+shuttle does not advance it. `GpxTrackPoint` became `TrackExportPoint` in a new
+shared `TrackExport`, gaining `runId`, which breaks only on transport or a manual
+pause while `sectionId` keeps breaking on every real gap.
+
+The in-app Strava upload now sends TCX. The backend derives the Strava `data_type`
+from the file extension, defaulting to GPX so older clients are unaffected;
+`proto/openapi.yaml` records this. `ExportRequest.GPX` became `.File` with a
+`DataType` alongside.
+
+157 Rust tests and strict Clippy pass, `make vet test build` passes, and Android
+`assembleDebug testDebugUnitTest` passes. Bindings and both native libraries were
+regenerated. Algorithm version stays `gps-bounded-0.13`: `ride_totals` math is
+untouched, but episode bounds do change, so caches produce fewer segments on the
+next run.
+
+Not verified on device: the fix is predicted from replaying the measured gaps, not
+from a fresh export on the phone, and Strava's handling of `DistanceMeters` still
+needs one real upload to confirm. Open, deferred at the user's request: exporting a
+single run rather than the whole activity, and trimming or hiding the start and finish.
+
+## 2026-09-15 — Single-run export and trimming the start and finish
+
+Both features the previous entry deferred. Designed against a four-way codebase
+map (Rust core, recording module, activity UI, contract and written decisions)
+produced by a workflow whose design phase then died on a session limit; the map
+was the useful half and the design was finished by hand from it.
+
+**Ride bounds.** New `fusion-core/src/ride_bounds.rs`: `RideBounds`,
+`ride_within` and `ride_runs`. `ride_breakdown` gained an `Option<RideBounds>`
+so totals and the odometer come from one walk that knows the trim; a pair
+reaching outside the bounds counts toward neither the ride nor the transport.
+`ride_odometer_m` folded into `ride_within`, which also reports the kept index
+range so Kotlin never repeats the boundary test with its own inclusivity.
+
+The trim never removes a point. That is the whole design: a transport correction
+relabels without removing, and profile positions, segment attempt slices and the
+odometer's alignment all depend on the finalized track keeping its length.
+Segment matching is deliberately blind to the trim, so a timed crossing in a
+trimmed head still stands and the annotation needs no revision counter.
+
+`StoredRideBounds` rides in the recording index next to `transport_episodes`, so
+backup and restore carry it with no archive change and the format stays at 1.
+`TransportCacheKey` became `CorrectionCacheKey` covering both annotations — one
+cached projection, one key, or a trim edit would keep serving the transport-only
+projection. `LocalRecording.ridingDurationMs` makes the header and the activity
+list follow the trim, which Rust totals cannot do for them.
+
+**Riding runs.** `ride_runs` is now the single definition; `TrackExport` labels
+`runId` from it instead of inventing boundaries, and a kept shuttle becomes its
+own lap. The export sheet lists runs with distance, descent and moving time, and
+`TrackExport.singleRun` slices one out by start time, rebasing the odometer so
+the file opens at zero rather than at the kilometres that came before it. The
+Strava `external_id` now carries the trim, without which a re-export after
+trimming would poll the old upload and report success while Strava kept the
+untrimmed ride.
+
+New `TrimEditorSheet` mirrors the transport editor deliberately — two elapsed
+clocks as the authoritative, screen-reader-operable input, the slider as the fast
+path, a map preview dimming what is dropped, "Use whole activity" as reset. The
+`SegmentProfileTrimmer` handles from `:feature:segments` were not promoted: it
+lives in another feature module, `:feature:activity` may not depend on it, and
+the profile sits inside a draggable sheet its gesture model was not built for.
+
+162 Rust tests and strict Clippy pass, `assembleDebug`, `testDebugUnitTest` and
+`lintDebug` pass; bindings and both native libraries regenerated.
+`ALGORITHM_VERSION` stays `gps-bounded-0.13` — both features are post-finalize
+views and the canonical math is untouched.
+
+Not verified on device: no build has been installed or driven this iteration, so
+both sheets are unexercised in the hand. Still open from the previous entry: one
+real Strava upload to confirm it honours TCX `DistanceMeters`.

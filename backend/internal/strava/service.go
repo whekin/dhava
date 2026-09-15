@@ -192,7 +192,8 @@ type ExportRequest struct {
 	Description string
 	SportType   string
 	Filename    string
-	GPX         []byte
+	DataType    string
+	File        []byte
 }
 
 type ExportStatus struct {
@@ -239,8 +240,9 @@ func (s *Service) Export(
 
 	if export.StravaUploadID == nil {
 		response, err := s.api.CreateUpload(ctx, accessToken, CreateUploadRequest{
-			File:        input.GPX,
+			File:        input.File,
 			Filename:    input.Filename,
+			DataType:    input.DataType,
 			Title:       input.Title,
 			Description: input.Description,
 			ExternalID:  input.ExternalID,

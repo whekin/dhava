@@ -37,7 +37,7 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.11";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.13";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;

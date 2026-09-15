@@ -28,6 +28,7 @@ import com.nakvali.core.recording.CanonicalRideTotals
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.StravaExportStatus
+import com.nakvali.fusion.RideRun
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
 import java.util.Locale
@@ -35,6 +36,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ActivityExportButton(
+    runs: List<RideRun>,
     rawGpsAvailable: Boolean,
     processedAvailable: Boolean,
     processedLoading: Boolean,
@@ -45,7 +47,7 @@ internal fun ActivityExportButton(
     ride: CanonicalRideTotals?,
     exportState: ActivityExportState,
     initiallyExpanded: Boolean = false,
-    onExport: (ActivityExportKind, ExportDestination) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
     onConnectStrava: () -> Unit,
     onExportStrava: () -> Unit,
     onRetryStrava: () -> Unit,
@@ -65,7 +67,7 @@ internal fun ActivityExportButton(
         ),
     ) {
         ActivityExportPanel(
-            rawGpsAvailable, processedAvailable, processedLoading, rawRecordingAvailable,
+            runs, rawGpsAvailable, processedAvailable, processedLoading, rawRecordingAvailable,
             healthLogAvailable, stravaConnection, recording, ride, exportState,
             onClose = { expanded = false }, onExport = onExport,
             onConnectStrava = onConnectStrava, onExportStrava = onExportStrava,
@@ -76,6 +78,7 @@ internal fun ActivityExportButton(
 
 @Composable
 private fun ActivityExportPanel(
+    runs: List<RideRun>,
     rawGpsAvailable: Boolean,
     processedAvailable: Boolean,
     processedLoading: Boolean,
@@ -86,22 +89,29 @@ private fun ActivityExportPanel(
     ride: CanonicalRideTotals?,
     exportState: ActivityExportState,
     onClose: () -> Unit,
-    onExport: (ActivityExportKind, ExportDestination) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
     onConnectStrava: () -> Unit,
     onExportStrava: () -> Unit,
     onRetryStrava: () -> Unit,
     onViewStrava: (Long) -> Unit,
 ) {
-    var kind by rememberSaveable(recording?.id) { mutableStateOf(ActivityExportKind.RIDING_ONLY) }
+    var kind by rememberSaveable(recording?.id) { mutableStateOf(ActivityExportKind.RIDING_ONLY_TCX) }
+    // Held by start time, not ordinal: a transport edit or a trim renumbers runs.
+    var chosenRunStartMs by rememberSaveable(recording?.id) { mutableStateOf<Long?>(null) }
+    val scope: ActivityExportScope = chosenRunStartMs
+        ?.takeIf { start -> runs.any { it.startedAtMs == start } }
+        ?.let { ActivityExportScope.OneRun(it) }
+        ?: ActivityExportScope.WholeActivity
     var diagnosticsExpanded by rememberSaveable { mutableStateOf(false) }
-    val isGpx = kind == ActivityExportKind.RIDING_ONLY || kind == ActivityExportKind.PROCESSED_5_HZ
-    val ready = when (kind) {
-        ActivityExportKind.RIDING_ONLY, ActivityExportKind.PROCESSED_5_HZ -> processedAvailable
-        ActivityExportKind.RAW_GPS -> rawGpsAvailable
-        ActivityExportKind.RAW_RECORDING -> rawRecordingAvailable
-        ActivityExportKind.HEALTH_LOG -> healthLogAvailable
+    val isTrack = kind.isProcessedTrack
+    val ready = when {
+        kind.isProcessedTrack -> processedAvailable
+        kind == ActivityExportKind.RAW_GPS -> rawGpsAvailable
+        kind == ActivityExportKind.RAW_RECORDING -> rawRecordingAvailable
+        else -> healthLogAvailable
     }
     val busy = exportState.busy || exportState.prepared != null
+    val transportSource = if (recording?.transportEpisodes != null) "marked" else "detected"
     val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.85f
     Column(Modifier.fillMaxWidth().heightIn(max = maxHeight)) {
         Row(
@@ -120,28 +130,54 @@ private fun ActivityExportPanel(
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             FileChoice(
-                title = "GPX track",
-                description = "For Strava and other ride apps",
-                selected = isGpx,
+                title = "TCX track",
+                description = "For Strava · keeps the real distance and one lap per run",
+                selected = isTrack && kind.isTcx,
                 enabled = !busy && (processedAvailable || processedLoading),
-                onClick = { kind = ActivityExportKind.RIDING_ONLY },
+                onClick = { kind = ActivityExportKind.processedTrack(tcx = true, excludeTransport = kind.excludesTransport) },
             )
-            if (isGpx) {
+            FileChoice(
+                title = "GPX track",
+                description = "Widest support · readers add the distance across removed transport",
+                selected = isTrack && !kind.isTcx,
+                enabled = !busy && (processedAvailable || processedLoading),
+                onClick = { kind = ActivityExportKind.processedTrack(tcx = false, excludeTransport = kind.excludesTransport) },
+            )
+            if (isTrack && runs.size > 1) {
+                HorizontalDivider(Modifier.padding(vertical = NakvaliSpacing.small))
+                FileChoice(
+                    title = "Whole activity",
+                    description = "Every run of the day in one file",
+                    selected = scope is ActivityExportScope.WholeActivity,
+                    enabled = !busy && processedAvailable,
+                    onClick = { chosenRunStartMs = null },
+                )
+                runs.forEach { run ->
+                    RunChoice(
+                        run = run,
+                        selected = (scope as? ActivityExportScope.OneRun)?.startedAtMs == run.startedAtMs,
+                        enabled = !busy && processedAvailable,
+                        onClick = { chosenRunStartMs = run.startedAtMs },
+                    )
+                }
+                HorizontalDivider(Modifier.padding(vertical = NakvaliSpacing.small))
+            }
+            if (isTrack) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).padding(end = NakvaliSpacing.medium)) {
                         Text("Exclude transport", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (ride == null) "Remove detected vehicle sections" else if (ride.transportDistanceM > 0) {
-                                String.format(Locale.US, "%.1f km · %d min of detected transport",
+                            if (ride == null) "Remove transport sections" else if (ride.transportDistanceM > 0) {
+                                String.format(Locale.US, "%.1f km · %d min of $transportSource transport",
                                     ride.transportDistanceM / 1000, (ride.transportTimeS / 60).toInt())
-                            } else "No transport detected",
+                            } else "No transport selected",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Switch(
-                        checked = kind == ActivityExportKind.RIDING_ONLY,
-                        onCheckedChange = { kind = if (it) ActivityExportKind.RIDING_ONLY else ActivityExportKind.PROCESSED_5_HZ },
+                        checked = kind.excludesTransport,
+                        onCheckedChange = { kind = ActivityExportKind.processedTrack(tcx = kind.isTcx, excludeTransport = it) },
                         enabled = !busy && processedAvailable,
                         modifier = Modifier.semantics { contentDescription = "Exclude transport" },
                     )
@@ -150,8 +186,11 @@ private fun ActivityExportPanel(
                     when {
                         processedLoading -> "Preparing track… You can still export original files below."
                         !processedAvailable -> "Processed track unavailable. Original files are available below."
-                        kind == ActivityExportKind.PROCESSED_5_HZ -> "Includes the full recorded day. Your original recording is kept."
-                        ride != null -> String.format(Locale.US, "%.1f km of riding · original recording kept", ride.distanceM / 1000)
+                        !kind.excludesTransport -> "Includes the full recorded day. Your original recording is kept."
+                        ride != null && kind.isTcx ->
+                            String.format(Locale.US, "%.1f km of riding · the file states this distance", ride.distanceM / 1000)
+                        ride != null ->
+                            String.format(Locale.US, "%.1f km of riding · readers may report more", ride.distanceM / 1000)
                         else -> "Original recording kept. Times and recording gaps are preserved."
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -194,7 +233,7 @@ private fun ActivityExportPanel(
                 color = if (exportState.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
-            if (!isGpx) Text(
+            if (!isTrack) Text(
                 when (kind) {
                     ActivityExportKind.RAW_GPS -> "Selected: original GPS (.gpx)"
                     ActivityExportKind.RAW_RECORDING -> "Selected: sensor recording (.jsonl.gz)"
@@ -203,7 +242,7 @@ private fun ActivityExportPanel(
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium)) {
                 Button(
-                    onClick = { onExport(kind, ExportDestination.SAVE) }, enabled = ready && !busy,
+                    onClick = { onExport(kind, ExportDestination.SAVE, scope) }, enabled = ready && !busy,
                     modifier = Modifier.weight(1f).heightIn(min = NakvaliSizes.primaryActionHeight),
                 ) {
                     Icon(Icons.Outlined.SaveAlt, null, Modifier.size(20.dp))
@@ -211,7 +250,7 @@ private fun ActivityExportPanel(
                     Text("Save file")
                 }
                 OutlinedButton(
-                    onClick = { onExport(kind, ExportDestination.SHARE) }, enabled = ready && !busy,
+                    onClick = { onExport(kind, ExportDestination.SHARE, scope) }, enabled = ready && !busy,
                     modifier = Modifier.weight(1f).heightIn(min = NakvaliSizes.primaryActionHeight),
                 ) {
                     Icon(Icons.Default.Share, null, Modifier.size(20.dp))
@@ -222,6 +261,38 @@ private fun ActivityExportPanel(
         }
     }
 }
+
+/**
+ * One riding run, offered as an export scope. A panel row rather than a
+ * [FileChoice], because three lines of stats beside a radio button already clip
+ * at large font scales.
+ */
+@Composable
+private fun RunChoice(run: RideRun, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val label = "Run ${run.index + 1u}"
+    val stats = String.format(
+        Locale.US, "%.1f km · %d m down · %s",
+        run.distanceM / 1000, run.descentM.toInt(), clock(run.movingTimeS.toLong()),
+    )
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = NakvaliSizes.secondaryControl)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = "$label, $stats" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Column(Modifier.padding(start = NakvaliSpacing.medium, top = NakvaliSpacing.small, bottom = NakvaliSpacing.small)) {
+            Text(label, style = MaterialTheme.typography.titleSmall,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stats, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+private fun clock(totalSeconds: Long): String = String.format(
+    Locale.US, "%d:%02d", totalSeconds / 60, totalSeconds % 60,
+)
 
 @Composable
 private fun FileChoice(title: String, description: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
@@ -272,7 +343,8 @@ private fun StravaAction(
         }
         connection is StravaConnectionState.Connected -> {
             label = if (status == StravaExportStatus.FAILED) "Retry Strava upload" else "Send to Strava"
-            description = recording?.stravaError ?: "Always excludes detected transport"
+            description = recording?.stravaError
+                ?: "Whole activity, transport excluded · a single run is file-only"
             enabled = available && recording != null
             action = if (status == StravaExportStatus.FAILED) onRetry else onExport
         }

@@ -100,3 +100,19 @@ _Avoid_: KOM, confirmed KOM
 **KOM**:
 The fastest eligible segment attempt confirmed by the server for a particular leaderboard.
 _Avoid_: Potential KOM, local best
+
+**Transport episode**:
+One continuous journey in a vehicle, from boarding/departure to unloading, including intermediate road descents, flat sections and brief stops.
+_Avoid_: Transit, downhill, individual vehicle-like fix
+
+**Transport override**:
+The rider's explicit replacement of the transport episodes in one activity; it can also confirm that the activity contains no transport.
+_Avoid_: Raw edit, GPS correction, automatic detection
+
+**Riding run**:
+One stretch of riding between shuttles or manual pauses, ending only on transport or a pause and never on a dropped fix. It is the unit a TCX lap records and the unit the rider picks when exporting a single descent. Distinct from a **Candidate descent**, which is a pure downhill stretch offered as a segment selection, and from a **Segment attempt**, which is gate to gate on one authored segment.
+_Avoid_: Downhill run, lap, descent
+
+**Ride bounds**:
+The span the rider calls the ride, narrowing an activity from its front and back so the approach and the standing around stop counting. An annotation like a **Transport override**: absolute recording timestamps, applied in Rust, leaving the recording's own bounds and the track untouched, and leaving segment times standing.
+_Avoid_: Crop, cut, truncation, delete

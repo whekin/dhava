@@ -49,6 +49,9 @@ skeleton and deployment scaffolding.
 ## Phase 4 — Recorder polish
 
 - Configurable recording fields, optional auto-pause, accidental-touch lock
+- Whole transport episodes with manual boundary correction shared by map, stats,
+  segment results and GPX export — implemented and checked on one full shuttle day;
+  broader field calibration remains pending
 - Actionable recording notification ✅
 - Audio/haptic preferences
 - Rust-only post-ride ActivityState map visualization — implemented locally;

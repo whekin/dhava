@@ -115,6 +115,7 @@ data class SegmentRideMatch(
     @SerialName("source_last_modified_ms") val sourceLastModifiedMs: Long,
     val attempts: List<StoredAttempt> = emptyList(),
     val rejected: List<StoredRejection> = emptyList(),
+    @SerialName("transport_revision") val transportRevision: Long = 0,
 )
 
 @Serializable

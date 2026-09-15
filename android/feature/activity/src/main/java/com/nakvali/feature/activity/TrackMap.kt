@@ -4,6 +4,19 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
@@ -83,6 +96,8 @@ private const val BOUNDS_PADDING_PX = 96
 private const val SINGLE_POINT_ZOOM = 15.0
 private const val FUSION_POINTS_MIN_ZOOM = 18f
 internal const val SEMANTIC_TRACK_MAX_GAP_MS = 3_000L
+// Transport GPS normally runs at 5 seconds; allow cadence jitter, not outages.
+private const val TRANSPORT_DISPLAY_MAX_GAP_MS = 7_500L
 
 /** Below this, confirmed stillness is not an event worth a map marker. */
 internal const val MIN_RIDER_STOP_MS = 15_000L
@@ -112,6 +127,8 @@ internal data class MapTrackPoint(
     val activityConfidence: Double? = null,
     val altitudeM: Double? = null,
     val speedMps: Double? = null,
+    // Draft transport geometry uses the selected color without assigning a saved state.
+    val isTransportPreview: Boolean = false,
 )
 
 /** One timed run at an authored segment, ready to draw and to label. */
@@ -142,20 +159,45 @@ internal fun TrackMap(
     segmentRuns: List<MapSegmentRun> = emptyList(),
     segmentColor: Color = Color.Unspecified,
     inspectedPoint: MapTrackPoint? = null,
+    overlayBottomPadding: androidx.compose.ui.unit.Dp = 240.dp,
+    respectUserCamera: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val mapView = rememberNakvaliMapView()
     val palette = rememberNakvaliMapPalette()
     val accuracyColors = rememberGpsAccuracyColors()
     val activityStateColors = rememberActivityStateColors()
-    val overlayBottomPx = with(LocalDensity.current) { 240.dp.roundToPx() }
+    val overlayBottomPx = with(LocalDensity.current) { overlayBottomPadding.roundToPx() }
     val mapChromeMarginPx = with(LocalDensity.current) { 12.dp.roundToPx() }
     val currentMode = rememberUpdatedState(mode)
     val currentInspectedPoint = rememberUpdatedState(inspectedPoint)
-    AndroidView(factory = { mapView }, modifier = modifier)
+    val currentData = rememberUpdatedState(Triple(rawPoints, fusedPoints, segmentRuns))
+    val rendering = remember(mapView) { TrackRenderingState() }
+    var styleReadyRevision by remember { mutableIntStateOf(0) }
+    val styleKey = listOf(palette, rawColor, fusedColor, segmentColor, accuracyColors, activityStateColors)
+    val gestureListener = remember(mapView) { MapLibreMap.OnCameraMoveStartedListener { reason ->
+        if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) rendering.userMoved = true
+    } }
+    DisposableEffect(mapView) {
+        onDispose {
+            rendering.disposed = true
+            rendering.map?.removeOnCameraMoveStartedListener(gestureListener)
+        }
+    }
+    Box(modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+        if (respectUserCamera) FilledTonalIconButton(
+            onClick = {
+                rendering.userMoved = false
+                rendering.map?.let { fitCamera(it, cameraBoundsPoints(currentMode.value, currentData.value.first, currentData.value.second)) }
+            },
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 84.dp, end = 12.dp),
+        ) { Icon(Icons.Default.CenterFocusStrong, "Fit activity") }
+    }
 
     LaunchedEffect(
         mapView,
+        styleReadyRevision,
         rawPoints,
         fusedPoints,
         rawColor,
@@ -167,12 +209,31 @@ internal fun TrackMap(
         activityStateColors,
     ) {
         mapView.getMapAsync { map ->
+            if (rendering.disposed) return@getMapAsync
+            if (rendering.map == null) {
+                rendering.map = map
+                map.addOnCameraMoveStartedListener(gestureListener)
+            }
+            val currentStyle = map.style
+            if (rendering.styleKey == styleKey && currentStyle?.getSource(RAW_SOURCE_ID) != null) {
+                val data = Triple(rawPoints, fusedPoints, segmentRuns)
+                if (rendering.data != data) {
+                    updateTrackSources(currentStyle, rawPoints, fusedPoints, segmentRuns)
+                    applyMode(currentStyle, currentMode.value, rawPoints, fusedPoints)
+                    if (!respectUserCamera || !rendering.userMoved) fitCamera(map, cameraBoundsPoints(currentMode.value, rawPoints, fusedPoints), if (respectUserCamera) 250 else 1_000)
+                    rendering.data = data
+                }
+                return@getMapAsync
+            }
+            if (rendering.loadingStyle) return@getMapAsync
+            rendering.loadingStyle = true
             @Suppress("DEPRECATION")
             map.setPadding(0, 0, 0, overlayBottomPx)
             map.configureNakvaliMapChrome(palette, overlayBottomPx, mapChromeMarginPx)
             // Fallback-aware: track layers are added even when the remote
             // style cannot load offline, so recorded lines always render.
             mapView.setNakvaliMapStyle(map, palette) { style ->
+                if (rendering.disposed) return@setNakvaliMapStyle
                 style.addSource(
                     GeoJsonSource(RAW_SOURCE_ID, diagnosticLineOptions()).also { source ->
                         rawPoints.toMultiLineStringOrNull()?.let(source::setGeoJson)
@@ -248,7 +309,6 @@ internal fun TrackMap(
                         PropertyFactory.lineColor(activityStateColors.likelyMotorized.toArgb()),
                         PropertyFactory.lineWidth(1.8f),
                         PropertyFactory.lineOpacity(0.22f),
-                        PropertyFactory.lineDasharray(arrayOf(3.0f, 2.6f)),
                         PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     ).withFilter(activityStateFilter(ACTIVITY_STATE_LIKELY_MOTORIZED)),
@@ -407,8 +467,14 @@ internal fun TrackMap(
                         PropertyFactory.iconIgnorePlacement(true),
                     ),
                 )
-                applyMode(style, currentMode.value, rawPoints, fusedPoints)
-                fitCamera(map, cameraBoundsPoints(currentMode.value, rawPoints, fusedPoints))
+                val latest = currentData.value
+                updateTrackSources(style, latest.first, latest.second, latest.third)
+                applyMode(style, currentMode.value, latest.first, latest.second)
+                if (!respectUserCamera || !rendering.userMoved) fitCamera(map, cameraBoundsPoints(currentMode.value, latest.first, latest.second), if (respectUserCamera) 250 else 1_000)
+                rendering.loadingStyle = false
+                rendering.data = latest
+                rendering.styleKey = styleKey
+                styleReadyRevision++
             }
         }
     }
@@ -417,7 +483,7 @@ internal fun TrackMap(
         mapView.getMapAsync { map ->
             map.style?.let { style ->
                 applyMode(style, mode, rawPoints, fusedPoints)
-                fitCamera(map, cameraBoundsPoints(mode, rawPoints, fusedPoints))
+                if (!respectUserCamera || !rendering.userMoved) fitCamera(map, cameraBoundsPoints(mode, rawPoints, fusedPoints))
             }
         }
     }
@@ -429,6 +495,26 @@ internal fun TrackMap(
                 ?.setPointOrEmpty(inspectedPoint)
         }
     }
+}
+
+private class TrackRenderingState {
+    var map: MapLibreMap? = null
+    var loadingStyle = false
+    var data: Triple<List<MapTrackPoint>, List<MapTrackPoint>, List<MapSegmentRun>>? = null
+    var styleKey: List<Any>? = null
+    var userMoved = false
+    var disposed = false
+}
+
+/** Data changes update sources in place; they do not reload the basemap. */
+private fun updateTrackSources(style: Style, raw: List<MapTrackPoint>, fused: List<MapTrackPoint>, runs: List<MapSegmentRun>) {
+    style.getSourceAs<GeoJsonSource>(RAW_SOURCE_ID)?.setGeoJson(raw.toMultiLineStringOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(RAW_POINTS_SOURCE_ID)?.setGeoJson(raw.toAccuracyFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(FUSED_SOURCE_ID)?.setGeoJson(fused.toSemanticLineFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(FUSED_POINTS_SOURCE_ID)?.setGeoJson(fused.toPointFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(STOP_SOURCE_ID)?.setGeoJson(fused.toStopFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(SEGMENT_SOURCE_ID)?.setGeoJson(runs.toFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
+    style.getSourceAs<GeoJsonSource>(SEGMENT_GATES_SOURCE_ID)?.setGeoJson(runs.toGateFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
 }
 
 /**
@@ -604,7 +690,12 @@ internal fun List<MapTrackPoint>.aggregatedStopMarkers(): List<StopMarker> {
 private fun MapTrackPoint.isSemanticallyContinuousWith(next: MapTrackPoint): Boolean {
     if (sectionId != next.sectionId) return false
     val deltaMs = next.timestampMs - timestampMs
-    return deltaMs in 0..SEMANTIC_TRACK_MAX_GAP_MS
+    val maxGapMs = if (
+        (activityState == ActivityState.LIKELY_MOTORIZED &&
+            next.activityState == ActivityState.LIKELY_MOTORIZED) ||
+        (isTransportPreview && next.isTransportPreview)
+    ) TRANSPORT_DISPLAY_MAX_GAP_MS else SEMANTIC_TRACK_MAX_GAP_MS
+    return deltaMs in 0..maxGapMs
 }
 
 private fun List<MapTrackPoint>.averageConfidence(state: ActivityState?): Double? {
@@ -910,16 +1001,16 @@ private inline fun markerBitmap(
     return bitmap
 }
 
-private fun fitCamera(map: MapLibreMap, points: List<MapTrackPoint>) {
+private fun fitCamera(map: MapLibreMap, points: List<MapTrackPoint>, durationMs: Int = 1_000) {
     if (points.isEmpty()) return
     val distinct = points.mapTo(LinkedHashSet()) { it.lat to it.lon }
     if (distinct.size < 2) {
         val only = points.first()
-        map.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(only.lat, only.lon), SINGLE_POINT_ZOOM))
+        map.easeCamera(CameraUpdateFactory.newLatLngZoom(LatLng(only.lat, only.lon), SINGLE_POINT_ZOOM), durationMs)
         return
     }
     val bounds = LatLngBounds.Builder()
         .apply { points.forEach { include(LatLng(it.lat, it.lon)) } }
         .build()
-    map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, BOUNDS_PADDING_PX), 1_000)
+    map.easeCamera(CameraUpdateFactory.newLatLngBounds(bounds, BOUNDS_PADDING_PX), durationMs)
 }

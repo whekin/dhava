@@ -93,6 +93,7 @@ import com.nakvali.core.ui.NakvaliStatusTone
 import com.nakvali.core.ui.NakvaliTheme
 import com.nakvali.fusion.ActivityState
 import com.nakvali.fusion.RideAnalysis
+import com.nakvali.fusion.RideRun
 import com.nakvali.fusion.RideProfilePoint
 import java.time.Instant
 import java.time.ZoneId
@@ -126,6 +127,10 @@ fun ActivityDetailScreen(
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
     val stravaConnection by viewModel.stravaConnection.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
+    val loading by viewModel.loading.collectAsState()
+    val transportEditor by viewModel.transportEditor.collectAsState()
+    val trimEditor by viewModel.trimEditor.collectAsState()
+    val ridingRuns by viewModel.ridingRuns.collectAsState()
     val context = LocalContext.current
     val developerMode = remember(context) {
         RecorderSettings.developerModeEnabled(context)
@@ -188,8 +193,25 @@ fun ActivityDetailScreen(
         }
     }
 
+    transportEditor?.let { state ->
+        TransportEditorSheet(
+            state = state, onDraftsChanged = viewModel::editTransportDrafts,
+            onReset = viewModel::resetTransportDrafts, onApply = viewModel::applyTransportDrafts,
+            onDismiss = viewModel::dismissTransportEditor,
+        )
+    }
+
+    trimEditor?.let { state ->
+        TrimEditorSheet(
+            state = state, onDraftChanged = viewModel::editTrimDraft,
+            onReset = viewModel::resetTrimDraft, onApply = viewModel::applyTrimDraft,
+            onDismiss = viewModel::dismissTrimEditor,
+        )
+    }
+
     ActivityDetailContent(
         recording = recording,
+        ridingRuns = ridingRuns,
         track = track,
         analysis = analysis,
         diagnostics = diagnostics,
@@ -202,8 +224,11 @@ fun ActivityDetailScreen(
         stravaConnection = stravaConnection,
         developerMode = developerMode,
         onBack = onBack,
+        loading = loading,
         exportState = exportState,
         onExport = viewModel::prepareExport,
+        onEditTransport = viewModel::openTransportEditor,
+        onEditTrim = viewModel::openTrimEditor,
         onCreateSegment = onCreateSegment,
         onOpenSegment = onOpenSegment,
         onAddBike = viewModel::addBike,
@@ -240,6 +265,7 @@ fun ActivityDetailScreen(
 @Composable
 private fun ActivityDetailContent(
     recording: LocalRecording?,
+    ridingRuns: List<RideRun>,
     track: TrackState,
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
@@ -252,8 +278,11 @@ private fun ActivityDetailContent(
     stravaConnection: StravaConnectionState,
     developerMode: Boolean,
     onBack: () -> Unit,
+    loading: ActivityLoadingState,
     exportState: ActivityExportState,
-    onExport: (ActivityExportKind, ExportDestination) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
+    onEditTransport: () -> Unit,
+    onEditTrim: () -> Unit,
     onCreateSegment: () -> Unit,
     onOpenSegment: (String) -> Unit,
     onAddBike: (name: String, type: BikeType) -> Bike,
@@ -273,7 +302,7 @@ private fun ActivityDetailContent(
     var showEdit by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
-    val rawPoints = replay?.rawTrack?.map {
+    val rawPoints = remember(replay, track, loading.preview) { replay?.rawTrack?.map {
         MapTrackPoint(
             lat = it.lat,
             lon = it.lon,
@@ -286,8 +315,11 @@ private fun ActivityDetailContent(
             // Without Rust replay the pause boundaries are unknown. Keep each
             // fix isolated rather than drawing a potentially false bridge.
             MapTrackPoint(point.lat, point.lon, index, point.accuracyM)
-        }.orEmpty()
-    val fusedPoints = rideInsights?.track?.map { point ->
+        } ?: loading.preview.mapIndexed { index, point ->
+            MapTrackPoint(point.lat, point.lon, index, point.accuracyM, point.timestampMs)
+        }
+    }
+    val fusedPoints = remember(rideInsights, replay) { rideInsights?.track?.map { point ->
         MapTrackPoint(
             lat = point.lat,
             lon = point.lon,
@@ -312,6 +344,7 @@ private fun ActivityDetailContent(
             )
         }
         .orEmpty()
+    }
     // The attempt indices address the finalized track the matcher was given,
     // which is exactly the list behind fusedPoints on this path. On the replay
     // fallback that correspondence is not guaranteed, so nothing is drawn
@@ -346,7 +379,7 @@ private fun ActivityDetailContent(
         hasActivityStates = hasActivityStates,
         hasAccuracy = hasAccuracy,
     )
-    val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true
+    val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true && loading.phase != ActivityLoadPhase.FAILED
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         // Anchors are named explicitly: from material3 alpha21 the PartiallyExpanded
@@ -361,6 +394,7 @@ private fun ActivityDetailContent(
         sheetContent = {
             ActivityDetailsSheet(
                 recording = recording,
+                ridingRuns = ridingRuns,
                 track = track,
                 analysis = analysis,
                 diagnostics = diagnostics,
@@ -376,9 +410,12 @@ private fun ActivityDetailContent(
                 processedExportAvailable = processedExportAvailable,
                 healthLogAvailable = healthLogAvailable,
                 stravaConnection = stravaConnection,
-                exportState = exportState,
+                loading = loading,
+        exportState = exportState,
                 onExport = onExport,
-                onCreateSegment = onCreateSegment,
+                onEditTransport = onEditTransport,
+                onEditTrim = onEditTrim,
+        onCreateSegment = onCreateSegment,
                 onOpenSegment = onOpenSegment,
                 onConnectStrava = onConnectStrava,
                 onExportStrava = onExportStrava,
@@ -389,7 +426,7 @@ private fun ActivityDetailContent(
             )
         },
         modifier = modifier.fillMaxSize(),
-        sheetPeekHeight = ActivitySheetPeekHeight,
+        sheetPeekHeight = ActivitySheetPeekHeight + if (loading.phase == ActivityLoadPhase.READY) 0.dp else 96.dp,
         sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         // A raised container, not `surface`: over a map the sheet has to own its
         // own edge, and in the light scheme `surface` and the basemap ground sat
@@ -406,34 +443,28 @@ private fun ActivityDetailContent(
         containerColor = MaterialTheme.colorScheme.background,
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            when (track) {
-                TrackState.Loading -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    NakvaliLoading()
+            if (rawPoints.isNotEmpty() || fusedPoints.isNotEmpty()) {
+                // One map instance survives the transition from preview to canonical.
+                TrackMap(
+                    rawPoints = rawPoints, fusedPoints = fusedPoints, segmentRuns = segmentRunLines,
+                    segmentColor = segmentHighlightColor, mode = effectiveTrackMode,
+                    rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fusedColor = MaterialTheme.colorScheme.primary,
+                    inspectedPoint = inspectedMapPoint, respectUserCamera = true,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else when (track) {
+                TrackState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Opening the recorded track…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TrackState.Empty -> NakvaliEmptyState(
-                    title = "No usable GPS track",
-                    description = "The raw recording is still preserved on this phone.",
+                    title = "No usable GPS track", description = "The raw recording is still preserved on this phone.",
                     modifier = Modifier.fillMaxSize(),
                 )
                 is TrackState.Failed -> NakvaliEmptyState(
-                    title = "Activity data unavailable",
-                    description = track.message,
-                    modifier = Modifier.fillMaxSize(),
+                    title = "Activity data unavailable", description = track.message, modifier = Modifier.fillMaxSize(),
                 )
-                is TrackState.Loaded -> TrackMap(
-                    rawPoints = rawPoints,
-                    fusedPoints = fusedPoints,
-                    segmentRuns = segmentRunLines,
-                    segmentColor = segmentHighlightColor,
-                    mode = effectiveTrackMode,
-                    rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fusedColor = MaterialTheme.colorScheme.primary,
-                    inspectedPoint = inspectedMapPoint,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                is TrackState.Loaded -> Unit
             }
 
             DetailTopBar(
@@ -509,6 +540,7 @@ private val ActivitySheetPeekHeight = 112.dp
 @Composable
 private fun ActivityDetailsSheet(
     recording: LocalRecording?,
+    ridingRuns: List<RideRun>,
     track: TrackState,
     analysis: RideAnalysis?,
     diagnostics: DiagnosticTrackState,
@@ -522,8 +554,11 @@ private fun ActivityDetailsSheet(
     processedExportAvailable: Boolean,
     healthLogAvailable: Boolean,
     stravaConnection: StravaConnectionState,
+    loading: ActivityLoadingState,
     exportState: ActivityExportState,
-    onExport: (ActivityExportKind, ExportDestination) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
+    onEditTransport: () -> Unit,
+    onEditTrim: () -> Unit,
     onCreateSegment: () -> Unit,
     onOpenSegment: (String) -> Unit,
     onConnectStrava: () -> Unit,
@@ -569,6 +604,7 @@ private fun ActivityDetailsSheet(
                 }
                 recording?.let { RecordingStatusPill(it.status) }
                 ActivityExportButton(
+                    runs = ridingRuns,
                     rawGpsAvailable = track is TrackState.Loaded,
                     processedAvailable = processedExportAvailable,
                     processedLoading = diagnostics is DiagnosticTrackState.Loading,
@@ -580,7 +616,7 @@ private fun ActivityDetailsSheet(
                     stravaConnection = stravaConnection,
                     recording = recording,
                     ride = ride,
-                    exportState = exportState,
+        exportState = exportState,
                     onExport = onExport,
                     onConnectStrava = onConnectStrava,
                     onExportStrava = onExportStrava,
@@ -593,11 +629,14 @@ private fun ActivityDetailsSheet(
                     // it can only be authored once that track exists.
                     canCreateSegment = processedExportAvailable,
                     onEdit = onEdit,
+                    onEditTransport = onEditTransport,
+                    onEditTrim = onEditTrim,
                     onCreateSegment = onCreateSegment,
                     onDelete = onDelete,
                 )
             }
 
+            if (loading.phase != ActivityLoadPhase.READY) ActivityLoadingStatus(loading)
             Column(
                 modifier = Modifier
                     .weight(1f, fill = false)
@@ -685,6 +724,8 @@ private fun ActivityOverflowMenu(
     enabled: Boolean,
     canCreateSegment: Boolean,
     onEdit: () -> Unit,
+    onEditTransport: () -> Unit,
+    onEditTrim: () -> Unit,
     onCreateSegment: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -703,6 +744,16 @@ private fun ActivityOverflowMenu(
                     expanded = false
                     onEdit()
                 },
+            )
+            DropdownMenuItem(
+                text = { Text("Transport episodes") },
+                enabled = canCreateSegment,
+                onClick = { expanded = false; onEditTransport() },
+            )
+            DropdownMenuItem(
+                text = { Text("Trim start and finish") },
+                enabled = canCreateSegment,
+                onClick = { expanded = false; onEditTrim() },
             )
             DropdownMenuItem(
                 text = { Text("Create segment") },
@@ -885,9 +936,12 @@ private fun ActivityMetrics(
     rideInsights: ActivityRideInsights?,
 ) {
     var showMore by rememberSaveable(recording?.id) { mutableStateOf(false) }
+    // Duration is the one headline number that does not come from Rust totals,
+    // so it has to follow the rider's trim explicitly or a three-minute descent
+    // would still be labelled with the forty-one minutes of the whole recording.
     val durationMs = recording
-        ?.takeIf { it.endedAtMs > it.startedAtMs }
-        ?.let { it.endedAtMs - it.startedAtMs }
+        ?.takeIf { it.ridingEndedAtMs > it.ridingStartedAtMs }
+        ?.ridingDurationMs
         ?: analysis?.let { it.endedAtMs - it.startedAtMs }
     // Every headline number describes riding. A shuttle lap's kilometres and
     // climb belong to the vehicle, and counting them makes the ride's own
@@ -956,6 +1010,17 @@ private fun ActivityMetrics(
             Spacer(Modifier.size(NakvaliSpacing.medium))
             Text(
                 text = "Not counted · $summary by transport",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        recording?.rideBounds?.let { bounds ->
+            val head = bounds.startedAtMs - recording.startedAtMs
+            val tail = recording.endedAtMs - bounds.endedAtMs
+            Spacer(Modifier.size(NakvaliSpacing.medium))
+            Text(
+                text = "Trimmed · ${formatElapsed(head)} off the start, " +
+                    "${formatElapsed(tail)} off the finish",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1105,6 +1170,7 @@ private fun formatAirDuration(milliseconds: Long): String =
 private fun ActivityDetailContentPreview() {
     NakvaliTheme(darkTheme = true) {
         ActivityDetailContent(
+            ridingRuns = emptyList(),
             recording = LocalRecording(
                 id = "preview",
                 startedAtMs = 1_767_000_000_000,
@@ -1125,8 +1191,11 @@ private fun ActivityDetailContentPreview() {
             stravaConnection = StravaConnectionState.Connected("Alex Rider"),
             developerMode = false,
             onBack = {},
+            loading = ActivityLoadingState(phase = ActivityLoadPhase.READY),
             exportState = ActivityExportState(),
-            onExport = { _, _ -> },
+            onExport = { _, _, _ -> },
+            onEditTransport = {},
+            onEditTrim = {},
             onCreateSegment = {},
             onOpenSegment = {},
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
@@ -1152,6 +1221,7 @@ private fun ExportMenuPreview() {
                 contentAlignment = Alignment.TopEnd,
             ) {
                 ActivityExportButton(
+                    runs = emptyList(),
                     rawGpsAvailable = true,
                     processedAvailable = true,
                     processedLoading = false,
@@ -1165,7 +1235,7 @@ private fun ExportMenuPreview() {
                     initiallyExpanded = true,
                     exportState = ActivityExportState(),
                     ride = null,
-                    onExport = { _, _ -> },
+                    onExport = { _, _, _ -> },
                     onConnectStrava = {},
                     onExportStrava = {},
                     onRetryStrava = {},

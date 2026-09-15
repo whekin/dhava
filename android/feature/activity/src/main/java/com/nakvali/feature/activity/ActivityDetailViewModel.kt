@@ -16,20 +16,27 @@ import com.nakvali.core.recording.CanonicalQuality
 import com.nakvali.core.recording.CanonicalRideTotals
 import com.nakvali.core.recording.GpsTrackReader
 import com.nakvali.core.recording.GpxExporter
-import com.nakvali.core.recording.GpxTrackPoint
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordLine
 import com.nakvali.core.recording.RecordingRepository
 import com.nakvali.core.recording.RideSegmentRun
 import com.nakvali.core.recording.StravaConnectionState
+import com.nakvali.core.recording.StoredRideBounds
+import com.nakvali.core.recording.TcxExporter
+import com.nakvali.core.recording.TrackExport
+import com.nakvali.core.recording.TrackExportPoint
+import com.nakvali.core.recording.exportPoints
+import com.nakvali.core.recording.ridingRuns
 import com.nakvali.core.recording.rawGpsPoints
 import com.nakvali.core.recording.toCanonicalTrack
 import com.nakvali.core.recording.toRecordingReplay
 import com.nakvali.core.recording.toRideAnalysis
 import com.nakvali.fusion.CanonicalTrackPoint
 import com.nakvali.fusion.RideAnalysis
+import com.nakvali.fusion.RideRun
 import com.nakvali.fusion.RideProfile
 import com.nakvali.fusion.RecordingReplay
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +44,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -73,15 +82,50 @@ data class ActivityRideInsights(
     val track: List<CanonicalTrackPoint>,
 )
 
+/**
+ * How much of the activity a file covers.
+ *
+ * A run is addressed by its start time, not its position: a transport edit or a
+ * trim renumbers every run, and an ordinal would quietly export a different
+ * descent than the one the rider tapped.
+ */
+sealed interface ActivityExportScope {
+    data object WholeActivity : ActivityExportScope
+    data class OneRun(val startedAtMs: Long) : ActivityExportScope
+}
+
 /** What the share menu can produce; the mime type drives the share intent. */
-enum class ActivityExportKind(val mimeType: String) {
-    RIDING_ONLY("application/gpx+xml"),
-    PROCESSED_5_HZ("application/gpx+xml"),
-    RAW_GPS("application/gpx+xml"),
+enum class ActivityExportKind(val mimeType: String, val extension: String) {
+    RIDING_ONLY("application/gpx+xml", "gpx"),
+    PROCESSED_5_HZ("application/gpx+xml", "gpx"),
+    /**
+     * The same tracks as a TCX activity. Worth offering separately because TCX
+     * states its own distance and laps: a GPX reader charges the rider for the
+     * straight line across every excluded shuttle, a TCX reader does not.
+     */
+    RIDING_ONLY_TCX("application/vnd.garmin.tcx+xml", "tcx"),
+    PROCESSED_5_HZ_TCX("application/vnd.garmin.tcx+xml", "tcx"),
+    RAW_GPS("application/gpx+xml", "gpx"),
     /** The raw sensor recording as-is, for diagnostics/bug reports. */
-    RAW_RECORDING("application/gzip"),
+    RAW_RECORDING("application/gzip", "jsonl.gz"),
     /** Append-only process/memory/writer heartbeat; never part of fusion input. */
-    HEALTH_LOG("application/x-ndjson"),
+    HEALTH_LOG("application/x-ndjson", "jsonl"),
+    ;
+
+    val isProcessedTrack: Boolean
+        get() = this == RIDING_ONLY || this == PROCESSED_5_HZ ||
+            this == RIDING_ONLY_TCX || this == PROCESSED_5_HZ_TCX
+    val excludesTransport: Boolean get() = this == RIDING_ONLY || this == RIDING_ONLY_TCX
+    val isTcx: Boolean get() = this == RIDING_ONLY_TCX || this == PROCESSED_5_HZ_TCX
+
+    companion object {
+        fun processedTrack(tcx: Boolean, excludeTransport: Boolean): ActivityExportKind = when {
+            tcx && excludeTransport -> RIDING_ONLY_TCX
+            tcx -> PROCESSED_5_HZ_TCX
+            excludeTransport -> RIDING_ONLY
+            else -> PROCESSED_5_HZ
+        }
+    }
 }
 
 /**
@@ -107,6 +151,8 @@ class ActivityDetailViewModel(
      * Canonical ride stats from the Rust fusion-core (UniFFI). Null while
      * computing or if analysis failed — tiles fall back to "—".
      */
+    private val _loading = MutableStateFlow(ActivityLoadingState())
+    internal val loading: StateFlow<ActivityLoadingState> = _loading.asStateFlow()
     private val _analysis = MutableStateFlow<RideAnalysis?>(null)
     val analysis: StateFlow<RideAnalysis?> = _analysis.asStateFlow()
 
@@ -188,13 +234,25 @@ class ActivityDetailViewModel(
         repository.retryStravaExport(recordingId)
     }
 
+    /**
+     * The activity's riding runs, enumerated in Rust. Published here rather than
+     * derived in the export sheet so the picker, the file's laps and any future
+     * map highlight all read one list.
+     */
+    private val _ridingRuns = MutableStateFlow<List<RideRun>>(emptyList())
+    val ridingRuns: StateFlow<List<RideRun>> = _ridingRuns.asStateFlow()
+
     private val _exportState = MutableStateFlow(ActivityExportState())
     val exportState: StateFlow<ActivityExportState> = _exportState.asStateFlow()
 
-    fun prepareExport(kind: ActivityExportKind, destination: ExportDestination) {
+    fun prepareExport(
+        kind: ActivityExportKind,
+        destination: ExportDestination,
+        scope: ActivityExportScope = ActivityExportScope.WholeActivity,
+    ) {
         if (_exportState.value.busy || _exportState.value.prepared != null) return
         _exportState.value = ActivityExportState(busy = true, message = "Preparing file…")
-        export(kind) { result ->
+        export(kind, scope) { result ->
             _exportState.value = result.fold(
                 onSuccess = { ActivityExportState(prepared = PreparedActivityExport(it, kind, destination)) },
                 onFailure = { ActivityExportState(error = it.message ?: "Could not prepare the file. Try again.") },
@@ -225,7 +283,11 @@ class ActivityDetailViewModel(
         }
     }
 
-    private fun export(kind: ActivityExportKind, onResult: (Result<File>) -> Unit) {
+    private fun export(
+        kind: ActivityExportKind,
+        scope: ActivityExportScope,
+        onResult: (Result<File>) -> Unit,
+    ) {
         if (kind == ActivityExportKind.RAW_RECORDING) {
             exportRawRecording(onResult)
             return
@@ -237,22 +299,29 @@ class ActivityDetailViewModel(
         val title = recording.value?.title ?: "Nakvali ride"
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
         val artifact = canonicalArtifact
-        val points = when (kind) {
-            ActivityExportKind.RIDING_ONLY, ActivityExportKind.PROCESSED_5_HZ -> artifact
-                ?.let { GpxExporter.processedPoints(
-                    it.finalizedTrack,
-                    excludeTransport = kind == ActivityExportKind.RIDING_ONLY,
-                ) }
-            ActivityExportKind.RAW_GPS -> {
+        val run = (scope as? ActivityExportScope.OneRun)
+            ?.let { chosen -> _ridingRuns.value.find { it.startedAtMs == chosen.startedAtMs } }
+        if (scope is ActivityExportScope.OneRun && run == null) {
+            onResult(Result.failure(IllegalStateException(
+                "That run is no longer part of this activity. Pick it again.",
+            )))
+            return
+        }
+        val points = when {
+            kind.isProcessedTrack -> artifact?.let {
+                val whole = it.exportPoints(kind.excludesTransport, _ridingRuns.value)
+                if (run == null) whole else TrackExport.singleRun(whole, run)
+            }
+            kind == ActivityExportKind.RAW_GPS -> {
                 artifact?.rawTrack?.map { point ->
-                    GpxTrackPoint(point.timestampMs, point.lat, point.lon, point.altitudeM, point.sectionId)
+                    TrackExportPoint(point.timestampMs, point.lat, point.lon, point.altitudeM, point.sectionId)
                 } ?: run {
                     val raw = (_track.value as? TrackState.Loaded)?.points
                     val sectionByTimestamp = replay?.rawTrack
                         ?.associate { point -> point.timestampMs to point.sectionId }
                         .orEmpty()
                     raw?.map { point ->
-                        GpxTrackPoint(
+                        TrackExportPoint(
                             timestampMs = point.timestampMs,
                             lat = point.lat,
                             lon = point.lon,
@@ -262,30 +331,30 @@ class ActivityDetailViewModel(
                     }
                 }
             }
-            ActivityExportKind.RAW_RECORDING -> null // handled above
-            ActivityExportKind.HEALTH_LOG -> null // handled above
+            else -> null // RAW_RECORDING and HEALTH_LOG are handled above
         }
-        if (points.isNullOrEmpty() || (kind == ActivityExportKind.RIDING_ONLY && points.size < 2)) {
+        if (points.isNullOrEmpty() || (kind.excludesTransport && points.size < 2)) {
             onResult(Result.failure(IllegalStateException(
-                if (kind == ActivityExportKind.RIDING_ONLY) "No riding track remains after excluding transport"
-                else "The selected GPX track is unavailable",
+                if (kind.excludesTransport) "No riding track remains after excluding transport"
+                else "The selected track is unavailable",
             )))
             return
         }
+        val scopeSuffix = run?.let { "-run${it.index + 1u}" }.orEmpty()
         val suffix = when (kind) {
-            ActivityExportKind.RIDING_ONLY -> "riding-only"
-            ActivityExportKind.PROCESSED_5_HZ -> "processed-5hz"
+            ActivityExportKind.RIDING_ONLY, ActivityExportKind.RIDING_ONLY_TCX -> "riding-only"
+            ActivityExportKind.PROCESSED_5_HZ, ActivityExportKind.PROCESSED_5_HZ_TCX -> "processed-5hz"
             ActivityExportKind.RAW_GPS -> "raw-gps"
-            ActivityExportKind.RAW_RECORDING -> error("unreachable")
-            ActivityExportKind.HEALTH_LOG -> error("unreachable")
-        }
+            ActivityExportKind.RAW_RECORDING, ActivityExportKind.HEALTH_LOG -> error("unreachable")
+        } + scopeSuffix
         viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching {
                 val output = File(
                     getApplication<Application>().cacheDir,
-                    "exports/nakvali-${recordingId.take(8)}-$suffix.gpx",
+                    "exports/nakvali-${recordingId.take(8)}-$suffix.${kind.extension}",
                 )
-                GpxExporter.write(points, title, output)
+                if (kind.isTcx) TcxExporter.write(points, title, output)
+                else GpxExporter.write(points, title, output)
             }
             withContext(Dispatchers.Main) { onResult(result) }
         }
@@ -329,52 +398,191 @@ class ActivityDetailViewModel(
         }
     }
 
-    init {
-        // Matching runs on its own coroutine: it can touch several canonical
-        // artifacts, and the map and the numbers must not wait behind it.
+    private fun publishArtifact(artifact: CanonicalActivityArtifact) {
+        canonicalArtifact = artifact
+        _quality.value = artifact.quality
+        _ride.value = artifact.ride
+        _ridingRuns.value = runCatching { artifact.ridingRuns() }
+            .onFailure { Log.w("ActivityDetail", "run enumeration failed for $recordingId", it) }
+            .getOrDefault(emptyList())
+        val points = artifact.rawGpsPoints()
+        _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
+        _analysis.value = artifact.toRideAnalysis()
+        val replay = artifact.toRecordingReplay()
+        _diagnostics.value = if (replay.rawTrack.isEmpty() && replay.finalizedTrack.isEmpty()) {
+            DiagnosticTrackState.Unavailable
+        } else {
+            DiagnosticTrackState.Loaded(replay)
+        }
+        _loading.update { it.copy(phase = ActivityLoadPhase.PROFILE, preview = emptyList(), readFraction = null) }
+        val finalizedTrack = artifact.finalizedTrack.toCanonicalTrack()
+        val insights = finalizedTrack
+            .takeIf { it.size >= 2 }
+            ?.let { track ->
+                runCatching {
+                    ActivityRideInsights(
+                        profile = FusionCore.rideProfile(track),
+                        track = track,
+                    )
+                }
+                    .onFailure {
+                        Log.w(
+                            "ActivityDetail",
+                            "ride profile failed for $recordingId",
+                            it,
+                        )
+                    }
+                    .getOrNull()
+            }
+        if (canonicalArtifact === artifact) {
+            _rideInsights.value = insights
+            _loading.update { it.copy(phase = ActivityLoadPhase.READY) }
+        }
+    }
+
+
+    private val _transportEditor = MutableStateFlow<TransportEditorState?>(null)
+    internal val transportEditor: StateFlow<TransportEditorState?> = _transportEditor.asStateFlow()
+
+    internal fun openTransportEditor() {
+        val artifact = canonicalArtifact ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            _segmentRuns.value = runCatching { repository.rideSegments(recordingId) }
-                .onFailure { Log.w("ActivityDetail", "segment runs failed for $recordingId", it) }
-                .getOrDefault(emptyList())
+            try {
+                val automatic = repository.automaticTransportEpisodes(recordingId)
+                val intervals = recording.value?.transportEpisodes ?: automatic
+                _transportEditor.value = TransportEditorState(
+                    originMs = artifact.analysis.startedAtMs, endedAtMs = artifact.analysis.endedAtMs,
+                    track = artifact.finalizedTrack.toCanonicalTrack(), automatic = automatic,
+                    drafts = intervals.map { it.draft(artifact.analysis.startedAtMs) },
+                    useAutomatic = recording.value?.transportEpisodes == null,
+                )
+            } catch (error: Exception) { Log.w("TransportEditor", "Could not load episodes", error) }
+        }
+    }
+
+    internal fun editTransportDrafts(drafts: List<TransportDraft>) {
+        _transportEditor.value = _transportEditor.value?.copy(drafts = drafts, useAutomatic = false, error = null)
+    }
+
+    internal fun resetTransportDrafts() {
+        _transportEditor.value = _transportEditor.value?.let {
+            it.copy(drafts = it.automatic.map { episode -> episode.draft(it.originMs) }, useAutomatic = true, error = null)
+        }
+    }
+
+    internal fun dismissTransportEditor() {
+        if (_transportEditor.value?.busy != true) _transportEditor.value = null
+    }
+
+    internal fun applyTransportDrafts() {
+        val editor = _transportEditor.value ?: return
+        if (editor.busy) return
+        _transportEditor.value = editor.copy(busy = true, error = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val intervals = if (editor.useAutomatic) null else editor.drafts.map { it.interval(editor.originMs) }
+                repository.saveTransportEpisodes(recordingId, intervals)
+                val artifact = repository.canonicalActivity(recordingId) ?: error("Could not reload activity")
+                _segmentRuns.value = null
+                publishArtifact(artifact)
+                _transportEditor.value = null
+                refreshSegmentRuns()
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                val message = (error as? com.nakvali.fusion.TransportException.InvalidInterval)?.msg
+                    ?: error.message ?: "Could not update transport"
+                _transportEditor.value = editor.copy(error = message)
+            }
+        }
+    }
+
+    private val _trimEditor = MutableStateFlow<TrimEditorState?>(null)
+    internal val trimEditor: StateFlow<TrimEditorState?> = _trimEditor.asStateFlow()
+
+    internal fun openTrimEditor() {
+        val artifact = canonicalArtifact ?: return
+        val origin = artifact.analysis.startedAtMs
+        val stored = recording.value?.rideBounds
+        _trimEditor.value = TrimEditorState(
+            originMs = origin, endedAtMs = artifact.analysis.endedAtMs,
+            track = artifact.finalizedTrack.toCanonicalTrack(),
+            draft = stored?.draft(origin)
+                ?: StoredRideBounds(origin, artifact.analysis.endedAtMs).draft(origin),
+            useWholeActivity = stored == null,
+        )
+    }
+
+    internal fun editTrimDraft(draft: TrimDraft) {
+        _trimEditor.value = _trimEditor.value?.copy(
+            draft = draft, useWholeActivity = false, error = null,
+        )
+    }
+
+    internal fun resetTrimDraft() {
+        _trimEditor.value = _trimEditor.value?.let {
+            it.copy(
+                draft = StoredRideBounds(it.originMs, it.endedAtMs).draft(it.originMs),
+                useWholeActivity = true, error = null,
+            )
+        }
+    }
+
+    internal fun dismissTrimEditor() {
+        if (_trimEditor.value?.busy != true) _trimEditor.value = null
+    }
+
+    internal fun applyTrimDraft() {
+        val editor = _trimEditor.value ?: return
+        if (editor.busy) return
+        _trimEditor.value = editor.copy(busy = true, error = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val bounds =
+                    if (editor.useWholeActivity) null else editor.draft.bounds(editor.originMs)
+                repository.saveRideBounds(recordingId, bounds)
+                val artifact = repository.canonicalActivity(recordingId)
+                    ?: error("Could not reload activity")
+                publishArtifact(artifact)
+                _trimEditor.value = null
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                val message = (error as? com.nakvali.fusion.RideBoundsException.Invalid)?.msg
+                    ?: error.message ?: "Could not trim the activity"
+                _trimEditor.value = editor.copy(busy = false, error = message)
+            }
+        }
+    }
+
+    private suspend fun refreshSegmentRuns() {
+        val revision = repository.recordings.value.firstOrNull { it.id == recordingId }?.transportRevision ?: return
+        val runs = runCatching { repository.rideSegments(recordingId) }
+            .onFailure { Log.w("ActivityDetail", "segment runs failed for $recordingId", it) }
+            .getOrDefault(emptyList())
+        if (repository.recordings.value.firstOrNull { it.id == recordingId }?.transportRevision == revision) _segmentRuns.value = runs
+    }
+
+    init {
+        // Observe work even if it was started by Finish before this screen.
+        val progressJob = viewModelScope.launch(Dispatchers.IO) {
+            repository.canonicalProgress(recordingId).collect { update ->
+                _loading.update { if (update.finished) it.finishedPreview(update.progress) else it.progress(update.progress) }
+            }
         }
         viewModelScope.launch(Dispatchers.IO) {
             val rawFile = repository.recordingFile(recordingId)
             val path = rawFile.absolutePath
-            val artifact = repository.canonicalActivity(recordingId)
+            val artifact = repository.canonicalActivity(recordingId) { preview ->
+                _loading.update { it.cached(preview) }
+            }
+            progressJob.cancelAndJoin()
             if (artifact != null) {
-                canonicalArtifact = artifact
-                _quality.value = artifact.quality
-                _ride.value = artifact.ride
-                val finalizedTrack = artifact.finalizedTrack.toCanonicalTrack()
-                _rideInsights.value = finalizedTrack
-                    .takeIf { it.size >= 2 }
-                    ?.let { track ->
-                        runCatching {
-                            ActivityRideInsights(
-                                profile = FusionCore.rideProfile(track),
-                                track = track,
-                            )
-                        }
-                            .onFailure {
-                                Log.w(
-                                    "ActivityDetail",
-                                    "ride profile failed for $recordingId",
-                                    it,
-                                )
-                            }
-                            .getOrNull()
-                    }
-                val points = artifact.rawGpsPoints()
-                _track.value = if (points.isEmpty()) TrackState.Empty else TrackState.Loaded(points)
-                _analysis.value = artifact.toRideAnalysis()
-                val replay = artifact.toRecordingReplay()
-                _diagnostics.value = if (replay.rawTrack.isEmpty() && replay.finalizedTrack.isEmpty()) {
-                    DiagnosticTrackState.Unavailable
-                } else {
-                    DiagnosticTrackState.Loaded(replay)
-                }
+                publishArtifact(artifact)
+                // Segment rematching can scan other rides. Start only after the
+                // activity itself is usable, so it cannot steal the cache lock.
+                refreshSegmentRuns()
                 return@launch
             }
+            _loading.update { it.copy(phase = ActivityLoadPhase.FAILED, readFraction = null) }
 
             // Raw file gone while the index entry still exists (external
             // cleanup, restored backup, …): a terminal error state instead of

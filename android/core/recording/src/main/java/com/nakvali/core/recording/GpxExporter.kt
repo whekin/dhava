@@ -3,56 +3,21 @@ package com.nakvali.core.recording
 import java.io.File
 import java.time.Instant
 
-/** One exported GPX sample. A section change starts a new `<trkseg>`. */
-data class GpxTrackPoint(
-    val timestampMs: Long,
-    val lat: Double,
-    val lon: Double,
-    val altitudeM: Double? = null,
-    val sectionId: Int = 0,
-)
-
-/** Creates a standards-friendly GPX 1.1 track without bridging pauses. */
+/**
+ * Creates a standards-friendly GPX 1.1 track without bridging pauses.
+ *
+ * GPX has no distance field at all, so every reader derives kilometres from the
+ * coordinates and charges the rider for the straight line across each removed
+ * shuttle. Use [TcxExporter] where the distance has to be right.
+ */
 object GpxExporter {
-    /** Uses Rust's labels; never reclassifies motion or changes source timestamps. */
-    fun processedPoints(
-        points: List<CanonicalPoint>,
-        excludeTransport: Boolean = false,
-    ): List<GpxTrackPoint> {
-        val result = ArrayList<GpxTrackPoint>(points.size)
-        var previous: CanonicalPoint? = null
-        var section = -1
-        for (point in points) {
-            if (excludeTransport && point.activityState == CanonicalActivityState.LIKELY_MOTORIZED) {
-                previous = null
-                continue
-            }
-            val prior = previous
-            // Preserve real gaps even within one manual recording section.
-            if (prior == null || prior.sectionId != point.sectionId ||
-                point.timestampMs - prior.timestampMs !in 1L..3_000L
-            ) {
-                section++
-            }
-            result.add(GpxTrackPoint(
-                timestampMs = point.timestampMs,
-                lat = point.lat,
-                lon = point.lon,
-                altitudeM = point.altitudeM,
-                sectionId = section,
-            ))
-            previous = point
-        }
-        return result
-    }
-
-    fun write(points: List<GpxTrackPoint>, name: String, output: File): File {
+    fun write(points: List<TrackExportPoint>, name: String, output: File): File {
         output.parentFile?.mkdirs()
         output.bufferedWriter().use { out ->
             out.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
             out.appendLine("<gpx version=\"1.1\" creator=\"Nakvali\" xmlns=\"http://www.topografix.com/GPX/1/1\">")
             out.appendLine("  <trk>")
-            out.appendLine("    <name>${escape(name)}</name>")
+            out.appendLine("    <name>${TrackExport.escape(name)}</name>")
             var openSectionId: Int? = null
             points.forEach { point ->
                 if (point.sectionId != openSectionId) {
@@ -72,8 +37,4 @@ object GpxExporter {
         }
         return output
     }
-
-    private fun escape(value: String): String = value
-        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        .replace("\"", "&quot;").replace("'", "&apos;")
 }

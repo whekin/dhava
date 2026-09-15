@@ -9,7 +9,7 @@ class GpxExporterTest {
     @Test fun `exports timestamps elevation and escaped title`() {
         val file = Files.createTempFile("nakvali", ".gpx").toFile()
         GpxExporter.write(
-            listOf(GpxTrackPoint(1_770_000_001_000, 41.7, 44.8, altitudeM = 712.4)),
+            listOf(TrackExportPoint(1_770_000_001_000, 41.7, 44.8, altitudeM = 712.4)),
             "Ride & trail",
             file,
         )
@@ -24,9 +24,9 @@ class GpxExporterTest {
         val file = Files.createTempFile("nakvali-sections", ".gpx").toFile()
         GpxExporter.write(
             listOf(
-                GpxTrackPoint(1_770_000_001_000, 41.70, 44.80, sectionId = 0),
-                GpxTrackPoint(1_770_000_001_200, 41.71, 44.81, sectionId = 0),
-                GpxTrackPoint(1_770_000_010_000, 41.80, 44.90, sectionId = 1),
+                TrackExportPoint(1_770_000_001_000, 41.70, 44.80, sectionId = 0),
+                TrackExportPoint(1_770_000_001_200, 41.71, 44.81, sectionId = 0),
+                TrackExportPoint(1_770_000_010_000, 41.80, 44.90, sectionId = 1),
             ),
             "Paused ride",
             file,
@@ -57,7 +57,7 @@ class GpxExporterTest {
             point(21_000, CanonicalActivityState.LIKELY_MOTORIZED, section = 1),
         )
         val original = source.toList()
-        val points = GpxExporter.processedPoints(source, excludeTransport = true)
+        val points = TrackExport.processedPoints(source, excludeTransport = true)
         assertEquals(listOf(2_000L, 3_000L, 6_000L, 7_000L, 8_000L, 20_000L), points.map { it.timestampMs })
         assertEquals(listOf(0, 0, 1, 1, 2, 3), points.map { it.sectionId })
         assertTrue(points.all { it.altitudeM == 700.0 })
@@ -75,9 +75,8 @@ class GpxExporterTest {
 
     @Test fun `whole track export retains transport while empty and transport only riding exports stay empty`() {
         val transport = listOf(point(1_000, CanonicalActivityState.LIKELY_MOTORIZED))
-        assertEquals(1, GpxExporter.processedPoints(transport).size)
-        assertTrue(GpxExporter.processedPoints(transport, excludeTransport = true).isEmpty())
-        assertTrue(GpxExporter.processedPoints(emptyList(), excludeTransport = true).isEmpty())
+        assertEquals(1, TrackExport.processedPoints(transport).size)
+        assertTrue(TrackExport.processedPoints(transport, excludeTransport = true).isEmpty())
+        assertTrue(TrackExport.processedPoints(emptyList(), excludeTransport = true).isEmpty())
     }
-
 }

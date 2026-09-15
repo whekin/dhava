@@ -190,14 +190,24 @@ paths:
           description: Redirect to `nakvali://strava/connected?result=...`
   /strava/exports:
     post:
-      summary: Idempotently export one canonical processed GPX to Strava
+      summary: Idempotently export one canonical processed track to Strava
       description: >
         Raw GPS, IMU, barometer and health data are never accepted. Repeating the
         same external_id polls the existing Strava upload instead of submitting
         a second activity. The client excludes canonical LikelyMotorized points,
-        preserving original timestamps and separate GPX track segments across
+        preserving original timestamps and separate track segments across
         excluded transport, manual pauses and recording gaps. No remaining riding
         track is an export error on the client; existing uploads are not replaced.
+
+        The upload data type is taken from the file extension, which must be
+        `.gpx` or `.tcx`. Prefer TCX: it states its own DistanceMeters, so a
+        reader charges nothing for the straight line across excluded transport,
+        and each riding run arrives as its own lap.
+
+        external_id identifies the exported artifact, not the recording: it
+        carries the algorithm version and the rider's trim, so re-exporting an
+        activity the rider has since trimmed is a new upload rather than a poll
+        of the old one. The server never parses the file and stores no track.
       operationId: exportActivityToStrava
       security:
         - privateAlphaAccessKey: []
@@ -210,7 +220,10 @@ paths:
               type: object
               required: [file, external_id, title, sport_type]
               properties:
-                file: { type: string, format: binary, description: Canonical processed GPX }
+                file:
+                  type: string
+                  format: binary
+                  description: Canonical processed track, named with a .gpx or .tcx extension
                 external_id: { type: string, maxLength: 200 }
                 title: { type: string, maxLength: 200 }
                 description: { type: string, maxLength: 5000 }

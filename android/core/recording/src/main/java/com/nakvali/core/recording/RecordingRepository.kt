@@ -18,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,12 +81,16 @@ class RecordingRepository private constructor(private val appContext: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val indexMutex = Mutex()
+    private val transportMutex = Mutex()
+    private var correctedActivity: Pair<CorrectionCacheKey, CanonicalActivityArtifact>? = null
     private val uploader = ActivityUploader()
     private val stravaApi = StravaApi(StravaCredentialStore(appContext))
+    private data class Calculation(val size: Long, val modified: Long, val progress: com.nakvali.fusion.CanonicalProgress, val finished: Boolean = false)
+    private val calculations = MutableStateFlow<Map<String, Calculation>>(emptyMap())
     private val canonicalStore = CanonicalActivityStore(
         artifactsDir = File(appContext.filesDir, ARTIFACTS_DIR),
         currentAlgorithmVersion = { FusionCore.algorithmVersion },
-        produce = { path -> FusionCore.finalize(path).toArtifactPayload() },
+        produce = ::finalizeReported,
     )
     private val segmentStore = SegmentStore(
         segmentsDir = File(appContext.filesDir, SEGMENTS_DIR),
@@ -412,12 +418,121 @@ class RecordingRepository private constructor(private val appContext: Context) {
      * Loads a valid derived artifact or rebuilds it from immutable raw data.
      * A missing/corrupt/old-version cache is never fatal and never mutates raw.
      */
-    suspend fun canonicalActivity(id: String): CanonicalActivityArtifact? {
+    private fun finalizeReported(path: String): CanonicalArtifactPayload {
+        val raw = File(path)
+        val id = raw.name.removeSuffix(".jsonl.gz")
+        val size = raw.length()
+        val modified = raw.lastModified()
+        val started = android.os.SystemClock.elapsedRealtime()
+        var lastStage: com.nakvali.fusion.CanonicalStage? = null
+        val observer = object : com.nakvali.fusion.CanonicalObserver {
+            @Synchronized
+            override fun onProgress(progress: com.nakvali.fusion.CanonicalProgress) {
+                if (lastStage != progress.stage) {
+                    Log.d("ActivityLoad", "${id.take(8)} stage=${progress.stage} elapsed_ms=${android.os.SystemClock.elapsedRealtime() - started}")
+                    lastStage = progress.stage
+                }
+                calculations.update { previous ->
+                    val old = previous[id]?.takeIf { it.size == size && it.modified == modified }
+                    val preview = if (progress.stage == com.nakvali.fusion.CanonicalStage.READING && progress.gpsFixes == 0uL)
+                        emptyList() else progress.preview.ifEmpty { old?.progress?.preview.orEmpty() }
+                    (previous - id + (id to Calculation(size, modified, progress.copy(preview = preview))))
+                        .entries.toList().takeLast(4).associate { it.key to it.value }
+                }
+            }
+        }
+        return try {
+            com.nakvali.fusion.finalizeRecordingWithProgress(path, observer).toArtifactPayload()
+        } finally {
+            calculations.update { entries ->
+                val entry = entries[id]
+                if (entry != null && entry.size == size && entry.modified == modified)
+                    entries + (id to entry.copy(finished = true)) else entries
+            }
+        }
+    }
+
+    /** Includes work already started at Finish, before an activity screen opens. */
+    fun canonicalProgress(id: String): Flow<CanonicalLoadEvent> {
+        val raw = recordingFile(id)
+        return calculations.map { it[id] }.filterNotNull()
+            .filter { it.size == raw.length() && it.modified == raw.lastModified() }
+            .map { CanonicalLoadEvent(it.progress, it.finished) }
+    }
+
+    suspend fun canonicalActivity(
+        id: String,
+        onPreview: ((CanonicalActivityArtifact) -> Unit)? = null,
+    ): CanonicalActivityArtifact? {
         loaded.await()
         val rawFile = recordingFile(id)
-        return runCatching { canonicalStore.loadOrCreate(id, rawFile) }
-            .onFailure { error -> Log.w(LOG_TAG, "canonical finalization failed for $id", error) }
+        return runCatching {
+            val automatic = canonicalStore.loadOrCreate(id, rawFile, onPreview = onPreview)
+            transportMutex.withLock {
+                val entry = _recordings.value.find { it.id == id }
+                val episodes = entry?.transportEpisodes
+                val bounds = entry?.rideBounds
+                if (episodes == null && bounds == null) return@withLock automatic
+                val key = CorrectionCacheKey(id, automatic.sourceSizeBytes,
+                    automatic.sourceLastModifiedMs, automatic.algorithmVersion, episodes, bounds)
+                correctedActivity?.takeIf { it.first == key }?.second ?: automatic
+                    .applyCorrections(episodes, bounds)
+                    .also { correctedActivity = key to it }
+            }
+        }.onFailure { error ->
+            Log.w(LOG_TAG, "canonical finalization failed for $id", error)
+        }
             .getOrNull()
+    }
+
+    /** Persist explicit intervals in the backed-up recording index, never raw. */
+    suspend fun saveTransportEpisodes(id: String, episodes: List<StoredTransportEpisode>?) {
+        loaded.await()
+        val recording = _recordings.value.find { it.id == id } ?: error("Activity no longer exists")
+        check(recording.status != RecordingStatus.RECORDING) { "Finish recording before editing transport" }
+        val automatic = canonicalStore.loadOrCreate(id, recordingFile(id))
+        val correction = episodes?.let {
+            com.nakvali.fusion.correctTransport(automatic.finalizedTrack.toCanonicalTrack(),
+                it.map { episode -> episode.toFusion() }, automatic.analysis.startedAtMs, automatic.analysis.endedAtMs)
+        }
+        val normalized = correction?.episodes?.map { it.toStored() }
+        updateEntry(id) {
+            if (it.transportEpisodes == normalized) it
+            else it.copy(transportEpisodes = normalized, transportRevision = it.transportRevision + 1)
+        }
+        transportMutex.withLock { correctedActivity = null }
+    }
+
+    /**
+     * Persist the rider's trim. Null restores the whole recording as the ride.
+     *
+     * Validated against the recording's own bounds, which never shrink, so a
+     * trim can always be widened again. Segment matching is deliberately not
+     * invalidated: bounds change what counts as the ride, not what the track
+     * records, so a timed crossing in a trimmed head still stands.
+     */
+    suspend fun saveRideBounds(id: String, bounds: StoredRideBounds?) {
+        loaded.await()
+        val recording = _recordings.value.find { it.id == id } ?: error("Activity no longer exists")
+        check(recording.status != RecordingStatus.RECORDING) { "Finish recording before trimming" }
+        val automatic = canonicalStore.loadOrCreate(id, recordingFile(id))
+        // Validated in Rust, and against the automatic track on purpose: a
+        // transport correction relabels points without adding or removing any,
+        // so it cannot change whether these boundaries hold.
+        bounds?.let {
+            com.nakvali.fusion.rideWithin(
+                automatic.finalizedTrack.toCanonicalTrack(), it.toFusion(),
+                automatic.analysis.startedAtMs, automatic.analysis.endedAtMs,
+            )
+        }
+        updateEntry(id) { if (it.rideBounds == bounds) it else it.copy(rideBounds = bounds) }
+        transportMutex.withLock { correctedActivity = null }
+    }
+
+    suspend fun automaticTransportEpisodes(id: String): List<StoredTransportEpisode> {
+        loaded.await()
+        val automatic = canonicalStore.loadOrCreate(id, recordingFile(id))
+        return automatic.transportEpisodes
     }
 
     // --- segments -----------------------------------------------------------
@@ -599,7 +714,10 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 results.schemaVersion == SegmentStore.RESULTS_SCHEMA_VERSION &&
                     results.algorithmVersion == algorithm &&
                     results.matchVersion == match &&
-                    results.geometryVersion == segment.geometryVersion
+                    results.geometryVersion == segment.geometryVersion &&
+                    results.rides.all { cached -> _recordings.value.any {
+                        it.id == cached.recordingId && it.transportRevision == cached.transportRevision
+                    } }
             }
             LiveSegmentArm(
                 definition = segment.toDefinition(),
@@ -1047,10 +1165,14 @@ class RecordingRepository private constructor(private val appContext: Context) {
         check(artifact.finalizedTrack.isNotEmpty()) { "Processed track is empty" }
         val output = File(
             appContext.cacheDir,
-            "strava/nakvali-${recording.id.take(8)}-processed.gpx",
+            "strava/nakvali-${recording.id.take(8)}-processed.tcx",
         )
-        GpxExporter.write(
-            points = GpxExporter.processedPoints(artifact.finalizedTrack, excludeTransport = true)
+        // TCX, because Strava derives a GPX's distance from its coordinates and
+        // charges the rider for the straight line across every excluded shuttle.
+        // Always the whole ride: one recording has one Strava activity, and the
+        // index entry has room for exactly one upload to describe.
+        TcxExporter.write(
+            points = artifact.exportPoints(excludeTransport = true, runs = artifact.ridingRuns())
                 .also { check(it.size >= 2) { "No riding track remains after excluding transport" } },
             name = recording.title ?: "Nakvali ride",
             output = output,

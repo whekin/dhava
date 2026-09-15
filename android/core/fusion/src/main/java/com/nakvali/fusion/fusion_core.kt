@@ -656,6 +656,38 @@ internal open class UniffiForeignFutureStructVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructVoid.UniffiByValue,)
 }
+internal interface UniffiCallbackInterfaceCanonicalObserverMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`progress`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+@Structure.FieldOrder("onProgress", "uniffiFree")
+internal open class UniffiVTableCallbackInterfaceCanonicalObserver(
+    @JvmField internal var `onProgress`: UniffiCallbackInterfaceCanonicalObserverMethod0? = null,
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+) : Structure() {
+    class UniffiByValue(
+        `onProgress`: UniffiCallbackInterfaceCanonicalObserverMethod0? = null,
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    ): UniffiVTableCallbackInterfaceCanonicalObserver(`onProgress`,`uniffiFree`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceCanonicalObserver) {
+        `onProgress` = other.`onProgress`
+        `uniffiFree` = other.`uniffiFree`
+    }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -795,7 +827,11 @@ fun uniffi_fusion_core_checksum_func_build_segment_continuous(
 ): Short
 fun uniffi_fusion_core_checksum_func_build_segment_continuous_with_gates(
 ): Short
+fun uniffi_fusion_core_checksum_func_correct_transport(
+): Short
 fun uniffi_fusion_core_checksum_func_finalize_recording(
+): Short
+fun uniffi_fusion_core_checksum_func_finalize_recording_with_progress(
 ): Short
 fun uniffi_fusion_core_checksum_func_live_totals_from_recording(
 ): Short
@@ -811,11 +847,17 @@ fun uniffi_fusion_core_checksum_func_replay_recording(
 ): Short
 fun uniffi_fusion_core_checksum_func_ride_profile(
 ): Short
+fun uniffi_fusion_core_checksum_func_ride_runs(
+): Short
+fun uniffi_fusion_core_checksum_func_ride_within(
+): Short
 fun uniffi_fusion_core_checksum_func_segment_match_version(
 ): Short
 fun uniffi_fusion_core_checksum_func_segment_search_bounds(
 ): Short
 fun uniffi_fusion_core_checksum_func_selection_overlap(
+): Short
+fun uniffi_fusion_core_checksum_method_canonicalobserver_on_progress(
 ): Short
 fun uniffi_fusion_core_checksum_method_livefusion_motorized_hint(
 ): Short
@@ -875,6 +917,7 @@ internal interface UniffiLib : Library {
             val lib = loadIndirect<UniffiLib>(componentName)
             // No need to check the contract version and checksums, since
             // we already did that with `IntegrityCheckingUniffiLib` above.
+            uniffiCallbackInterfaceCanonicalObserver.register(lib)
             // Loading of library with integrity check done.
             lib
         }
@@ -886,7 +929,15 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_fusion_core_fn_clone_livefusion(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_fusion_core_fn_clone_canonicalobserver(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Pointer
+fun uniffi_fusion_core_fn_free_canonicalobserver(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_fusion_core_fn_init_callback_vtable_canonicalobserver(`vtable`: UniffiVTableCallbackInterfaceCanonicalObserver,
+): Unit
+fun uniffi_fusion_core_fn_method_canonicalobserver_on_progress(`ptr`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): Unit
+fun uniffi_fusion_core_fn_clone_livefusion(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Pointer
 fun uniffi_fusion_core_fn_free_livefusion(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): Unit
@@ -924,7 +975,11 @@ fun uniffi_fusion_core_fn_func_build_segment_continuous(`id`: RustBuffer.ByValue
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_build_segment_continuous_with_gates(`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`sourceRecordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,`gateCenters`: RustBuffer.ByValue,`minLengthM`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_correct_transport(`track`: RustBuffer.ByValue,`episodes`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_finalize_recording_with_progress(`path`: RustBuffer.ByValue,`observer`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_live_totals_from_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -939,6 +994,10 @@ fun uniffi_fusion_core_fn_func_propose_segment(`track`: RustBuffer.ByValue,uniff
 fun uniffi_fusion_core_fn_func_replay_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_ride_profile(`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_ride_runs(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_ride_within(`track`: RustBuffer.ByValue,`bounds`: RustBuffer.ByValue,`startedAtMs`: Long,`endedAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_segment_match_version(uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1087,7 +1146,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_build_segment_continuous_with_gates() != 50296.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_correct_transport() != 30279.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording() != 3271.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_finalize_recording_with_progress() != 21643.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_live_totals_from_recording() != 42207.toShort()) {
@@ -1111,6 +1176,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_fusion_core_checksum_func_ride_profile() != 57811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_fusion_core_checksum_func_ride_runs() != 45108.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_ride_within() != 64000.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_fusion_core_checksum_func_segment_match_version() != 63275.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1118,6 +1189,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_selection_overlap() != 12877.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_method_canonicalobserver_on_progress() != 26592.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_livefusion_motorized_hint() != 56027.toShort()) {
@@ -1227,7 +1301,38 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
  *
  * @suppress
  * */
-object NoPointer
+object NoPointer// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+internal const val IDX_CALLBACK_FREE = 0
+// Callback return codes
+internal const val UNIFFI_CALLBACK_SUCCESS = 0
+internal const val UNIFFI_CALLBACK_ERROR = 1
+internal const val UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+/**
+ * @suppress
+ */
+public abstract class FfiConverterCallbackInterface<CallbackInterface: Any>: FfiConverter<CallbackInterface, Long> {
+    internal val handleMap = UniffiHandleMap<CallbackInterface>()
+
+    internal fun drop(handle: Long) {
+        handleMap.remove(handle)
+    }
+
+    override fun lift(value: Long): CallbackInterface {
+        return handleMap.get(value)
+    }
+
+    override fun read(buf: ByteBuffer) = lift(buf.getLong())
+
+    override fun lower(value: CallbackInterface) = handleMap.insert(value)
+
+    override fun allocationSize(value: CallbackInterface) = 8UL
+
+    override fun write(value: CallbackInterface, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
 /**
  * The cleaner interface for Object finalization code to run.
  * This is the entry point to any implementation that we're using.
@@ -1336,6 +1441,29 @@ public object FfiConverterInt: FfiConverter<Int, Int> {
 
     override fun write(value: Int, buf: ByteBuffer) {
         buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8UL
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
     }
 }
 
@@ -1462,6 +1590,276 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteBuf = toUtf8(value)
         buf.putInt(byteBuf.limit())
         buf.put(byteBuf)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+public interface CanonicalObserver {
+
+    fun `onProgress`(`progress`: CanonicalProgress)
+
+    companion object
+}
+
+open class CanonicalObserverImpl: Disposable, AutoCloseable, CanonicalObserver
+{
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_fusion_core_fn_free_canonicalobserver(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_fusion_core_fn_clone_canonicalobserver(pointer!!, status)
+        }
+    }
+
+    override fun `onProgress`(`progress`: CanonicalProgress)
+        =
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_method_canonicalobserver_on_progress(
+        it, FfiConverterTypeCanonicalProgress.lower(`progress`),_status)
+}
+    }
+
+
+
+
+
+
+
+    companion object
+
+}
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceCanonicalObserver {
+    internal object `onProgress`: UniffiCallbackInterfaceCanonicalObserverMethod0 {
+        override fun callback(`uniffiHandle`: Long,`progress`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeCanonicalObserver.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`onProgress`(
+                    FfiConverterTypeCanonicalProgress.lift(`progress`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeCanonicalObserver.handleMap.remove(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceCanonicalObserver.UniffiByValue(
+        `onProgress`,
+        uniffiFree,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_fusion_core_fn_init_callback_vtable_canonicalobserver(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalObserver: FfiConverter<CanonicalObserver, Pointer> {
+    internal val handleMap = UniffiHandleMap<CanonicalObserver>()
+
+    override fun lower(value: CanonicalObserver): Pointer {
+        return Pointer(handleMap.insert(value))
+    }
+
+    override fun lift(value: Pointer): CanonicalObserver {
+        return CanonicalObserverImpl(value)
+    }
+
+    override fun read(buf: ByteBuffer): CanonicalObserver {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: CanonicalObserver) = 8UL
+
+    override fun write(value: CanonicalObserver, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
     }
 }
 
@@ -2186,6 +2584,58 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
 
 
 
+data class BoundedRide (
+    /**
+     * Totals over the kept span only, recomputed rather than subtracted —
+     * ascent and descent carry a reference altitude forward, so the parts of a
+     * ride never sum to the whole.
+     */
+    var `ride`: RideTotals,
+    /**
+     * Running ride distance per input point, index-aligned with the input and
+     * flat wherever the rider is in a vehicle or outside the bounds.
+     */
+    var `odometerM`: List<kotlin.Double>,
+    /**
+     * Half-open index range of the points the bounds keep.
+     */
+    var `keptFrom`: kotlin.UInt,
+    var `keptTo`: kotlin.UInt
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBoundedRide: FfiConverterRustBuffer<BoundedRide> {
+    override fun read(buf: ByteBuffer): BoundedRide {
+        return BoundedRide(
+            FfiConverterTypeRideTotals.read(buf),
+            FfiConverterSequenceDouble.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BoundedRide) = (
+            FfiConverterTypeRideTotals.allocationSize(value.`ride`) +
+            FfiConverterSequenceDouble.allocationSize(value.`odometerM`) +
+            FfiConverterUInt.allocationSize(value.`keptFrom`) +
+            FfiConverterUInt.allocationSize(value.`keptTo`)
+    )
+
+    override fun write(value: BoundedRide, buf: ByteBuffer) {
+            FfiConverterTypeRideTotals.write(value.`ride`, buf)
+            FfiConverterSequenceDouble.write(value.`odometerM`, buf)
+            FfiConverterUInt.write(value.`keptFrom`, buf)
+            FfiConverterUInt.write(value.`keptTo`, buf)
+    }
+}
+
+
+
 /**
  * A descent the editor can offer as a ready-made selection.
  */
@@ -2252,7 +2702,8 @@ data class CanonicalActivity (
     var `ride`: RideTotals,
     var `rawTrack`: List<CanonicalTrackPoint>,
     var `finalizedTrack`: List<CanonicalTrackPoint>,
-    var `quality`: QualitySummary
+    var `quality`: QualitySummary,
+    var `transportEpisodes`: List<TransportEpisode>
 ) {
 
     companion object
@@ -2270,6 +2721,7 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
             FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
             FfiConverterTypeQualitySummary.read(buf),
+            FfiConverterSequenceTypeTransportEpisode.read(buf),
         )
     }
 
@@ -2279,7 +2731,8 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterTypeRideTotals.allocationSize(value.`ride`) +
             FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`rawTrack`) +
             FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`finalizedTrack`) +
-            FfiConverterTypeQualitySummary.allocationSize(value.`quality`)
+            FfiConverterTypeQualitySummary.allocationSize(value.`quality`) +
+            FfiConverterSequenceTypeTransportEpisode.allocationSize(value.`transportEpisodes`)
     )
 
     override fun write(value: CanonicalActivity, buf: ByteBuffer) {
@@ -2289,6 +2742,91 @@ public object FfiConverterTypeCanonicalActivity: FfiConverterRustBuffer<Canonica
             FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`rawTrack`, buf)
             FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`finalizedTrack`, buf)
             FfiConverterTypeQualitySummary.write(value.`quality`, buf)
+            FfiConverterSequenceTypeTransportEpisode.write(value.`transportEpisodes`, buf)
+    }
+}
+
+
+
+data class CanonicalPreviewPoint (
+    var `timestampMs`: kotlin.Long,
+    var `lat`: kotlin.Double,
+    var `lon`: kotlin.Double,
+    var `accuracyM`: kotlin.Double?
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalPreviewPoint: FfiConverterRustBuffer<CanonicalPreviewPoint> {
+    override fun read(buf: ByteBuffer): CanonicalPreviewPoint {
+        return CanonicalPreviewPoint(
+            FfiConverterLong.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CanonicalPreviewPoint) = (
+            FfiConverterLong.allocationSize(value.`timestampMs`) +
+            FfiConverterDouble.allocationSize(value.`lat`) +
+            FfiConverterDouble.allocationSize(value.`lon`) +
+            FfiConverterOptionalDouble.allocationSize(value.`accuracyM`)
+    )
+
+    override fun write(value: CanonicalPreviewPoint, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`timestampMs`, buf)
+            FfiConverterDouble.write(value.`lat`, buf)
+            FfiConverterDouble.write(value.`lon`, buf)
+            FfiConverterOptionalDouble.write(value.`accuracyM`, buf)
+    }
+}
+
+
+
+data class CanonicalProgress (
+    var `stage`: CanonicalStage,
+    var `readBytes`: kotlin.ULong,
+    var `totalBytes`: kotlin.ULong,
+    var `gpsFixes`: kotlin.ULong,
+    var `preview`: List<CanonicalPreviewPoint>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalProgress: FfiConverterRustBuffer<CanonicalProgress> {
+    override fun read(buf: ByteBuffer): CanonicalProgress {
+        return CanonicalProgress(
+            FfiConverterTypeCanonicalStage.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterSequenceTypeCanonicalPreviewPoint.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CanonicalProgress) = (
+            FfiConverterTypeCanonicalStage.allocationSize(value.`stage`) +
+            FfiConverterULong.allocationSize(value.`readBytes`) +
+            FfiConverterULong.allocationSize(value.`totalBytes`) +
+            FfiConverterULong.allocationSize(value.`gpsFixes`) +
+            FfiConverterSequenceTypeCanonicalPreviewPoint.allocationSize(value.`preview`)
+    )
+
+    override fun write(value: CanonicalProgress, buf: ByteBuffer) {
+            FfiConverterTypeCanonicalStage.write(value.`stage`, buf)
+            FfiConverterULong.write(value.`readBytes`, buf)
+            FfiConverterULong.write(value.`totalBytes`, buf)
+            FfiConverterULong.write(value.`gpsFixes`, buf)
+            FfiConverterSequenceTypeCanonicalPreviewPoint.write(value.`preview`, buf)
     }
 }
 
@@ -2958,6 +3496,42 @@ public object FfiConverterTypeRideAnalysis: FfiConverterRustBuffer<RideAnalysis>
 
 
 /**
+ * The span the rider calls the ride. Absolute recording timestamps, inclusive
+ * at both ends, so re-opening the editor round-trips the same boundary.
+ */
+data class RideBounds (
+    var `startedAtMs`: kotlin.Long,
+    var `endedAtMs`: kotlin.Long
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRideBounds: FfiConverterRustBuffer<RideBounds> {
+    override fun read(buf: ByteBuffer): RideBounds {
+        return RideBounds(
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RideBounds) = (
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`endedAtMs`)
+    )
+
+    override fun write(value: RideBounds, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`endedAtMs`, buf)
+    }
+}
+
+
+
+/**
  * A whole ride, reduced to what an elevation chart needs.
  */
 data class RideProfile (
@@ -3067,6 +3641,80 @@ public object FfiConverterTypeRideProfilePoint: FfiConverterRustBuffer<RideProfi
             FfiConverterOptionalDouble.write(value.`gradientPercent`, buf)
             FfiConverterInt.write(value.`sectionId`, buf)
             FfiConverterBoolean.write(value.`continues`, buf)
+    }
+}
+
+
+
+/**
+ * One stretch of riding between shuttles or manual pauses — the unit a TCX lap
+ * records and the unit a rider picks when exporting a single descent.
+ *
+ * A dropped fix mid-descent does NOT end a run: the rider kept riding, and the
+ * gap is a recording artifact. Only a vehicle or a manual pause ends one.
+ */
+data class RideRun (
+    /**
+     * Position among the runs of this activity. Presentation only — it
+     * renumbers whenever an annotation changes, so never persist it as identity.
+     */
+    var `index`: kotlin.UInt,
+    var `startedAtMs`: kotlin.Long,
+    var `endedAtMs`: kotlin.Long,
+    /**
+     * Half-open index range into the track this was enumerated from.
+     */
+    var `fromIndex`: kotlin.UInt,
+    var `toIndex`: kotlin.UInt,
+    var `distanceM`: kotlin.Double,
+    var `ascentM`: kotlin.Double,
+    var `descentM`: kotlin.Double,
+    var `movingTimeS`: kotlin.Double
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRideRun: FfiConverterRustBuffer<RideRun> {
+    override fun read(buf: ByteBuffer): RideRun {
+        return RideRun(
+            FfiConverterUInt.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterDouble.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RideRun) = (
+            FfiConverterUInt.allocationSize(value.`index`) +
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`endedAtMs`) +
+            FfiConverterUInt.allocationSize(value.`fromIndex`) +
+            FfiConverterUInt.allocationSize(value.`toIndex`) +
+            FfiConverterDouble.allocationSize(value.`distanceM`) +
+            FfiConverterDouble.allocationSize(value.`ascentM`) +
+            FfiConverterDouble.allocationSize(value.`descentM`) +
+            FfiConverterDouble.allocationSize(value.`movingTimeS`)
+    )
+
+    override fun write(value: RideRun, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`index`, buf)
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`endedAtMs`, buf)
+            FfiConverterUInt.write(value.`fromIndex`, buf)
+            FfiConverterUInt.write(value.`toIndex`, buf)
+            FfiConverterDouble.write(value.`distanceM`, buf)
+            FfiConverterDouble.write(value.`ascentM`, buf)
+            FfiConverterDouble.write(value.`descentM`, buf)
+            FfiConverterDouble.write(value.`movingTimeS`, buf)
     }
 }
 
@@ -3672,6 +4320,74 @@ public object FfiConverterTypeTrackPoint: FfiConverterRustBuffer<TrackPoint> {
 
 
 
+data class TransportCorrection (
+    var `track`: List<CanonicalTrackPoint>,
+    var `ride`: RideTotals,
+    var `episodes`: List<TransportEpisode>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTransportCorrection: FfiConverterRustBuffer<TransportCorrection> {
+    override fun read(buf: ByteBuffer): TransportCorrection {
+        return TransportCorrection(
+            FfiConverterSequenceTypeCanonicalTrackPoint.read(buf),
+            FfiConverterTypeRideTotals.read(buf),
+            FfiConverterSequenceTypeTransportEpisode.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TransportCorrection) = (
+            FfiConverterSequenceTypeCanonicalTrackPoint.allocationSize(value.`track`) +
+            FfiConverterTypeRideTotals.allocationSize(value.`ride`) +
+            FfiConverterSequenceTypeTransportEpisode.allocationSize(value.`episodes`)
+    )
+
+    override fun write(value: TransportCorrection, buf: ByteBuffer) {
+            FfiConverterSequenceTypeCanonicalTrackPoint.write(value.`track`, buf)
+            FfiConverterTypeRideTotals.write(value.`ride`, buf)
+            FfiConverterSequenceTypeTransportEpisode.write(value.`episodes`, buf)
+    }
+}
+
+
+
+data class TransportEpisode (
+    var `startedAtMs`: kotlin.Long,
+    var `endedAtMs`: kotlin.Long
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTransportEpisode: FfiConverterRustBuffer<TransportEpisode> {
+    override fun read(buf: ByteBuffer): TransportEpisode {
+        return TransportEpisode(
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TransportEpisode) = (
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`endedAtMs`)
+    )
+
+    override fun write(value: TransportEpisode, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`endedAtMs`, buf)
+    }
+}
+
+
+
 /**
  * Mutually exclusive interpretation of one canonical track point.
  *
@@ -3840,6 +4556,40 @@ public object FfiConverterTypeAttemptRejection: FfiConverterRustBuffer<AttemptRe
     override fun allocationSize(value: AttemptRejection) = 4UL
 
     override fun write(value: AttemptRejection, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+enum class CanonicalStage {
+
+    READING,
+    MOTION,
+    TRACK,
+    ELEVATION,
+    TRANSPORT,
+    FINALIZING;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCanonicalStage: FfiConverterRustBuffer<CanonicalStage> {
+    override fun read(buf: ByteBuffer) = try {
+        CanonicalStage.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: CanonicalStage) = 4UL
+
+    override fun write(value: CanonicalStage, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -4231,6 +4981,65 @@ public object FfiConverterTypeLiveSegmentEvent : FfiConverterRustBuffer<LiveSegm
 
 
 
+sealed class RideBoundsException: kotlin.Exception() {
+
+    class Invalid(
+
+        val `msg`: kotlin.String
+        ) : RideBoundsException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<RideBoundsException> {
+        override fun lift(error_buf: RustBuffer.ByValue): RideBoundsException = FfiConverterTypeRideBoundsError.lift(error_buf)
+    }
+
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRideBoundsError : FfiConverterRustBuffer<RideBoundsException> {
+    override fun read(buf: ByteBuffer): RideBoundsException {
+
+
+        return when(buf.getInt()) {
+            1 -> RideBoundsException.Invalid(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: RideBoundsException): ULong {
+        return when(value) {
+            is RideBoundsException.Invalid -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+        }
+    }
+
+    override fun write(value: RideBoundsException, buf: ByteBuffer) {
+        when(value) {
+            is RideBoundsException.Invalid -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+
+
 /**
  * Errors specific to authoring and matching segments.
  */
@@ -4283,6 +5092,65 @@ public object FfiConverterTypeSegmentError : FfiConverterRustBuffer<SegmentExcep
     override fun write(value: SegmentException, buf: ByteBuffer) {
         when(value) {
             is SegmentException.InvalidSelection -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`msg`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+
+
+sealed class TransportException: kotlin.Exception() {
+
+    class InvalidInterval(
+
+        val `msg`: kotlin.String
+        ) : TransportException() {
+        override val message
+            get() = "msg=${ `msg` }"
+    }
+
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<TransportException> {
+        override fun lift(error_buf: RustBuffer.ByValue): TransportException = FfiConverterTypeTransportError.lift(error_buf)
+    }
+
+
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTransportError : FfiConverterRustBuffer<TransportException> {
+    override fun read(buf: ByteBuffer): TransportException {
+
+
+        return when(buf.getInt()) {
+            1 -> TransportException.InvalidInterval(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: TransportException): ULong {
+        return when(value) {
+            is TransportException.InvalidInterval -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`msg`)
+            )
+        }
+    }
+
+    override fun write(value: TransportException, buf: ByteBuffer) {
+        when(value) {
+            is TransportException.InvalidInterval -> {
                 buf.putInt(1)
                 FfiConverterString.write(value.`msg`, buf)
                 Unit
@@ -4448,6 +5316,38 @@ public object FfiConverterOptionalTypeLiveSnapshot: FfiConverterRustBuffer<LiveS
         } else {
             buf.put(1)
             FfiConverterTypeLiveSnapshot.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeRideBounds: FfiConverterRustBuffer<RideBounds?> {
+    override fun read(buf: ByteBuffer): RideBounds? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRideBounds.read(buf)
+    }
+
+    override fun allocationSize(value: RideBounds?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRideBounds.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RideBounds?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRideBounds.write(value, buf)
         }
     }
 }
@@ -4638,6 +5538,34 @@ public object FfiConverterSequenceTypeCandidateDescent: FfiConverterRustBuffer<L
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeCanonicalPreviewPoint: FfiConverterRustBuffer<List<CanonicalPreviewPoint>> {
+    override fun read(buf: ByteBuffer): List<CanonicalPreviewPoint> {
+        val len = buf.getInt()
+        return List<CanonicalPreviewPoint>(len) {
+            FfiConverterTypeCanonicalPreviewPoint.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<CanonicalPreviewPoint>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeCanonicalPreviewPoint.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<CanonicalPreviewPoint>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeCanonicalPreviewPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeCanonicalTrackPoint: FfiConverterRustBuffer<List<CanonicalTrackPoint>> {
     override fun read(buf: ByteBuffer): List<CanonicalTrackPoint> {
         val len = buf.getInt()
@@ -4806,6 +5734,34 @@ public object FfiConverterSequenceTypeRideProfilePoint: FfiConverterRustBuffer<L
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeRideRun: FfiConverterRustBuffer<List<RideRun>> {
+    override fun read(buf: ByteBuffer): List<RideRun> {
+        val len = buf.getInt()
+        return List<RideRun>(len) {
+            FfiConverterTypeRideRun.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RideRun>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRideRun.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RideRun>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRideRun.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeSegmentAttempt: FfiConverterRustBuffer<List<SegmentAttempt>> {
     override fun read(buf: ByteBuffer): List<SegmentAttempt> {
         val len = buf.getInt()
@@ -4908,6 +5864,34 @@ public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<Tr
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeTrackPoint.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTransportEpisode: FfiConverterRustBuffer<List<TransportEpisode>> {
+    override fun read(buf: ByteBuffer): List<TransportEpisode> {
+        val len = buf.getInt()
+        return List<TransportEpisode>(len) {
+            FfiConverterTypeTransportEpisode.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TransportEpisode>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTransportEpisode.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TransportEpisode>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTransportEpisode.write(it, buf)
         }
     }
 }
@@ -5047,6 +6031,20 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
 
 
         /**
+         * Replace automatic transport labels, restoring ordinary downhill/transit/still
+         * outside the user's intervals. Empty means explicitly no transport.
+         */
+    @Throws(TransportException::class) fun `correctTransport`(`track`: List<CanonicalTrackPoint>, `episodes`: List<TransportEpisode>, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long): TransportCorrection {
+            return FfiConverterTypeTransportCorrection.lift(
+    uniffiRustCallWithError(TransportException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_correct_transport(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterSequenceTypeTransportEpisode.lower(`episodes`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),_status)
+}
+    )
+    }
+
+
+        /**
          * Parses one raw recording once and produces its canonical processed result.
          */
     @Throws(FusionException::class) fun `finalizeRecording`(`path`: kotlin.String): CanonicalActivity {
@@ -5054,6 +6052,20 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
     uniffiRustCallWithError(FusionException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_finalize_recording(
         FfiConverterString.lower(`path`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Uses the same parser and math as finalize_recording; progress never feeds
+         * back into analysis. Snapshot thinning is display-only, at most 2,000 points.
+         */
+    @Throws(FusionException::class) fun `finalizeRecordingWithProgress`(`path`: kotlin.String, `observer`: CanonicalObserver): CanonicalActivity {
+            return FfiConverterTypeCanonicalActivity.lift(
+    uniffiRustCallWithError(FusionException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_finalize_recording_with_progress(
+        FfiConverterString.lower(`path`),FfiConverterTypeCanonicalObserver.lower(`observer`),_status)
 }
     )
     }
@@ -5156,6 +6168,37 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_profile(
         FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Enumerate the riding runs of a finalized track, honouring the rider's bounds.
+         *
+         * This is the single definition of a run. Kotlin labels its export points from
+         * what this returns rather than deciding boundaries again, so the run a rider
+         * taps and the lap that gets written are always the same descent.
+         */ fun `rideRuns`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?): List<RideRun> {
+            return FfiConverterSequenceTypeRideRun.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_runs(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Recompute the ride under the rider's bounds. `started_at_ms`/`ended_at_ms`
+         * are the recording's own bounds, which never shrink — validating against the
+         * trimmed span instead would make every edit one-way.
+         */
+    @Throws(RideBoundsException::class) fun `rideWithin`(`track`: List<CanonicalTrackPoint>, `bounds`: RideBounds?, `startedAtMs`: kotlin.Long, `endedAtMs`: kotlin.Long): BoundedRide {
+            return FfiConverterTypeBoundedRide.lift(
+    uniffiRustCallWithError(RideBoundsException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_ride_within(
+        FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterOptionalTypeRideBounds.lower(`bounds`),FfiConverterLong.lower(`startedAtMs`),FfiConverterLong.lower(`endedAtMs`),_status)
 }
     )
     }

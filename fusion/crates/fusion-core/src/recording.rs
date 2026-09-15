@@ -85,6 +85,16 @@ pub fn parse_recording_file(path: &Path) -> Result<ParsedRecording, FusionError>
 
 /// Parses a raw recording from any reader of gzipped JSONL bytes.
 pub fn parse_recording<R: Read>(reader: R) -> Result<ParsedRecording, FusionError> {
+    parse_recording_observed(reader, |_| {})
+}
+
+pub(crate) fn parse_recording_observed<R: Read>(
+    reader: R,
+    mut progress: impl FnMut(&ParsedRecording),
+) -> Result<ParsedRecording, FusionError> {
+    let mut last_report = std::time::Instant::now();
+    let mut processed = 0usize;
+    let mut first_gps_reported = false;
     let mut lines = BufReader::new(MultiGzDecoder::new(reader));
     let mut out = ParsedRecording::default();
     let mut buf = String::new();
@@ -110,8 +120,17 @@ pub fn parse_recording<R: Read>(reader: R) -> Result<ParsedRecording, FusionErro
             // Unknown line type or malformed/truncated line: skip.
             Ok(RecordLine::Unknown) | Err(_) => out.skipped_lines += 1,
         }
+        processed += 1;
+        if (!first_gps_reported && !out.gps.is_empty())
+            || (processed.is_multiple_of(4096)
+                && last_report.elapsed() >= std::time::Duration::from_millis(500))
+        {
+            progress(&out);
+            first_gps_reported = !out.gps.is_empty();
+            last_report = std::time::Instant::now();
+        }
     }
-
+    progress(&out);
     Ok(out)
 }
 

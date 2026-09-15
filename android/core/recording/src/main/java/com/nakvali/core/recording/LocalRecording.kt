@@ -98,7 +98,22 @@ data class LocalRecording(
     @SerialName("strava_upload_id") val stravaUploadId: Long? = null,
     @SerialName("strava_activity_id") val stravaActivityId: Long? = null,
     @SerialName("strava_error") val stravaError: String? = null,
-)
+    @SerialName("transport_episodes") val transportEpisodes: List<StoredTransportEpisode>? = null,
+    @SerialName("transport_revision") val transportRevision: Long = 0,
+    /** Null means the whole recording is the ride. See [StoredRideBounds]. */
+    @SerialName("ride_bounds") val rideBounds: StoredRideBounds? = null,
+) {
+    /**
+     * The span the rider calls the ride. Equal to the recording's own bounds
+     * until a trim says otherwise, so callers can use these unconditionally.
+     *
+     * The recording's own [startedAtMs]/[endedAtMs] stay untouched: continuation,
+     * crash recovery, backup validation and list ordering all depend on them.
+     */
+    val ridingStartedAtMs: Long get() = rideBounds?.startedAtMs ?: startedAtMs
+    val ridingEndedAtMs: Long get() = rideBounds?.endedAtMs ?: endedAtMs
+    val ridingDurationMs: Long get() = (ridingEndedAtMs - ridingStartedAtMs).coerceAtLeast(0)
+}
 
 /** An interrupted, unsaved recording that is safe to append to. */
 fun LocalRecording.canContinueRecording(): Boolean =

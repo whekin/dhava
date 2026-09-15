@@ -132,11 +132,56 @@ func TestStravaExportAcceptsOnlyProcessedGPXFields(t *testing.T) {
 	if broker.export.ExternalID != "nakvali-ride-v1.gpx" {
 		t.Errorf("external id = %q", broker.export.ExternalID)
 	}
-	if string(broker.export.GPX) != "<gpx/>" {
-		t.Errorf("GPX = %q", broker.export.GPX)
+	if string(broker.export.File) != "<gpx/>" {
+		t.Errorf("GPX = %q", broker.export.File)
+	}
+	if broker.export.DataType != "gpx" {
+		t.Errorf("data type = %q", broker.export.DataType)
 	}
 	if broker.export.SportType != "MountainBikeRide" {
 		t.Errorf("sport type = %q", broker.export.SportType)
+	}
+}
+
+// Strava reads a TCX upload's stated distance and laps instead of deriving
+// kilometres from coordinates, so the file extension has to reach it.
+func TestStravaExportDerivesDataTypeFromExtension(t *testing.T) {
+	for _, testCase := range []struct{ filename, dataType string }{
+		{"ride.tcx", "tcx"},
+		{"ride.TCX", "tcx"},
+		{"ride.gpx", "gpx"},
+		{"ride", "gpx"},
+	} {
+		t.Run(testCase.filename, func(t *testing.T) {
+			broker := &fakeStravaBroker{}
+			h := testStravaRouter(t, broker)
+
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			_ = writer.WriteField("external_id", "nakvali-ride-v1.gpx")
+			_ = writer.WriteField("title", "Forest ride")
+			_ = writer.WriteField("sport_type", "MountainBikeRide")
+			part, err := writer.CreateFormFile("file", testCase.filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = part.Write([]byte("<track/>"))
+			_ = writer.Close()
+
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/strava/exports", &body)
+			request.Header.Set("Authorization", "Bearer device-secret")
+			request.Header.Set("Content-Type", writer.FormDataContentType())
+			response := httptest.NewRecorder()
+
+			h.ServeHTTP(response, request)
+
+			if response.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, body=%s", response.Code, response.Body)
+			}
+			if broker.export.DataType != testCase.dataType {
+				t.Errorf("data type = %q, want %q", broker.export.DataType, testCase.dataType)
+			}
+		})
 	}
 }
 

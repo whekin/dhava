@@ -103,6 +103,10 @@ func (u UploadResponse) UploadID() (int64, error) {
 type CreateUploadRequest struct {
 	File        []byte
 	Filename    string
+	// DataType tells Strava how to read File. TCX carries its own distance and
+	// laps; GPX does not, so Strava derives kilometres from the coordinates and
+	// bridges every gap the client left where transport was excluded.
+	DataType    string
 	Title       string
 	Description string
 	ExternalID  string
@@ -115,10 +119,16 @@ func (c *Client) CreateUpload(
 ) (UploadResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
+	// Empty fields are skipped below, and Strava rejects an upload with no
+	// data_type at all, so the default has to be applied here.
+	dataType := input.DataType
+	if dataType == "" {
+		dataType = "gpx"
+	}
 	fields := map[string]string{
 		"name":        input.Title,
 		"description": input.Description,
-		"data_type":   "gpx",
+		"data_type":   dataType,
 		"external_id": input.ExternalID,
 	}
 	for name, value := range fields {

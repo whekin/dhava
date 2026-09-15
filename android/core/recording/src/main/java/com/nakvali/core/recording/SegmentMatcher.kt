@@ -74,7 +74,8 @@ internal class SegmentMatcher(
             val lastModifiedMs = file.lastModified()
 
             val reusable = cachedRides[recording.id]?.takeIf {
-                it.sourceSizeBytes == sizeBytes && it.sourceLastModifiedMs == lastModifiedMs
+                it.sourceSizeBytes == sizeBytes && it.sourceLastModifiedMs == lastModifiedMs &&
+                    it.transportRevision == recording.transportRevision
             }
             if (reusable != null) {
                 rides += reusable
@@ -85,6 +86,7 @@ internal class SegmentMatcher(
                 recordingId = recording.id,
                 sourceSizeBytes = sizeBytes,
                 sourceLastModifiedMs = lastModifiedMs,
+                transportRevision = recording.transportRevision,
             )
             val known = boundsCache[recording.id]?.takeIf {
                 it.sourceSizeBytes == sizeBytes && it.sourceLastModifiedMs == lastModifiedMs

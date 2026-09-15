@@ -99,10 +99,17 @@ internal class StravaApi(
     suspend fun export(
         recording: LocalRecording,
         algorithmVersion: String,
-        gpx: File,
+        track: File,
     ): StravaExportResponse = withContext(Dispatchers.IO) {
         val safeVersion = algorithmVersion.replace(Regex("[^A-Za-z0-9._-]"), "-")
-        val externalId = "nakvali-${recording.id}-$safeVersion.gpx"
+        // The trim belongs in the idempotency key. Without it, re-exporting a
+        // ride the rider has just trimmed finds the existing upload, returns
+        // "uploaded" without sending a byte, and leaves Strava holding the
+        // untrimmed ride while the app reports success.
+        val trim = recording.rideBounds?.let {
+            "-t${it.startedAtMs - recording.startedAtMs}-${recording.endedAtMs - it.endedAtMs}"
+        }.orEmpty()
+        val externalId = "nakvali-${recording.id}-$safeVersion$trim.${track.extension}"
         val sportType = if (recording.bikeType == BikeType.EBIKE) {
             "EMountainBikeRide"
         } else {
@@ -112,8 +119,8 @@ internal class StravaApi(
             .setType(MultipartBody.FORM)
             .addFormDataPart(
                 "file",
-                gpx.name,
-                gpx.asRequestBody("application/gpx+xml".toMediaType()),
+                track.name,
+                track.asRequestBody(trackMediaType(track).toMediaType()),
             )
             .addFormDataPart("external_id", externalId)
             .addFormDataPart("title", recording.title ?: "Nakvali ride")
@@ -124,6 +131,12 @@ internal class StravaApi(
             .post(body)
             .build()
         executeJson(request, acceptedCodes = setOf(200, 202, 422))
+    }
+
+    /** The server reads the upload's data type from the name, not this header. */
+    private fun trackMediaType(track: File): String = when (track.extension.lowercase()) {
+        "tcx" -> "application/vnd.garmin.tcx+xml"
+        else -> "application/gpx+xml"
     }
 
     private fun authenticatedRequest(url: String): Request.Builder = Request.Builder()

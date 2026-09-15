@@ -214,7 +214,7 @@ private fun ActivityRow(
                 )
                 Text(
                     text = listOfNotNull(
-                        formatElapsed(recording.endedAtMs - recording.startedAtMs),
+                        formatElapsed(recording.ridingDurationMs),
                         recording.bikeName,
                     ).joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium,

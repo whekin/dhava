@@ -22,12 +22,15 @@ mod gps_quality;
 pub mod linalg;
 pub mod live;
 pub mod live_segment;
+pub mod load_progress;
 mod motion;
 pub mod orientation;
 pub mod recording;
 pub mod replay;
+pub mod ride_bounds;
 pub mod segment;
 pub mod segment_editor;
+pub mod transport;
 
 pub use live::{LiveFusion, LiveSnapshot, LiveTotals, live_totals_from_recording};
 pub use live_segment::{LiveRunEnd, LiveSegmentArm, LiveSegmentEvent, LiveSegmentTracker};
@@ -44,6 +47,7 @@ pub use analysis::{
 };
 pub use recording::{ParsedRecording, RecordingMeta, parse_recording, parse_recording_file};
 
+pub use ride_bounds::{BoundedRide, RideBounds, RideBoundsError, RideRun, ride_runs, ride_within};
 pub use segment::{
     AttemptFlag, AttemptQuality, AttemptRejection, GeoBounds, RejectedAttempt,
     SEGMENT_MATCH_VERSION, SegmentAttempt, SegmentBuildResult, SegmentDefinition,

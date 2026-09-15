@@ -67,3 +67,26 @@ storage.
 Import accepts at most 10,000 payload files, a 2 MB manifest and 50 GB of declared
 payload data. Entry names use an allowlist and cannot contain nested or parent paths.
 Nakvali also keeps 64 MB of free internal space beyond the staging requirement.
+
+## Transport annotations
+
+Each recording-index entry can contain `transport_episodes`: absent/null uses
+automatic detection, an empty list explicitly means no transport, and a nonempty
+list contains `{started_at_ms, ended_at_ms}` intervals in absolute recording time.
+These annotations are backed up with the existing index, not written into raw
+sensor files. `transport_revision` invalidates local segment-match caches after
+an edit. Fresh restores preserve annotations; the existing merge policy still
+keeps authored metadata already present on the destination device.
+
+## Trim annotations
+
+Each entry can also contain `ride_bounds`: absent/null means the whole recording
+is the ride, and a value is `{started_at_ms, ended_at_ms}` in absolute recording
+time. The entry's own `started_at_ms`/`ended_at_ms` are the recording's true
+bounds and never move. There is no trim revision, because a trim changes what
+counts as the ride and not the track segment matching consumes.
+
+Both fields are optional, so an index written before them decodes unchanged and
+the format version stays 1. As with transport annotations, restoring onto a
+device that already holds the ride keeps that device's entry, so a trim authored
+on another phone is not imported.

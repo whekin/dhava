@@ -39,6 +39,13 @@ data class CanonicalActivityArtifact(
      * artifacts, which were computed before transport was excluded.
      */
     val ride: CanonicalRideTotals? = null,
+    val transportEpisodes: List<StoredTransportEpisode> = emptyList(),
+    /**
+     * The rider's trim, carried on the corrected projection so consumers can dim
+     * what it leaves out. Always absent on the stored artifact, which is the
+     * automatic result — the annotation itself lives in the recording index.
+     */
+    val rideBounds: StoredRideBounds? = null,
 )
 
 /**
@@ -143,6 +150,7 @@ internal data class CanonicalArtifactPayload(
     val finalizedTrack: List<CanonicalPoint>,
     val quality: CanonicalQuality,
     val ride: CanonicalRideTotals,
+    val transportEpisodes: List<StoredTransportEpisode> = emptyList(),
 )
 
 internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
@@ -188,9 +196,10 @@ internal fun CanonicalActivity.toArtifactPayload(): CanonicalArtifactPayload =
             )
         },
         quality = quality.toCanonicalQuality(),
+        transportEpisodes = transportEpisodes.map { it.toStored() },
     )
 
-private fun ActivityState.toCanonicalActivityState(): CanonicalActivityState = when (this) {
+internal fun ActivityState.toCanonicalActivityState(): CanonicalActivityState = when (this) {
     ActivityState.UNKNOWN -> CanonicalActivityState.UNKNOWN
     ActivityState.STILL -> CanonicalActivityState.STILL
     ActivityState.DOWNHILL -> CanonicalActivityState.DOWNHILL

@@ -5,6 +5,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -132,16 +133,23 @@ func (s *Server) handleStravaExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	gpx, err := io.ReadAll(io.LimitReader(file, maxStravaGPXBytes+1))
+	// Strava needs to be told how to read the upload, and the extension is the
+	// only thing that says so. Older clients sent GPX under any name, so an
+	// unknown extension keeps meaning GPX rather than failing their uploads.
+	dataType := "gpx"
+	if strings.EqualFold(filepath.Ext(header.Filename), ".tcx") {
+		dataType = "tcx"
+	}
+	track, err := io.ReadAll(io.LimitReader(file, maxStravaGPXBytes+1))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "gpx_unreadable"})
 		return
 	}
-	if len(gpx) == 0 {
+	if len(track) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "gpx_empty"})
 		return
 	}
-	if len(gpx) > maxStravaGPXBytes {
+	if len(track) > maxStravaGPXBytes {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "gpx_too_large"})
 		return
 	}
@@ -152,7 +160,8 @@ func (s *Server) handleStravaExport(w http.ResponseWriter, r *http.Request) {
 		Description: description,
 		SportType:   sportType,
 		Filename:    header.Filename,
-		GPX:         gpx,
+		DataType:    dataType,
+		File:        track,
 	})
 	if err != nil {
 		s.writeStravaError(w, err)

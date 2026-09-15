@@ -262,6 +262,51 @@ class TrackMapTest {
         assertEquals(0f, diagnosticLineOptions()["tolerance"])
     }
 
+    @Test
+    fun `transport connects power saving GPS cadence without changing vertices`() {
+        val points = listOf(0L, 5_000L, 12_500L).map {
+            point(it, ActivityState.LIKELY_MOTORIZED)
+        }
+        assertEquals(listOf(points), points.semanticLineRuns().map { it.points })
+    }
+
+    @Test
+    fun `transport still splits pauses and missing GPS`() {
+        val points = listOf(
+            point(0, ActivityState.LIKELY_MOTORIZED),
+            point(5_000, ActivityState.LIKELY_MOTORIZED),
+            point(12_501, ActivityState.LIKELY_MOTORIZED),
+            point(17_501, ActivityState.LIKELY_MOTORIZED),
+            point(18_000, ActivityState.LIKELY_MOTORIZED, sectionId = 1),
+            point(23_000, ActivityState.LIKELY_MOTORIZED, sectionId = 1),
+        )
+        assertEquals(points.chunked(2), points.semanticLineRuns().map { it.points })
+    }
+
+    @Test
+    fun `riding and transport boundaries retain strict gap policy`() {
+        for (state in listOf(ActivityState.DOWNHILL, ActivityState.TRANSIT)) {
+            assertEquals(emptyList<SemanticLineRun>(), listOf(
+                point(0, state), point(5_000, state),
+            ).semanticLineRuns())
+            assertEquals(emptyList<SemanticLineRun>(), listOf(
+                point(0, ActivityState.LIKELY_MOTORIZED), point(5_000, state),
+            ).semanticLineRuns())
+        }
+    }
+
+    @Test
+    fun `transport draft keeps selected color and sparse cadence with hard breaks`() {
+        val points = listOf(
+            point(0, null), point(5_000, null), point(12_500, null),
+            point(20_001, null), point(25_001, null),
+            point(26_000, null, sectionId = 1), point(31_000, null, sectionId = 1),
+        ).map { it.copy(isTransportPreview = true) }
+        val runs = points.semanticLineRuns()
+        assertEquals(listOf(points.take(3), points.subList(3, 5), points.takeLast(2)), runs.map { it.points })
+        runs.forEach { assertNull(it.activityState) }
+    }
+
     private fun point(
         timestampMs: Long,
         state: ActivityState?,

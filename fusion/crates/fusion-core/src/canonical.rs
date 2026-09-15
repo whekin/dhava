@@ -27,7 +27,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::activity::{ActivityState, classify_activity};
+use crate::activity::{ActivityState, classify_activity_with_episodes};
 use crate::analysis::{
     ALGORITHM_VERSION, AirtimeWindow, MAX_MOVING_GAP_MS, MIN_MOVE_M, MOVING_SPEED_MPS,
     RideAnalysis, analyze,
@@ -36,6 +36,7 @@ use crate::gps_quality::geographic_distance_m;
 
 use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::replay::{DiagnosticTrackPoint, replay_parsed};
+use crate::ride_bounds::{RideBounds, within};
 use crate::{BaroSample, FusionError};
 
 const MAX_GPS_ACCURACY_M: f64 = 20.0;
@@ -120,6 +121,7 @@ pub struct CanonicalActivity {
     pub raw_track: Vec<CanonicalTrackPoint>,
     pub finalized_track: Vec<CanonicalTrackPoint>,
     pub quality: QualitySummary,
+    pub transport_episodes: Vec<crate::transport::TransportEpisode>,
 }
 
 /// What the rider did, with transport removed.
@@ -194,7 +196,17 @@ pub fn finalize_recording(path: String) -> Result<CanonicalActivity, FusionError
 }
 
 pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, FusionError> {
+    finalize_observed(recording, |_| {})
+}
+
+pub(crate) fn finalize_observed(
+    recording: &ParsedRecording,
+    mut progress: impl FnMut(crate::load_progress::CanonicalStage),
+) -> Result<CanonicalActivity, FusionError> {
+    use crate::load_progress::CanonicalStage;
+    progress(CanonicalStage::Motion);
     let mut analysis = analyze(recording)?;
+    progress(CanonicalStage::Track);
     let replay = replay_parsed(recording);
 
     let mut gps = recording.gps.clone();
@@ -223,6 +235,7 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
         })
         .collect();
 
+    progress(CanonicalStage::Elevation);
     let vertical = finalized_altitudes(
         &raw_track,
         &recording.baro,
@@ -248,7 +261,9 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
             activity_confidence: point.activity_confidence.unwrap_or(0.0),
         })
         .collect();
-    let classifications = classify_activity(&finalized_track, &recording.imu);
+    progress(CanonicalStage::Transport);
+    let (classifications, transport_episodes) =
+        classify_activity_with_episodes(&finalized_track, &recording.imu);
     for (point, classification) in finalized_track.iter_mut().zip(classifications) {
         point.activity_state = classification.state;
         point.activity_confidence = classification.confidence;
@@ -263,6 +278,7 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
 
     let ride = ride_totals(&finalized_track);
 
+    progress(CanonicalStage::Finalizing);
     Ok(CanonicalActivity {
         algorithm_version: ALGORITHM_VERSION.to_owned(),
         analysis,
@@ -270,6 +286,7 @@ pub fn finalize(recording: &ParsedRecording) -> Result<CanonicalActivity, Fusion
         raw_track,
         finalized_track,
         quality,
+        transport_episodes,
     })
 }
 
@@ -770,9 +787,23 @@ fn finalized_speeds(
 /// else — including `STILL` and `UNKNOWN` — stays with the ride, because a
 /// stop in the middle of a lap is part of that lap.
 pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
+    ride_breakdown(track, None).0
+}
+
+/// Ride figures and the running ride distance at each point, from one walk.
+///
+/// The odometer exists because TCX states its own distance per trackpoint; it
+/// is derived here rather than separately so it cannot disagree with the totals
+/// the app shows. `bounds` narrows the walk to the span the rider calls the
+/// ride: outside it nothing accumulates, so the odometer simply stays flat.
+pub(crate) fn ride_breakdown(
+    track: &[CanonicalTrackPoint],
+    bounds: Option<RideBounds>,
+) -> (RideTotals, Vec<f64>) {
     let motorized =
         |point: &CanonicalTrackPoint| point.activity_state == ActivityState::LikelyMotorized;
 
+    let mut odometer_m = vec![0.0; track.len()];
     let mut distance_m = 0.0;
     let mut transport_distance_m = 0.0;
     let mut moving_time_ms = 0i64;
@@ -785,18 +816,27 @@ pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
 
     for point in track {
         if !motorized(point)
+            && within(bounds, point)
             && let Some(speed) = point.speed_mps.filter(|value| value.is_finite())
         {
             max_speed_mps = max_speed_mps.max(speed);
         }
     }
 
-    for pair in track.windows(2) {
+    for (index, pair) in track.windows(2).enumerate() {
         let (from, to) = (&pair[0], &pair[1]);
         let dt_ms = to.timestamp_ms - from.timestamp_ms;
-        if from.section_id != to.section_id || !(1..=MAX_MOVING_GAP_MS).contains(&dt_ms) {
+        // A pair reaching outside the bounds counts toward neither the ride nor
+        // the transport: the rider has said that stretch is not part of the day,
+        // not that they were driven through it.
+        if from.section_id != to.section_id
+            || !(1..=MAX_MOVING_GAP_MS).contains(&dt_ms)
+            || !within(bounds, from)
+            || !within(bounds, to)
+        {
             ride_anchor = None;
             transport_anchor = None;
+            odometer_m[index + 1] = distance_m;
             continue;
         }
         let in_transport = motorized(from) || motorized(to);
@@ -837,17 +877,18 @@ pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
                 moving_time_ms += dt_ms;
             }
         }
+        odometer_m[index + 1] = distance_m;
     }
 
     let ride_only: Vec<CanonicalTrackPoint> = track
         .iter()
-        .filter(|point| !motorized(point))
+        .filter(|point| !motorized(point) && within(bounds, point))
         .cloned()
         .collect();
     let (ascent_m, descent_m) = ascent_descent(&ride_only);
 
     let moving_time_s = moving_time_ms as f64 / 1_000.0;
-    RideTotals {
+    let totals = RideTotals {
         distance_m,
         moving_time_s,
         ascent_m,
@@ -860,7 +901,8 @@ pub(crate) fn ride_totals(track: &[CanonicalTrackPoint]) -> RideTotals {
         },
         transport_distance_m,
         transport_time_s: transport_time_ms as f64 / 1_000.0,
-    }
+    };
+    (totals, odometer_m)
 }
 
 pub(crate) fn ascent_descent(track: &[CanonicalTrackPoint]) -> (f64, f64) {
@@ -1387,5 +1429,20 @@ mod tests {
         );
         assert!(totals.moving_time_s < 105.0 && totals.moving_time_s > 90.0);
         assert!(totals.transport_time_s > 90.0);
+
+        // The odometer an export writes must land on the number the app shows,
+        // and must not move at all while the rider is in the shuttle.
+        let odometer = crate::ride_bounds::ride_within(track.clone(), None, 0, 201_000)
+            .unwrap()
+            .odometer_m;
+        assert_eq!(odometer.len(), track.len());
+        assert_eq!(odometer.last().copied(), Some(totals.distance_m));
+        assert!(odometer.windows(2).all(|pair| pair[1] >= pair[0]));
+        assert_eq!(odometer[100], 0.0, "the shuttle advanced the ride odometer");
+        assert!(
+            (750.0..=850.0).contains(&(odometer[201] - odometer[101])),
+            "the run's own distance is wrong: {} m",
+            odometer[201] - odometer[101],
+        );
     }
 }
