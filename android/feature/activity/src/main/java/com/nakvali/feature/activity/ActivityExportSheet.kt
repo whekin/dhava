@@ -58,6 +58,13 @@ internal fun ActivityExportButton(
         onClick = { expanded = true },
         enabled = processedAvailable || processedLoading || rawGpsAvailable || rawRecordingAvailable || healthLogAvailable,
     ) { Icon(Icons.Filled.Share, contentDescription = "Export") }
+    // Once the file has been handed to the system picker or the share chooser,
+    // this sheet has done its job: the rider's attention is in the other app,
+    // and coming back to a sheet still asking what to export is asking a
+    // question that was already answered. The result arrives as a toast.
+    LaunchedEffect(exportState.prepared) {
+        if (exportState.prepared != null) expanded = false
+    }
     if (!expanded) return
     ModalBottomSheet(
         onDismissRequest = { expanded = false },

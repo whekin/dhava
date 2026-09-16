@@ -186,6 +186,21 @@ fun ActivityDetailScreen(
         }
     }
 
+    // The export sheet closes the moment the file is handed to the system, so
+    // whatever happened next has to be said somewhere the sheet no longer is.
+    // Only results that follow a hand-off are announced: a failure to prepare
+    // the file happens while the sheet is still open and reads it out there.
+    var awaitingExportResult by remember { mutableStateOf(false) }
+    LaunchedEffect(exportState.prepared) {
+        if (exportState.prepared != null) awaitingExportResult = true
+    }
+    LaunchedEffect(exportState.message, exportState.error, exportState.busy) {
+        if (!awaitingExportResult || exportState.busy) return@LaunchedEffect
+        val feedback = exportState.error ?: exportState.message ?: return@LaunchedEffect
+        awaitingExportResult = false
+        Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
+    }
+
     // Pops the screen once the entry disappears (deleted here or elsewhere).
     // Guarded on "seen at least once" so the initial null emitted while the
     // index is still loading never pops a freshly opened screen.
