@@ -1,4 +1,4 @@
-package com.nakvali.feature.segments
+package com.nakvali.core.ui
 
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.assertEquals

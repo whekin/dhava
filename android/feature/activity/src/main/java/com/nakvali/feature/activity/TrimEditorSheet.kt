@@ -13,17 +13,26 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.ProfileDomain
+import com.nakvali.core.ui.ProfileTrimmer
+import com.nakvali.core.ui.SelectionHandle
+import com.nakvali.core.ui.clampDomain
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.roundToLong
 
 /**
  * Trims the walk to the trailhead off the front and the standing around off the
- * back. Deliberately the same instrument as the transport editor: two elapsed
- * clocks are the authoritative, screen-reader-operable input and the slider is
- * the fast path, so the two features are one thing to learn.
+ * back.
+ *
+ * The instrument is the ride's own elevation profile with the two boundaries
+ * living on it — the same one the segment editor trims with, promoted to
+ * `:core:ui` so both features share it. It replaced a range slider here for the
+ * reason it replaced one there: a slider shows the rider a bare axis, while
+ * what they are actually looking for is a shape — the climb before the run, the
+ * flat roll-out after it. The elapsed clocks stay below the chart as the exact,
+ * screen-reader-operable input.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,12 +54,24 @@ internal fun TrimEditorSheet(
             .filter { it.timestampMs !in bounds.startedAtMs..bounds.endedAtMs }
             .map { MapTrackPoint(it.lat, it.lon, it.sectionId, timestampMs = it.timestampMs) }
     }
+    val lastPosition = state.profile.lastPosition
+    var domain by remember(state.profile) {
+        mutableStateOf(ProfileDomain(0.0, lastPosition.coerceAtLeast(1.0)))
+    }
+    // The sheet and the chart both want a drag. While a boundary is held the
+    // sheet stands down, so pulling a gate upward moves the gate and not the
+    // whole editor.
+    var activeHandle by remember { mutableStateOf<SelectionHandle?>(null) }
+    val startPosition = state.track.positionAt(bounds?.startedAtMs ?: state.originMs)
+    val endPosition = state.track.positionAt(bounds?.endedAtMs ?: state.endedAtMs)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberBottomSheetState(initialValue = SheetValue.Hidden,
             enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)),
+        sheetGesturesEnabled = activeHandle == null,
     ) {
-        Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.9f)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.92f)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = NakvaliSpacing.xLarge),
                 verticalAlignment = Alignment.CenterVertically,
@@ -79,6 +100,37 @@ internal fun TrimEditorSheet(
                     overlayBottomPadding = 0.dp,
                     modifier = Modifier.fillMaxWidth().height(200.dp),
                 )
+                if (state.profile.drawable) {
+                    ProfileTrimmer(
+                        profile = state.profile,
+                        candidates = emptyList(),
+                        startPosition = startPosition,
+                        endPosition = endPosition,
+                        domain = domain,
+                        onSelectionChange = { start, end ->
+                            if (state.busy) return@ProfileTrimmer
+                            onDraftChanged(
+                                state.draft.copy(
+                                    start = elapsedClock(
+                                        state.track.timestampAt(start) - state.originMs,
+                                    ),
+                                    finish = elapsedClock(
+                                        state.track.timestampAt(end) - state.originMs,
+                                    ),
+                                ),
+                            )
+                        },
+                        onDomainChange = { domain = clampDomain(it, lastPosition) },
+                        onCandidatePicked = {},
+                        onActiveHandleChange = { activeHandle = it },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Drag either boundary along the profile · pinch to zoom in",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text("Boundaries are elapsed time (HH:MM:SS) from ${wallClock(state.originMs)}.",
                     style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium)) {
@@ -95,18 +147,6 @@ internal fun TrimEditorSheet(
                         enabled = !state.busy, modifier = Modifier.weight(1f),
                     )
                 }
-                val duration = ((state.endedAtMs - state.originMs) / 1000).coerceAtLeast(1).toFloat()
-                if (bounds != null && bounds.startedAtMs < bounds.endedAtMs) RangeSlider(
-                    value = ((bounds.startedAtMs - state.originMs) / 1000f).coerceIn(0f, duration)..
-                        ((bounds.endedAtMs - state.originMs) / 1000f).coerceIn(0f, duration),
-                    valueRange = 0f..duration, enabled = !state.busy,
-                    onValueChange = {
-                        onDraftChanged(state.draft.copy(
-                            start = elapsedClock(it.start.roundToLong() * 1000),
-                            finish = elapsedClock(it.endInclusive.roundToLong() * 1000),
-                        ))
-                    },
-                )
                 if (bounds != null && !state.useWholeActivity) Text(
                     trimmedAway(state.originMs, state.endedAtMs, bounds.startedAtMs, bounds.endedAtMs),
                     style = MaterialTheme.typography.bodySmall,

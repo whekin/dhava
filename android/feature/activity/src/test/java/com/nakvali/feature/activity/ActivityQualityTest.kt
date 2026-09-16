@@ -18,26 +18,26 @@ class ActivityQualityTest {
         assertNull(gpsQualityBucket(Double.NaN))
     }
 
-    @Test fun `gps chip text includes bucket, median and gap count`() {
-        assertEquals("GPS: Good · 3.8 m", gpsChipText(quality(medianAccuracyM = 3.8)))
-        assertEquals(
-            "GPS: Fair · 7.2 m · 1 gap",
-            gpsChipText(quality(medianAccuracyM = 7.2, gpsGapCount = 1)),
-        )
-        assertEquals(
-            "GPS: Poor · 14.0 m · 3 gaps",
-            gpsChipText(quality(medianAccuracyM = 14.0, gpsGapCount = 3)),
-        )
+    @Test fun `gps chip text is the bucket and the median, and nothing else`() {
+        assertEquals("Good · 3.8 m", gpsChipText(quality(medianAccuracyM = 3.8)))
+        assertEquals("Fair · 7.2 m", gpsChipText(quality(medianAccuracyM = 7.2, gpsGapCount = 1)))
+        assertEquals("Poor · 14.0 m", gpsChipText(quality(medianAccuracyM = 14.0, gpsGapCount = 3)))
         assertNull(gpsChipText(quality(medianAccuracyM = null)))
+    }
+
+    @Test fun `dropped fixes are their own chip, and absent when there are none`() {
+        assertNull(gapChipText(quality(gpsGapCount = 0)))
+        assertEquals("1 gap", gapChipText(quality(gpsGapCount = 1)))
+        assertEquals("147 gaps", gapChipText(quality(gpsGapCount = 147)))
     }
 
     @Test fun `elevation chip text reflects the rust-reported source`() {
         assertEquals(
-            "Elevation: Barometric",
+            "Barometric",
             elevationChipText(quality(source = CanonicalElevationSource.BAROMETRIC)),
         )
         assertEquals(
-            "Elevation: GPS net (±8 m)",
+            "GPS net ±8 m",
             elevationChipText(
                 quality(
                     source = CanonicalElevationSource.GPS_INTERPOLATED,
@@ -46,7 +46,7 @@ class ActivityQualityTest {
             ),
         )
         assertEquals(
-            "Elevation: GPS net",
+            "GPS net",
             elevationChipText(
                 quality(
                     source = CanonicalElevationSource.GPS_INTERPOLATED,

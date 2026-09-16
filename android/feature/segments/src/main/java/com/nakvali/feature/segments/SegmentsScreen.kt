@@ -36,6 +36,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ZoomOutMap
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.DropdownMenu
@@ -321,6 +323,9 @@ private fun SegmentLibrary(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Find descents") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Terrain, contentDescription = null)
+                            },
                             onClick = {
                                 addMenuExpanded = false
                                 onCreateSegment()
@@ -328,6 +333,9 @@ private fun SegmentLibrary(
                         )
                         DropdownMenuItem(
                             text = { Text("Import GPX") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.FileUpload, contentDescription = null)
+                            },
                             onClick = {
                                 addMenuExpanded = false
                                 onImportGpx()

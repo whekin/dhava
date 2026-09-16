@@ -3723,3 +3723,65 @@ metric several ways, and replays the live accumulator.
 
 Not verified on device: no build has been installed since these changes, so the
 numbers above are all from replaying the rider's recording on the desktop.
+
+## 2026-09-16 — Five things the activity screen got wrong
+
+All five reported from the hand, all five fixed and seen on screen. The
+measuring rig was the rider's own six-hour recording, cut to its first 95
+minutes and seeded into an emulator as `Morning ride`, so every screenshot below
+is real data rather than a preview fixture.
+
+**The title had no room.** The header row gave the title a weight, then put the
+status pill and two action buttons beside it, so "Morning ride" rendered as
+"Mornin…". The title owns the line now and the pill moved down next to the
+subtitle, where the space was already spoken for.
+
+**The elevation profile was drawn as dashes.** `ride_profile` decided continuity
+with `MAX_ATTEMPT_GAP_MS`, which is three seconds — the rule for whether a run
+can still be *timed* across a hole. The recorder's own power-saving cadence is
+five seconds, up to seven and a half with jitter, so every shuttle and every
+power-saving stretch counted as a break: 372 of 1204 samples on that recording.
+A chart is asked a different question, so it has its own constant now,
+`PROFILE_MAX_GAP_MS` at 7.5 s, and the same recording breaks at 5 samples.
+Anything longer still breaks, because past it nobody knows what the ground did.
+
+**The quality chips did not fit and read as capitals.** "GPS: GOOD · 3.8 M · 147
+GAPS" ran off the edge, and a metre in capitals reads as the wrong unit. The
+category is an icon's job now — terrain, GPS, dropped fixes — so the text is
+only the answer: "Barometric", "Good · 3.8 m", "9 gaps". Dropped fixes became
+their own chip, because they are a different fact from how accurate the fixes
+that arrived were, and the row flows instead of clipping.
+
+**Trimming an activity reused the segment editor's instrument.** The previous
+entry left `SegmentProfileTrimmer` in `:feature:segments` for two reasons, and
+both turned out to be soluble. It is a general instrument, so it moved to
+`:core:ui` as `ProfileTrimmer` with its types and its tests, and `SelectionHandle`
+came with it. The sheet gesture conflict is answered by material3's
+`sheetGesturesEnabled`, which the trim editor now drives from the active handle:
+while a boundary is held the sheet stands down. `TrimEditorState` carries the
+profile — reused from the insights the detail screen already computed rather
+than paying for a second pass — and positions map to timestamps through the
+track, which is what the sample positions index. The elapsed clocks stay below
+the chart as the exact, screen-reader-operable input; the range slider is gone.
+
+**Context menus have icons**, and **an expanded sheet is expanded**: the detail
+panel was capped at 72% of the screen while holding a summary, a profile, the
+segment runs and the quality row. It goes to 94% now, leaving the handle and a
+thumb-width of map as the way back down.
+
+Verified on a Pixel 9 Pro emulator against the seeded ride: the title renders in
+full, the profile draws as one continuous line, the three chips sit on one row,
+the overflow menu carries its icons, and the trim editor opens on the elevation
+profile with a boundary at each end. Not verified: dragging a boundary. `adb
+input swipe` did not grab a handle — the synthetic gesture does not reproduce
+what the gesture detector expects — and the component's drag behaviour is only
+proven by its existing use in the segment editor. Worth one check by hand.
+
+168 Android unit tests, `assembleDebug` and `lintDebug` pass; 170 Rust tests and
+strict Clippy pass; bindings and both native libraries were regenerated. Nothing
+here changes a canonical result, so `ALGORITHM_VERSION` stays `gps-bounded-0.14`
+— the profile is a display artifact, computed on demand and never cached.
+
+Emulator housekeeping, stated because it was data: seeding the ride overwrote the
+emulator's recording index and deleted four leftover test recordings from August
+that were in the way. Nothing on the phone was touched.

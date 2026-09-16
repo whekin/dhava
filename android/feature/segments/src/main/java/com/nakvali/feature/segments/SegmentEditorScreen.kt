@@ -9,6 +9,10 @@ import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
 import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.SegmentFormat
+import com.nakvali.core.ui.ProfileDomain
+import com.nakvali.core.ui.ProfileTrimmer
+import com.nakvali.core.ui.SelectionHandle
+import com.nakvali.core.ui.focusedDomain
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -298,7 +302,7 @@ private fun EditorBody(
                             )
                         }
                     }
-                    SegmentProfileTrimmer(
+                    ProfileTrimmer(
                         profile = state.profile,
                         candidates = state.candidates,
                         startPosition = state.startPosition,

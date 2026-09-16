@@ -23,6 +23,18 @@ const MAX_RIDE_PROFILE_POINTS: usize = 720;
 /// adjacent fixes are dominated by altitude noise.
 const GRADIENT_WINDOW_M: f64 = 25.0;
 
+/// Longest hole a profile chart draws straight across.
+///
+/// Deliberately not [`MAX_ATTEMPT_GAP_MS`], which answers a different question:
+/// whether a run can still be *timed* across a hole, where three seconds of
+/// missing trail is already too much to stand behind. A chart is asked whether
+/// the ground was continuous, and the recorder's own power-saving cadence is
+/// five seconds, up to seven and a half with jitter — so the timing rule marked
+/// every shuttle and every power-saving stretch as a break. On a real six-hour
+/// ride that was 372 of 1204 samples, and the profile was drawn as dashes;
+/// under this rule it is 5.
+const PROFILE_MAX_GAP_MS: i64 = 7_500;
+
 /// Shortest descent worth proposing. Below this a segment is dominated by gate
 /// geometry and GPS uncertainty rather than by riding.
 const MIN_CANDIDATE_LENGTH_M: f64 = 300.0;
@@ -58,8 +70,9 @@ pub struct RideProfilePoint {
     pub gradient_percent: Option<f64>,
     /// Continuous recording section this sample belongs to.
     pub section_id: i32,
-    /// False when the previous sample is separated by a manual pause or a
-    /// recording gap, so a chart can break the line instead of drawing across.
+    /// False when a manual pause or a hole longer than [`PROFILE_MAX_GAP_MS`]
+    /// separates this sample from the one before it, so a chart can break the
+    /// line instead of drawing across ground it never saw.
     pub continues: bool,
 }
 
@@ -116,13 +129,13 @@ pub fn ride_profile(track: Vec<CanonicalTrackPoint>) -> RideProfile {
         // section: those carry the pause boundaries the chart must break at.
         let boundary = index == 0
             || index == track.len() - 1
-            || !connects(&track, index)
-            || !connects(&track, index + 1);
+            || !profile_connects(&track, index)
+            || !profile_connects(&track, index + 1);
         if index % stride != 0 && !boundary {
             continue;
         }
         let continues = previous.is_some_and(|previous| {
-            ((previous + 1)..=index).all(|between| connects(&track, between))
+            ((previous + 1)..=index).all(|between| profile_connects(&track, between))
         });
         points.push(RideProfilePoint {
             position: index as f64,
@@ -322,6 +335,17 @@ fn coverage_of(
         segment_name: definition.name.clone(),
         coverage: inside as f64 / selection.len() as f64,
     })
+}
+
+/// True when point `index` is continuous enough with the one before it to be
+/// drawn as one line. See [`PROFILE_MAX_GAP_MS`] for why this is not the rule
+/// segment timing uses.
+fn profile_connects(track: &[CanonicalTrackPoint], index: usize) -> bool {
+    if index == 0 || index >= track.len() {
+        return index == 0;
+    }
+    track[index].section_id == track[index - 1].section_id
+        && (1..=PROFILE_MAX_GAP_MS).contains(&(track[index].timestamp_ms - track[index - 1].timestamp_ms))
 }
 
 /// True when point `index` continues the one before it without a manual pause
@@ -560,6 +584,48 @@ mod tests {
                 .filter_map(|point| point.gradient_percent)
                 .all(|gradient| gradient < 0.0)
         );
+    }
+
+    /// The recorder drops to a five-second cadence to save power on a shuttle
+    /// road. That is the ride still being recorded, not a hole in it, and a
+    /// chart that breaks at every one of those fixes is drawn as dashes.
+    #[test]
+    fn the_power_saving_cadence_does_not_break_the_profile() {
+        let mut track = vec![point(0, 0.0, 0, ActivityState::Transit)];
+        for index in 1..=120i64 {
+            // Five seconds apart, with the jitter a real device shows.
+            let timestamp_ms = index * 5_000 + (index % 3) * 500;
+            track.push(point(
+                timestamp_ms,
+                index as f64 * 40.0,
+                0,
+                ActivityState::Transit,
+            ));
+        }
+
+        let profile = ride_profile(track);
+
+        assert!(
+            profile.points.iter().skip(1).all(|point| point.continues),
+            "{} of {} samples broke the line",
+            profile.points.iter().filter(|point| !point.continues).count(),
+            profile.points.len(),
+        );
+    }
+
+    /// A real hole still breaks it: past the display threshold nobody knows
+    /// what the ground did, and a straight line would be an invention.
+    #[test]
+    fn a_hole_longer_than_the_display_threshold_still_breaks_the_profile() {
+        let mut track = vec![point(0, 0.0, 0, ActivityState::Downhill)];
+        append(&mut track, 50, ActivityState::Downhill);
+        let resume_ms = track.last().unwrap().timestamp_ms + PROFILE_MAX_GAP_MS + 1_000;
+        track.push(point(resume_ms, 60.0, 0, ActivityState::Downhill));
+        append(&mut track, 50, ActivityState::Downhill);
+
+        let profile = ride_profile(track);
+
+        assert!(profile.points.iter().any(|point| !point.continues));
     }
 
     #[test]

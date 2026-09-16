@@ -1,4 +1,8 @@
 package com.nakvali.feature.segments
+import com.nakvali.core.ui.CandidateSpan
+import com.nakvali.core.ui.ProfileSample
+import com.nakvali.core.ui.RideProfileUi
+import com.nakvali.core.ui.SelectionHandle
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -85,8 +89,6 @@ sealed interface SelectionPreview {
 
     data class Invalid(val message: String) : SelectionPreview
 }
-
-enum class SelectionHandle { START, FINISH }
 
 sealed interface SegmentEditorSource {
     val id: String

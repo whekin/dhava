@@ -3657,8 +3657,9 @@ data class RideProfilePoint (
      */
     var `sectionId`: kotlin.Int,
     /**
-     * False when the previous sample is separated by a manual pause or a
-     * recording gap, so a chart can break the line instead of drawing across.
+     * False when a manual pause or a hole longer than [`PROFILE_MAX_GAP_MS`]
+     * separates this sample from the one before it, so a chart can break the
+     * line instead of drawing across ground it never saw.
      */
     var `continues`: kotlin.Boolean
 ) {

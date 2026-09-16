@@ -503,9 +503,20 @@ class ActivityDetailViewModel(
         val artifact = canonicalArtifact ?: return
         val origin = artifact.analysis.startedAtMs
         val stored = recording.value?.rideBounds
+        val track = artifact.finalizedTrack.toCanonicalTrack()
+        // The detail screen already charted this exact track, so the editor
+        // opens on the profile the rider was just looking at instead of paying
+        // for a second pass over a multi-hour ride.
+        val profile = _rideInsights.value
+            ?.takeIf { it.track.size == track.size }
+            ?.profile
+            ?: runCatching { FusionCore.rideProfile(track) }
+                .onFailure { Log.w("ActivityDetail", "trim profile failed for $recordingId", it) }
+                .getOrNull()
         _trimEditor.value = TrimEditorState(
             originMs = origin, endedAtMs = artifact.analysis.endedAtMs,
-            track = artifact.finalizedTrack.toCanonicalTrack(),
+            track = track,
+            profile = profile.toUi(track.size),
             draft = stored?.draft(origin)
                 ?: StoredRideBounds(origin, artifact.analysis.endedAtMs).draft(origin),
             useWholeActivity = stored == null,

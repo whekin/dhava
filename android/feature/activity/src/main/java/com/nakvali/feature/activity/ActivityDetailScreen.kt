@@ -32,6 +32,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.AddRoad
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.BottomSheetScaffold
@@ -411,11 +416,11 @@ private fun ActivityDetailContent(
                 healthLogAvailable = healthLogAvailable,
                 stravaConnection = stravaConnection,
                 loading = loading,
-        exportState = exportState,
+                exportState = exportState,
                 onExport = onExport,
                 onEditTransport = onEditTransport,
                 onEditTrim = onEditTrim,
-        onCreateSegment = onCreateSegment,
+                onCreateSegment = onCreateSegment,
                 onOpenSegment = onOpenSegment,
                 onConnectStrava = onConnectStrava,
                 onExportStrava = onExportStrava,
@@ -572,7 +577,13 @@ private fun ActivityDetailsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = maxHeight * 0.72f)
+                // Expanded means expanded: the sheet holds a summary, a
+                // profile, segment runs and the quality row, and capping it at
+                // 72% of the screen left the rider scrolling a small window
+                // over a long page with a map they were not looking at behind
+                // it. What is left is the drag handle and a thumb-width of map,
+                // so the way back down stays obvious.
+                .heightIn(max = maxHeight * 0.94f)
                 .navigationBarsPadding(),
         ) {
             Row(
@@ -582,6 +593,10 @@ private fun ActivityDetailsSheet(
                 horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // The title owns the whole line. It shared it with the status
+                // pill and two action buttons before, which left "Morning ride"
+                // showing as "Mornin…" on a phone; the pill says the same thing
+                // one line down, where the space is already the subtitle's.
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = recording?.title
@@ -593,16 +608,22 @@ private fun ActivityDetailsSheet(
                         overflow = TextOverflow.Ellipsis,
                     )
                     recording?.let {
-                        Text(
-                            text = activitySubtitle(it),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = activitySubtitle(it),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            RecordingStatusPill(it.status)
+                        }
                     }
                 }
-                recording?.let { RecordingStatusPill(it.status) }
                 ActivityExportButton(
                     runs = ridingRuns,
                     rawGpsAvailable = track is TrackState.Loaded,
@@ -616,7 +637,7 @@ private fun ActivityDetailsSheet(
                     stravaConnection = stravaConnection,
                     recording = recording,
                     ride = ride,
-        exportState = exportState,
+                    exportState = exportState,
                     onExport = onExport,
                     onConnectStrava = onConnectStrava,
                     onExportStrava = onExportStrava,
@@ -738,8 +759,11 @@ private fun ActivityOverflowMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
+            // Icons, because this menu is reached mid-ride with gloves on and
+            // read at a glance: the shape finds the item before the word does.
             DropdownMenuItem(
                 text = { Text("Edit") },
+                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                 onClick = {
                     expanded = false
                     onEdit()
@@ -747,16 +771,19 @@ private fun ActivityOverflowMenu(
             )
             DropdownMenuItem(
                 text = { Text("Transport episodes") },
+                leadingIcon = { Icon(Icons.Filled.DirectionsCar, contentDescription = null) },
                 enabled = canCreateSegment,
                 onClick = { expanded = false; onEditTransport() },
             )
             DropdownMenuItem(
                 text = { Text("Trim start and finish") },
+                leadingIcon = { Icon(Icons.Filled.ContentCut, contentDescription = null) },
                 enabled = canCreateSegment,
                 onClick = { expanded = false; onEditTrim() },
             )
             DropdownMenuItem(
                 text = { Text("Create segment") },
+                leadingIcon = { Icon(Icons.Filled.AddRoad, contentDescription = null) },
                 enabled = canCreateSegment,
                 onClick = {
                     expanded = false
@@ -765,6 +792,13 @@ private fun ActivityOverflowMenu(
             )
             DropdownMenuItem(
                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                },
                 onClick = {
                     expanded = false
                     onDelete()

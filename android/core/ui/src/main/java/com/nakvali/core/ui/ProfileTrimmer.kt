@@ -1,6 +1,4 @@
-package com.nakvali.feature.segments
-
-import com.nakvali.core.ui.SegmentFormat
+package com.nakvali.core.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -45,6 +43,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+/** Which of the two gates a gesture is moving. */
+enum class SelectionHandle { START, FINISH }
+
 /** One sample of the ride's elevation story, as the chart needs it. */
 data class ProfileSample(
     /** Continuous position in the finalized track this sample came from. */
@@ -79,12 +80,12 @@ data class CandidateSpan(
 )
 
 /** The visible window of the chart, in track positions. */
-internal data class ProfileDomain(val start: Double, val end: Double) {
+data class ProfileDomain(val start: Double, val end: Double) {
     val span: Double get() = (end - start).coerceAtLeast(MIN_DOMAIN_SPAN)
 }
 
 /** Minimum separation between the gates, in meters of ridden trail. */
-internal const val MIN_SELECTION_GAP_M = 25.0
+const val MIN_SELECTION_GAP_M = 25.0
 private const val MIN_DOMAIN_SPAN = 1.0
 private const val DOMAIN_FOCUS_PADDING_FRACTION = 0.12
 private val HandleTouchSlop = 28.dp
@@ -137,7 +138,7 @@ private const val EDGE_PAN_STEP_MS = 16L
  * expects the chart to follow; leaving the chart at ride scale was the reason
  * a close-up map still moved the gate in large jumps.
  */
-internal fun dragSensitivityForMapZoom(zoom: Double): Double = when {
+fun dragSensitivityForMapZoom(zoom: Double): Double = when {
     !zoom.isFinite() || zoom <= 14.0 -> 1.0
     zoom >= 18.0 -> 0.3
     else -> 1.0 - (zoom - 14.0) / 4.0 * 0.7
@@ -158,7 +159,7 @@ private val CandidateRibbonHeight = 18.dp
  * an x. Above all, the rider can see that the selection actually goes down.
  */
 @Composable
-internal fun SegmentProfileTrimmer(
+fun ProfileTrimmer(
     profile: RideProfileUi,
     candidates: List<CandidateSpan>,
     startPosition: Double,
@@ -549,10 +550,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawHandle(
     )
 }
 
-internal fun xForPosition(position: Double, width: Float, domain: ProfileDomain): Float =
+fun xForPosition(position: Double, width: Float, domain: ProfileDomain): Float =
     ((position - domain.start) / domain.span * width).toFloat()
 
-internal fun positionForX(x: Float, width: Float, domain: ProfileDomain): Double =
+fun positionForX(x: Float, width: Float, domain: ProfileDomain): Double =
     if (width <= 0f) domain.start else domain.start + x / width * domain.span
 
 /**
@@ -562,7 +563,7 @@ internal fun positionForX(x: Float, width: Float, domain: ProfileDomain): Double
  * same x, the upper half of the chart grabs the start and the lower half the
  * finish, so a collapsed selection can always be pulled apart.
  */
-internal fun grabbedHandle(
+fun grabbedHandle(
     touch: Offset,
     width: Float,
     chartHeight: Float,
@@ -597,7 +598,7 @@ internal fun grabbedHandle(
  * different one at speed, and it was a position-based gap of a thousandth of a
  * sample that let the old handles collapse into each other.
  */
-internal fun applyHandle(
+fun applyHandle(
     handle: SelectionHandle,
     proposed: Double,
     profile: RideProfileUi,
@@ -625,7 +626,7 @@ internal fun applyHandle(
 }
 
 /** Distance ridden up to [position], interpolated between chart samples. */
-internal fun RideProfileUi.distanceAt(position: Double): Double {
+fun RideProfileUi.distanceAt(position: Double): Double {
     if (samples.isEmpty()) return 0.0
     val index = samples.indexOfFirst { it.position >= position }
     if (index <= 0) return samples.first().distanceM
@@ -638,7 +639,7 @@ internal fun RideProfileUi.distanceAt(position: Double): Double {
 }
 
 /** The inverse of [distanceAt], clamped to the ride. */
-internal fun RideProfileUi.positionAtDistance(distanceM: Double): Double {
+fun RideProfileUi.positionAtDistance(distanceM: Double): Double {
     if (samples.isEmpty()) return 0.0
     val index = samples.indexOfFirst { it.distanceM >= distanceM }
     if (index <= 0) return samples.first().position
@@ -651,7 +652,7 @@ internal fun RideProfileUi.positionAtDistance(distanceM: Double): Double {
 }
 
 /** A window around the selection, with a margin for grabbing outside it. */
-internal fun focusedDomain(
+fun focusedDomain(
     startPosition: Double,
     endPosition: Double,
     lastPosition: Double,
@@ -669,7 +670,7 @@ internal fun focusedDomain(
 private fun RideProfileUi.positionsPerMetre(): Double? =
     (lastPosition / lengthM).takeIf { lengthM > 0.0 && lastPosition > 0.0 && it.isFinite() }
 
-internal fun clampDomain(domain: ProfileDomain, lastPosition: Double): ProfileDomain {
+fun clampDomain(domain: ProfileDomain, lastPosition: Double): ProfileDomain {
     val limit = lastPosition.coerceAtLeast(MIN_DOMAIN_SPAN)
     val span = domain.span.coerceAtMost(limit)
     val start = domain.start.coerceIn(0.0, limit - span)
