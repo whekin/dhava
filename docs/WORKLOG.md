@@ -3785,3 +3785,58 @@ here changes a canonical result, so `ALGORITHM_VERSION` stays `gps-bounded-0.14`
 Emulator housekeeping, stated because it was data: seeding the ride overwrote the
 emulator's recording index and deleted four leftover test recordings from August
 that were in the way. Nothing on the phone was touched.
+
+## 2026-09-17 — A receiver that went 11.5 km sideways
+
+The rider reported that a ride had glitched badly and that the app handled it
+poorly. The recording says exactly what happened, and it is a clean specimen.
+
+At t+45 min, after a fourteen-second hole in the trace, one fix lands **11 566 m
+away in one second**. It reports its own accuracy as **13.8 m** — comfortably
+inside the 20 m cutoff — and its own ground speed as **0.0 m/s**. The receiver
+stays out there for twenty-six seconds and then jumps back. The health log
+explains the setting: satellites used fell from 60+ to single digits between
+t+108 and t+122, and the hole at t+45 sits on the same decline.
+
+Both guards abstained, each for its own reason. The accuracy cutoff believed the
+13.8 m. The kinematic gate only refuses a step when some reported ground speed
+of at least 1.5 m/s contradicts it, and a glitching receiver reports zero — so
+the gate had nothing to corroborate against on precisely the fix it exists to
+refuse. It also skips any pair more than five seconds apart, which is what the
+way back was. The rider was shown **30 950 m** for a ride of about twenty.
+
+**The gate now asks physics first.** `MAX_GROUND_SPEED_MPS` is 50 m/s — not a
+bike's top speed but the speed past which nothing carrying a phone travels, so a
+car on a motorway still passes — and it applies to every pair however far apart
+in time, because a hole is not permission to cross ground nobody can cross. The
+corroboration rule is unchanged behind it, so a zero-speed report still cannot
+veto ordinary displacement. On the rider's file the ride falls from 30 950 m to
+**19 395 m**; ascent and descent are untouched, the barometer having had no part
+in it.
+
+**And it yields rather than blacking out.** A gate that refuses forever would
+lose a rider who really was carried somewhere while the receiver was blind, so
+`LiveFusion` counts how long it has been refusing and, past
+`IMPLAUSIBLE_RESEAT_MS` (45 s — longer than the 26 s this glitch lasted), takes
+the position as authoritative and re-seats onto it. Recording nothing at all is
+the worse failure.
+
+`ALGORITHM_VERSION` is now `gps-bounded-0.15`: this changes distance, so cached
+artifacts rebuild.
+
+**The export sheet closes itself.** Once the file is handed to the system picker
+or the share chooser, the sheet has done its job; coming back to it still asking
+what to export is asking a question already answered. The result — saved,
+cancelled, failed — arrives as a toast, since the sheet that used to display it
+is gone by then. A failure to *prepare* the file still reads out inline, because
+that happens while the sheet is open.
+
+174 Rust tests and strict Clippy pass, `assembleDebug`, `testDebugUnitTest` and
+`lintDebug` pass, bindings and both native libraries regenerated. New tests: the
+re-acquisition kilometres away, the way back from it, a long hole that really
+did carry a rider, and a motorway shuttle that must still pass. `gps_probe`
+joins `descent_probe` as a measuring instrument — it reports the accuracy
+distribution, every step above 25 m/s, which of them each gate refuses, and what
+the rider ends up being shown.
+
+Not verified on device: no build installed this iteration.

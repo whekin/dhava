@@ -62,6 +62,14 @@ const MAX_VERTICAL_SPEED_MPS: f64 = 10.0;
 /// A hole in the pressure trace longer than this ends the filter's window: what
 /// arrives afterwards is not continuous with what came before it.
 const MAX_PRESSURE_GAP_MS: i64 = 3_000;
+/// How long the horizontal gate may keep refusing fixes before it yields.
+///
+/// A glitching receiver comes back on its own: the ride that prompted this was
+/// somewhere else for twenty-six seconds. Something that insists for longer is
+/// more likely to be the truth arriving late — a phone carried out of a
+/// building, a receiver recovering after a long hole — than a fix worth
+/// dropping, and recording nothing at all is the worse failure.
+const IMPLAUSIBLE_RESEAT_MS: i64 = 45_000;
 /// How long the vertical channel keeps trusting a barometer that has stopped
 /// reporting. Past it the GPS series takes over again rather than leaving the
 /// rider watching a descent that silently stopped counting.
@@ -140,6 +148,9 @@ struct State {
     gps_stop_anchor: Option<HorizontalFix>,
     gps_stop_rearm_anchor: Option<HorizontalFix>,
     horizontal_reseat_pending: bool,
+    /// When the horizontal gate started refusing fixes, so a receiver that
+    /// never comes back cannot black out the track for the rest of the ride.
+    implausible_since_ms: Option<i64>,
     distance_m: f64,
     descent_m: f64,
     /// Last accepted position in the EKF's local tangent frame. Cleared on a
@@ -203,6 +214,7 @@ impl LiveFusion {
                 gps_stop_anchor: None,
                 gps_stop_rearm_anchor: None,
                 horizontal_reseat_pending: false,
+                implausible_since_ms: None,
                 distance_m: 0.0,
                 descent_m: 0.0,
                 distance_anchor: None,
@@ -497,7 +509,7 @@ impl LiveFusion {
         let mut s = self.state.lock().expect("live fusion mutex poisoned");
         let reported_velocity = velocity_en(speed_mps, bearing_deg);
         let gps_reports_zero_speed = reported_velocity == Some([0.0, 0.0]);
-        let horizontal_reseat_pending = s.horizontal_reseat_pending;
+        let mut horizontal_reseat_pending = s.horizontal_reseat_pending;
         let current_fix = HorizontalFix {
             timestamp_ms,
             lat,
@@ -509,8 +521,17 @@ impl LiveFusion {
             && s.last_gps_fix
                 .is_some_and(|previous| !kinematically_plausible(previous, current_fix))
         {
-            return None;
+            let refusing_since_ms = *s.implausible_since_ms.get_or_insert(timestamp_ms);
+            if timestamp_ms - refusing_since_ms < IMPLAUSIBLE_RESEAT_MS {
+                return None;
+            }
+            // Refused for longer than a glitch lasts. At this point the
+            // receiver is more likely to be describing where the phone is than
+            // the rule is, and recording nothing at all is the worse failure:
+            // take the position as authoritative and re-seat onto it.
+            horizontal_reseat_pending = true;
         }
+        s.implausible_since_ms = None;
         let stop_anchor_moved = s
             .gps_stop_anchor
             .is_some_and(|anchor| gps_fix_moved_beyond_uncertainty(anchor, current_fix));
@@ -979,6 +1000,7 @@ impl LiveFusion {
         state.gps_stop_anchor = None;
         state.gps_stop_rearm_anchor = None;
         state.horizontal_reseat_pending = state.ekf.is_some();
+        state.implausible_since_ms = None;
         // Totals survive the pause — the ride is the same ride — but the
         // anchors do not: the reseat jump across a pause is not ridden
         // distance, and altitude across it is not a continuous descent.
