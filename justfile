@@ -57,6 +57,14 @@ fusion-check:
 deploy-check:
     ./deploy/check-compose.sh
 
+# Serve the static landing page locally.
+web-dev:
+    cd web && npm run dev
+
+# Type-check and verify the generated static routes and Android association.
+web-check:
+    cd web && npm run check
+
 # Start the local API and PostGIS stack with private development defaults.
 stack-up:
     ./deploy/local-stack.sh up

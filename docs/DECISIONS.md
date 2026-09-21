@@ -996,3 +996,25 @@ single-run file rebases its odometer to zero, since TCX states an absolute
 distance per trackpoint. Strava stays whole-activity: the index entry holds one
 export status and the worker's unique work is per recording, so a single run is
 file-only and the sheet says so.
+
+## 2026-09-21 — One public domain, separate static web and API services
+
+Nakvali's minimal public site uses statically built Astro, served by nginx in a
+`web` service alongside the existing Go API and PostGIS. Coolify's existing proxy
+owns TLS and routes `nakvali.whekin.dev/api/v1/*` to Go with the prefix preserved;
+the root route serves the website. No second reverse proxy or runtime Node server
+is introduced. The old API domain stays during migration so installed builds do
+not lose connectivity.
+
+The website hosts the BIKEYARD HTTPS callback fallback and Android's association
+file. Only the existing release signing certificate is trusted, and Android
+claims only the exact callback path. This prepares registration; token exchange
+and upload require the future registered public PKCE client. No browser code
+handles or forwards OAuth codes. The domain association must be verified on the
+live HTTPS domain before relying on automatic app opening.
+
+APK downloads belong in the existing public GitHub repository's Releases. GitHub
+currently identifies that repository as `whekin/dhava`; earlier references to
+`whekin/nakvali` were not a verified repository rename. Until the first actual
+release exists, the landing links to the release list and does not promise a
+working APK download. BIKEYARD uploads are similarly labelled as forthcoming.

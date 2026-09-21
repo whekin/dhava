@@ -1,0 +1,84 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site';
+---
+
+<Base
+  title="Terms — Nakvali"
+  description="Terms for using the early-stage Nakvali cycling recorder and website."
+>
+  <article class="document">
+    <p class="eyebrow">BEFORE YOU RIDE</p>
+    <h1>Terms of use.</h1>
+    <p class="lede">
+      Nakvali is an independent, early-stage cycling recorder. Use it
+      thoughtfully and keep a backup of the rides that matter to you.
+    </p>
+    <p class="updated">Last updated: {site.updated}</p>
+    <h2>The app and website</h2>
+    <p>
+      Nakvali is developed by Stas (
+      <a href="https://github.com/whekin">whekin</a>). These terms apply to the
+      app and this website. Using Nakvali means accepting these terms. If you do
+      not agree, stop using the service. Any rights granted by an explicit
+      source-code or dependency license remain governed by that license.
+    </p>
+    <h2>Early development</h2>
+    <p>
+      The app is under active development. Features may change, and recording,
+      sensor estimates, exports or connected services may fail or be
+      unavailable. Keep independent backups of important rides. Features marked
+      “coming soon” are plans, not a promise of delivery or a feature of the
+      current build.
+    </p>
+    <h2>Ride responsibly</h2>
+    <p>
+      Nakvali is not an emergency, navigation or safety service. Recorded tracks
+      and statistics are estimates, not guarantees of trail access, safety or
+      timing accuracy. Follow local rules and trail closures, respect other
+      riders and landowners, and stop somewhere safe before interacting with
+      your phone.
+    </p>
+    <h2>Your recordings and account</h2>
+    <p>
+      You keep your rights in your recordings. Using the app does not transfer
+      ownership of them to Nakvali. You authorize the processing necessary for
+      the features you use, such as local track processing or an export you
+      request. Keep your account credentials secure and upload only recordings
+      you are entitled to share.
+    </p>
+    <h2>Other services</h2>
+    <p>
+      Google/Firebase, GitHub, map providers and any ride-sharing service you
+      choose have their own terms and privacy practices. Nakvali is an
+      independent project and is not made by or endorsed by BIKEYARD or Strava.
+      Connecting to a service does not guarantee that it will accept a ride or
+      calculate the same statistics.
+    </p>
+    <h2>Availability and responsibility</h2>
+    <p>
+      To the extent permitted by applicable law, Nakvali is provided as
+      available without a guarantee of uninterrupted operation or error-free
+      results. Nothing in these terms excludes rights or responsibilities that
+      cannot legally be excluded. You can stop using the app at any time;
+      deleting the app does not automatically delete data previously sent to
+      other services.
+    </p>
+    <h2>Privacy and contact</h2>
+    <p>
+      Read the <a href="/privacy">Privacy notice</a> for details about data
+      handling and deletion requests.
+    </p>
+    {site.contactEmail ? (
+      <p>
+        Questions about these terms:{' '}
+        <a href={`mailto:${site.contactEmail}`}>{site.contactEmail}</a>.
+      </p>
+    ) : (
+      <p class="notice">
+        Preview: a contact address must be configured before these terms are
+        published.
+      </p>
+    )}
+  </article>
+</Base>

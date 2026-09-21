@@ -25,3 +25,7 @@ deploy/secrets/*
 
 # Local ride evidence and diagnostic outputs (never publish raw recordings).
 /tmp/
+
+# Local browser verification artifacts.
+/.playwright-cli/
+/output/playwright/

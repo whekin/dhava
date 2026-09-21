@@ -5,6 +5,22 @@
 name: nakvali
 
 services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NAKVALI_CONTACT_EMAIL: ${NAKVALI_CONTACT_EMAIL:-whekins@gmail.com}
+    expose:
+      - "80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   api:
     build:
       # Coolify sets Compose's project directory to the repository root.

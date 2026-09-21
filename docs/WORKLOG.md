@@ -3840,3 +3840,80 @@ distribution, every step above 25 m/s, which of them each gate refuses, and what
 the rider ends up being shown.
 
 Not verified on device: no build installed this iteration.
+
+## 2026-09-21 — BIKEYARD integration research
+
+The owner wants to prioritize BIKEYARD over Strava and keep Nakvali focused on
+recording rather than duplicating a friend's trail/community product. This session
+was explicitly limited to capabilities and architecture, not implementation.
+
+Reviewed BIKEYARD's official developer documentation and published API contract,
+alongside the existing Firebase sign-in, Strava broker/queue, and Rust-derived
+GPX/TCX exports. Findings and source links live in
+`docs/research/bikeyard-integration.md`.
+
+Proposed first step: an Android public OAuth client with PKCE, direct processed
+TCX uploads through a durable local queue, and links back to BIKEYARD. Keep
+recording available offline without an account. Export does not require the
+Nakvali Go broker. A BIKEYARD-connected profile is possible; replacing Firebase
+for authenticated Nakvali API calls additionally requires an explicit identity
+and session design. Neither auth migration nor removal of local segments was
+approved or implemented.
+
+Open validation: BIKEYARD's exact treatment of TCX distance, pauses, laps and
+excluded shuttle travel; a controlled HTTPS mobile callback; and product choices
+for publishing privacy and later edited/reprocessed activities. No application
+code, deployment configuration, or registered OAuth application changed. No build
+or tests run for this research-only change.
+
+## 2026-09-21 — Registration-ready website and BIKEYARD App Link foundation
+
+Prepared a minimal static Astro site in `web/`, using the app's Archivo typography,
+trail-green palette and original synthetic contour artwork. Landing, Privacy,
+Terms, 404 and the BIKEYARD callback fallback ship without client JavaScript,
+remote font requests, analytics or fabricated ride data. BIKEYARD uploads are
+explicitly forthcoming. The public contact is a build argument: local previews
+show an honest missing-contact notice; the production Docker build requires it.
+
+Added the nginx `web` service to the existing Compose stack, local preview port,
+build-context validation and web commands. The existing database volume and API
+configuration remain in place. `docs/bikeyard-setup.md` gives the exact Coolify
+routing and BIKEYARD form values, including preserving `/api/v1` and retaining the
+old API origin during migration. No live configuration has been changed.
+
+Verified the real GitHub repository is public `whekin/dhava`, with no releases;
+`whekin/nakvali` is not currently resolvable. Landing links use the real releases
+page, not a nonexistent APK. Release documentation now distinguishes future
+public distribution from owner builds containing the private-alpha access key.
+
+Added `assetlinks.json` for `com.nakvali.app`, trusting only the existing release
+SHA-256 verified with `:app:signingReport`. Android claims the exact HTTPS callback
+path and gives a forthcoming-integration message, clearing callback data rather
+than pretending to complete OAuth. Google auth and Strava behavior are retained.
+OAuth/PKCE, manual uploads and auto-sync are not implemented in this foundation.
+
+Validation: Astro typecheck and static build pass with zero diagnostics; generated
+routes and association checks pass; Docker image builds; actual nginx HTTP checks
+confirm 200 pages, JSON association without redirects, no-store/no-referrer
+callback that does not reflect code/state, and 404s instead of successful HTML for
+missing/API routes. Playwright verified the landing at 1440px and 390px and Privacy
+at 320px without horizontal overflow, broken images or browser errors. Android
+`:app:assembleDebug :app:lintDebug` pass. No device installation or public release.
+
+Pending owner input: actual public support/privacy email and Coolify URL/access.
+DNS for `nakvali.whekin.dev` resolves to `152.53.136.162`, but the server currently
+returns an untrusted self-signed certificate. Website publication, actual proxy
+routing, trusted TLS and release-device domain verification remain to be done
+before the BIKEYARD registration URLs are live. The local preview is reviewable;
+no Git commit, push, public APK or production deployment was performed.
+
+## 2026-09-21 — Public contact confirmed
+
+The owner approved `whekins@gmail.com` for the site's public contact and identified
+`https://coolify.whekin.dev` as the dashboard. Set that email as the site and Docker
+build default, keeping an environment override. Rebuilt the static pages to remove
+the missing-contact preview. The dashboard opens successfully over HTTPS but
+requires login in the available browser session; no production settings changed.
+Coolify will manage the website TLS certificate after the HTTPS service routes
+are configured and deployed. The website changes still need to reach Git before
+Coolify can build them.

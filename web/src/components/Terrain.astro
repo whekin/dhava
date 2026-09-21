@@ -1,0 +1,70 @@
+---
+// Decorative contours are synthetic artwork, never a rider's private GPS trace.
+const contours = Array.from({ length: 24 }, (_, i) => {
+  const y = 40 + i * 25;
+  return `M-60 ${y + 115} C90 ${y - 150},190 ${y + 230},330 ${y + 30} S530 ${y - 115},740 ${y + 80}`;
+});
+---
+
+<div class="terrain" aria-hidden="true">
+  <svg viewBox="0 0 680 760" fill="none" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <pattern id="grid" width="85" height="85" patternUnits="userSpaceOnUse">
+        <path d="M85 0H0V85" stroke="#6fdd87" stroke-opacity=".07" />
+      </pattern>
+    </defs>
+    <rect width="680" height="760" fill="url(#grid)" />
+    <g stroke="#56674c" stroke-width="1.2">
+      {contours.map((d, i) => (
+        <path d={d} opacity={i % 4 === 0 ? '.6' : '.28'} />
+      ))}
+    </g>
+    <path
+      d="M449 126C405 138 435 181 389 210S291 225 304 269S408 277 376 328S267 322 257 370S349 407 310 456S176 448 195 507S285 532 232 582L167 638"
+      stroke="#0d0f0d"
+      stroke-width="13"
+    />
+    <path
+      class="trail"
+      d="M449 126C405 138 435 181 389 210S291 225 304 269S408 277 376 328S267 322 257 370S349 407 310 456S176 448 195 507S285 532 232 582L167 638"
+      stroke="#6fdd87"
+      stroke-width="3.5"
+      stroke-linecap="round"
+    />
+    <circle
+      cx="449"
+      cy="126"
+      r="8"
+      fill="#6fdd87"
+      stroke="#0d0f0d"
+      stroke-width="4"
+    />
+    <circle
+      cx="167"
+      cy="638"
+      r="8"
+      fill="#0d0f0d"
+      stroke="#6fdd87"
+      stroke-width="3"
+    />
+    <g fill="#a5b09f" font-family="monospace" font-size="11" letter-spacing="2">
+      <text x="474" y="130">
+        DROP IN
+      </text>
+      <text x="58" y="643">
+        ONE MORE?
+      </text>
+      <text x="490" y="360" transform="rotate(-30 490 360)">
+        FOLLOW YOUR LINE
+      </text>
+    </g>
+    <path d="M592 58V25m-6 8 6-8 6 8" stroke="#a5b09f" />
+    <text x="588" y="77" fill="#a5b09f" font-family="monospace" font-size="11">
+      N
+    </text>
+  </svg>
+  <div class="terrain-caption">
+    <span>A little less noise.</span>
+    <strong>A little more trail.</strong>
+  </div>
+</div>

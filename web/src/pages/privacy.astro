@@ -1,0 +1,140 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site';
+---
+
+<Base
+  title="Privacy — Nakvali"
+  description="How Nakvali handles recordings, account information and optional ride sharing."
+>
+  <article class="document">
+    <p class="eyebrow">YOUR DATA</p>
+    <h1>Privacy, on the trail.</h1>
+    <p class="lede">
+      Your original ride recordings stay on your phone. You choose when to
+      export or share them.
+    </p>
+    <p class="updated">Last updated: {site.updated}</p>
+    <h2>Who runs Nakvali</h2>
+    <p>
+      Nakvali is an independent cycling recorder developed by Stas, known as{' '}
+      <a href="https://github.com/whekin">whekin</a>. This notice covers the
+      Android app and this website.
+    </p>
+    {site.contactEmail ? (
+      <p>
+        For privacy questions or account-data requests, email{' '}
+        <a href={`mailto:${site.contactEmail}`}>{site.contactEmail}</a>. Do not
+        send GPS recordings or credentials unless needed for a support request
+        you choose to make.
+      </p>
+    ) : (
+      <p class="notice">
+        Preview: a private contact address must be configured before this page
+        is published.
+      </p>
+    )}
+    <h2>Recordings on your phone</h2>
+    <p>
+      When you start a recording, Nakvali uses location, timestamps and
+      available motion and pressure sensors to record and process your ride.
+      Recording can continue in the background until you stop it. Tracks, ride
+      statistics, sensor recordings and diagnostic files are stored locally.
+      Recording and local review do not require an account.
+    </p>
+    <p>
+      Raw GPS, motion and pressure recordings are not automatically uploaded to
+      the Nakvali server. They remain on your device until you delete them or
+      remove the app. Exports and backups you create may remain in the folders
+      or services you choose. Android backup behavior also depends on your
+      device settings.
+    </p>
+    <h2>Optional account and maps</h2>
+    <p>
+      If you sign in with Google, Firebase Authentication processes the sign-in.
+      The Nakvali backend receives your verified account ID, email address,
+      display name, avatar URL and email-verification status to maintain your
+      profile. Signing out ends the app session; it does not itself delete the
+      server-side account.
+    </p>
+    <p>
+      Online map requests go to OpenFreeMap and the resources referenced by its
+      map style. Those services receive normal network information, including
+      your IP address and the map tiles requested. Previously downloaded map
+      data may be cached on your device.
+    </p>
+    <p>
+      See{' '}
+      <a href="https://firebase.google.com/support/privacy">
+        Firebase privacy information
+      </a>{' '}
+      and{' '}
+      <a href="https://openfreemap.org/privacy/">
+        OpenFreeMap’s privacy policy
+      </a>{' '}
+      for how those providers handle their services.
+    </p>
+    <h2>Exports and connected services</h2>
+    <p>
+      A GPX or TCX export can contain precise locations, timestamps and
+      altitude. Android’s save or share flow sends the file to the destination
+      you select. Local diagnostic and backup exports may include raw sensor
+      data; share them only with a recipient you intend.
+    </p>
+    <p>
+      Some development builds include an optional Strava connection. If you use
+      it, the Nakvali backend stores the connection credentials and export
+      status, and sends the processed ride you request to Strava.
+    </p>
+    <p>
+      <strong>
+        BIKEYARD uploads are planned, not available in the current build.
+      </strong>{' '}
+      The intended flow asks you to connect BIKEYARD and choose uploads or opt
+      into automatic uploads of new saved rides. It will send processed tracks
+      and selected ride metadata with your chosen visibility. Original sensor
+      files will stay on the phone. This notice will be updated when that
+      integration is available.
+    </p>
+    <h2>This website and operational data</h2>
+    <p>
+      This website contains no analytics scripts, advertising trackers or
+      tracking cookies. Its fonts and artwork are served from the same site.
+      Hosting and proxy services process connection information such as IP
+      addresses, requested paths, response status and timestamps to deliver and
+      protect the service. The Nakvali API may retain operational logs for
+      troubleshooting.
+    </p>
+    <p>
+      GitHub hosts the source and release downloads. Following a GitHub link or
+      downloading a release is subject to{' '}
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">
+        GitHub’s privacy statement
+      </a>
+      . Nakvali does not sell personal data.
+    </p>
+    <h2>Retention and your choices</h2>
+    <p>
+      You control local recordings through the app’s delete, export and backup
+      actions. Server account information is retained while your account is in
+      use or until you request deletion. Operational records are retained only
+      as needed for service operation, troubleshooting and security; backup
+      copies may take longer to expire. Data you publish to another service is
+      managed separately by that service.
+    </p>
+    <p>
+      You can request access, correction or deletion of the account information
+      held by Nakvali using the private contact above. You can also ask about
+      retention and processing, object to processing where applicable, and
+      complain to your local data-protection authority. We may need to verify
+      account ownership before acting. Do not post personal data in public
+      GitHub issues.
+    </p>
+    <h2>Changes</h2>
+    <p>
+      This notice describes an evolving early-stage app. Material changes to
+      data handling will be reflected here with a new update date before the new
+      functionality is offered.
+    </p>
+  </article>
+</Base>

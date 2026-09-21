@@ -1,0 +1,86 @@
+---
+import '@fontsource-variable/archivo';
+import '../styles/global.css';
+import { site } from '../data/site';
+interface Props {
+  title?: string;
+  description?: string;
+  noindex?: boolean;
+}
+const {
+  title = 'Nakvali — Ride the trail. Keep the ride.',
+  description = 'An offline-first mountain bike recorder for Android. Record your ride, refine your track on your phone, and take your data with you.',
+  noindex = false,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0d0f0d" />
+    <meta name="description" content={description} />
+    <meta name="referrer" content="no-referrer" />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <link rel="canonical" href={new URL(Astro.url.pathname, site.origin)} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta
+      property="og:url"
+      content={new URL(Astro.url.pathname, site.origin)}
+    />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      Skip to content
+    </a>
+    <header class="header wrap">
+      <a class="wordmark" href="/" aria-label="Nakvali home">
+        <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+          <path
+            d="M5 26V6l22 20V6M5 17l10-7M17 24l10-7"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="3"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        nakvali<span class="wordmark-dot">.</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a class="nav-about" href="/#the-recorder">
+          The recorder
+        </a>
+        <a href={site.repository}>
+          GitHub <span aria-hidden="true">↗</span>
+        </a>
+      </nav>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="footer wrap">
+      <div>
+        <a class="footer-brand" href="/">
+          nakvali.
+        </a>
+        <p>Made for days on the mountain.</p>
+      </div>
+      <nav aria-label="Footer navigation">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        {site.contactEmail ? (
+          <a href={`mailto:${site.contactEmail}`}>Contact</a>
+        ) : (
+          <a href={`${site.repository}/issues`}>Feedback</a>
+        )}
+      </nav>
+      <span class="footer-note">Independent. Built by a rider.</span>
+    </footer>
+  </body>
+</html>

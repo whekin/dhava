@@ -1,13 +1,18 @@
 # Nakvali private-alpha deployment
 
-This stack deploys the Go API and PostGIS only. Immutable raw recordings remain
+This stack deploys the static Astro/nginx website, Go API and PostGIS. For the
+shared `nakvali.whekin.dev` domain, exact service domains, prefix preservation,
+Android association and BIKEYARD registration, follow
+[`docs/bikeyard-setup.md`](../docs/bikeyard-setup.md).
+
+Immutable raw recordings remain
 on the phone, so production does not run MinIO or expose the legacy raw-upload
 routes. The Rust verification worker is also intentionally absent until the
 server has a real segment verification queue.
 
 ## Create the Coolify resource
 
-1. Connect `whekin/nakvali` through the Coolify GitHub App and create a Docker
+1. Connect `whekin/dhava` through the Coolify GitHub App and create a Docker
    Compose application.
 2. Use branch `main`, base directory `/`, and Compose location
    `/deploy/docker-compose.yml`.
@@ -58,6 +63,9 @@ Set these as Coolify secrets/variables before the first deployment:
   or chat.
 - `PUBLIC_BASE_URL` — required HTTPS origin without a trailing slash, for
   example `https://api.example.com`.
+- `NAKVALI_CONTACT_EMAIL` — public support/privacy email (default `whekins@gmail.com`), passed to the
+  web image at build time. It appears on the site and is not a secret. Rebuild
+  the web image after changing it.
 - `LOG_LEVEL` — optional; defaults to `info`.
 - `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET` — optional until the Strava app
   is registered.

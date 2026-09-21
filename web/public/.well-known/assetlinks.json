@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.nakvali.app",
+      "sha256_cert_fingerprints": [
+        "F8:DC:85:B0:5D:D7:72:46:44:53:80:09:B3:CC:BE:26:3C:96:55:1A:D3:A7:A5:8A:80:9B:14:6E:A4:BF:45:CA"
+      ]
+    }
+  }
+]

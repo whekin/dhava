@@ -1,5 +1,24 @@
 # Android release builds
 
+## Public download location
+
+The actual public repository is currently `whekin/dhava` (verified 2026-09-21);
+no GitHub releases exist yet. Use its GitHub Releases for signed APKs. The website
+links to the releases list until a real downloadable release is published.
+
+For each public release, use a unique version code, a version/tag matching the
+APK, release notes, the stable asset name `nakvali.apk`, and an SHA-256 checksum.
+Verify the APK's package and signing certificate before attaching it. Do not
+publish a development APK containing the owner's private-alpha API access key.
+Source repository visibility does not make existing local build credentials
+public release configuration. Publication is a separate step from preparing the
+website and BIKEYARD registration.
+
+After publishing, the landing can link to the verified version-specific APK URL.
+GitHub's `/releases/latest/download/nakvali.apk` only works for a latest full
+release with that asset; prerelease builds need their explicit tag URL. See
+[GitHub release links](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases).
+
 Nakvali's release build deliberately has no debug-signing fallback. A build signed
 with a different certificate cannot update an installed app, and uninstalling the
 old app would remove recordings that have not been backed up.

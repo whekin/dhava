@@ -1,0 +1,108 @@
+---
+import Base from '../layouts/Base.astro';
+import Terrain from '../components/Terrain.astro';
+import { site } from '../data/site';
+---
+
+<Base>
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <p class="eyebrow">
+        <span class="status-dot"></span> Android · Early development
+      </p>
+      <h1>
+        Ride the trail.
+        <br />
+        Keep <em>the ride.</em>
+      </h1>
+      <p class="hero-description">
+        For the way down, and the day around it.
+        <br class="desktop-break" /> A mountain bike recorder that keeps your
+        rides
+        <br class="desktop-break" /> on your phone. Even out of signal.
+      </p>
+      <div class="hero-actions">
+        <a class="button" href={site.releases}>
+          Follow Android releases <span aria-hidden="true">↗</span>
+        </a>
+        <a class="text-link" href="#the-recorder">
+          Meet Nakvali <span aria-hidden="true">↓</span>
+        </a>
+      </div>
+      <p class="availability">Android 14+ · First public APK coming soon</p>
+    </div>
+    <Terrain />
+    <div class="hero-bottom">
+      <span>BUILT FOR THE DESCENT</span>
+      <span>YOUR PHONE. YOUR TRACK. YOUR DATA.</span>
+    </div>
+  </section>
+  <section
+    class="features wrap"
+    id="the-recorder"
+    aria-labelledby="recorder-heading"
+  >
+    <div class="section-intro">
+      <p class="eyebrow">THE RECORDER</p>
+      <h2 id="recorder-heading">
+        Less to think about.
+        <br />
+        More to ride.
+      </h2>
+    </div>
+    <div class="feature-list">
+      <article>
+        <span class="feature-number">01</span>
+        <div>
+          <h3>Out of signal. Still recording.</h3>
+          <p>
+            Record and review your ride without a connection. Your local ride
+            archive goes wherever you do.
+          </p>
+        </div>
+      </article>
+      <article>
+        <span class="feature-number">02</span>
+        <div>
+          <h3>Give your track a second look.</h3>
+          <p>
+            GPS, motion sensors and barometer data are processed on your phone.
+            Review your ride, trim the edges and exclude shuttle travel.
+          </p>
+        </div>
+      </article>
+      <article>
+        <span class="feature-number">03</span>
+        <div>
+          <h3>Your ride stays yours.</h3>
+          <p>
+            Keep the original sensor recordings. Export a processed GPX or TCX,
+            or back up your local archive.
+          </p>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section class="bikeyard wrap" aria-labelledby="bikeyard-heading">
+    <div class="integration-mark" aria-hidden="true">
+      n<span>↗</span>
+    </div>
+    <div>
+      <p class="eyebrow">NEXT UP · BIKEYARD</p>
+      <h2 id="bikeyard-heading">
+        Record here.
+        <br />
+        Share the ride there.
+      </h2>
+      <p>
+        We’re building optional uploads to BIKEYARD, including automatic uploads
+        after you save. Nakvali focuses on recording. Your riding community
+        stays in BIKEYARD.
+      </p>
+      <a class="text-link" href="https://yard.bike">
+        Explore BIKEYARD <span aria-hidden="true">↗</span>
+      </a>
+    </div>
+    <span class="coming-soon">Coming soon</span>
+  </section>
+</Base>
