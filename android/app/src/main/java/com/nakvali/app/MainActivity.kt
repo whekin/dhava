@@ -3,7 +3,6 @@ package com.nakvali.app
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -76,11 +75,10 @@ class MainActivity : ComponentActivity() {
         if (data?.scheme == "https" && data.host == "nakvali.whekin.dev" &&
             data.path == "/oauth/bikeyard/callback"
         ) {
-            // Do not retain, log or present an authorization code before the
-            // registered client's state/PKCE exchange is implemented.
+            val callback = data.toString()
             intent.data = null
-            Toast.makeText(this, "BIKEYARD connection is coming in a future update", Toast.LENGTH_LONG)
-                .show()
+            com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(this)
+                .finishConnect(callback)
             return
         }
         handleStravaRedirect(intent)

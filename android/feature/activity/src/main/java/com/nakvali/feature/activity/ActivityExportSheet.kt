@@ -138,7 +138,7 @@ private fun ActivityExportPanel(
             }
             FileChoice(
                 title = "TCX track",
-                description = "For Strava · keeps the real distance and one lap per run",
+                description = "States riding distance and one lap per run",
                 selected = isTrack && kind.isTcx,
                 enabled = !busy && (processedAvailable || processedLoading),
                 onClick = { kind = ActivityExportKind.processedTrack(tcx = true, excludeTransport = kind.excludesTransport) },
@@ -205,10 +205,7 @@ private fun ActivityExportPanel(
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = NakvaliSpacing.small))
-            StravaAction(
-                stravaConnection, recording, processedAvailable && !busy,
-                onConnectStrava, onExportStrava, onRetryStrava, onViewStrava,
-            )
+            BikeyardExportAction(recording, processedAvailable && !busy)
             HorizontalDivider(Modifier.padding(vertical = NakvaliSpacing.small))
             TextButton(
                 onClick = { diagnosticsExpanded = !diagnosticsExpanded },

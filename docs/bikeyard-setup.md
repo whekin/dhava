@@ -94,7 +94,7 @@ Description (describes the integration being registered):
 Review and accept BIKEYARD's terms yourself, then create the application. Share
 only the public Client ID for implementation; a mobile client has no secret.
 Initial scopes will be `profile:read rides:write`. Use the sandbox before live
-uploads. This session does not implement PKCE/token exchange or upload.
+uploads. The registered clients and implemented Android flow are described below.
 
 ## Android verification
 
@@ -110,10 +110,11 @@ adb -s SERIAL shell am start -W -a android.intent.action.VIEW \
   -d 'https://nakvali.whekin.dev/oauth/bikeyard/callback'
 ```
 
-Expected domain state: `verified`. The current foundation opens Nakvali and says
-that BIKEYARD is coming in a future update; it does **not** claim to connect an
-account. Real OAuth handling replaces this branch after registration. Browser
-fallback is similarly explicit. Code/state must never be logged or echoed.
+Expected domain state: `verified`. A bare callback without a pending authorization
+and matching state simply opens Nakvali; it must never claim to connect an account.
+A real browser return is validated and exchanged using the saved PKCE verifier.
+The published fallback page remains informational. Code/state must never be logged
+or echoed.
 
 ## References
 
@@ -125,3 +126,59 @@ The owner confirmed the Coolify dashboard is `https://coolify.whekin.dev`.
 Its HTTPS login page is accessible; an authenticated session is required to
 inspect or modify the existing resource. Coolify manages the site certificate
 after an HTTPS service domain is saved and deployed.
+
+## Registered clients and Android implementation (2026-09-21)
+
+The owner registered a public PKCE client for each environment:
+
+- Sandbox: `yb_test_joajw5rzf57c5fukf7jb`
+- Live: `yb_live_3dnewziryr55f5hvrgd2`
+
+These identifiers are public, not credentials. Android requests only
+`profile:read rides:write`; a sample with `rides:read` cannot authorize uploads.
+The callback stays exactly `https://nakvali.whekin.dev/oauth/bikeyard/callback`.
+Never replace generated state/challenge values with the example's placeholders.
+
+Profile → BIKEYARD selects Sandbox or Live while disconnected. The initial default
+is Sandbox. Connection uses the system browser, a fresh random state/verifier,
+S256, strict callback matching and a consumed-once pending flow. A release-signed
+APK can verify the published App Link. Debug builds are deliberately not trusted
+by the public domain; use a release build for the real browser return, or explicitly
+select supported links on a test device. No debug certificate is published.
+
+The direct Android client lives under `core/recording/bikeyard`. AES-GCM with an
+Android Keystore key encrypts state stored under `noBackupFilesDir`; it contains
+tokens, profile and account-bound upload receipts. Refresh rotation is serialized,
+marked in-flight before the request, and atomically persisted on success. An
+ambiguous refresh failure or process death requires reconnection instead of
+reusing a possibly spent token. Disconnect cancels queued work and clears local
+connection data; failed remote revocation is shown with instructions to revoke
+Nakvali from BIKEYARD connected apps. Already published rides are unaffected.
+
+Manual upload appears in Activity → Export. It sends the whole riding-only TCX,
+with a confirmation naming the account, environment and visibility. WorkManager
+waits for a connection and retries boundedly. The first prepared file and metadata
+remain fixed across retries, with a stable `nakvali-<recording-id>` external ID.
+An edit/reprocessing does not silently create or replace another remote ride.
+Duplicate receipts are considered uploaded only when BIKEYARD confirms this
+rider's `duplicate_of`; a foreign duplicate is a separate review state. Upload
+receipts marked processing are polled. `Retry-After` is respected.
+
+Automatic uploads default off; visibility defaults private. Opting in explicitly
+disables the global Offline mode and records consent on each subsequently saved
+ride. Startup recovers a save-to-enqueue interruption; existing saves are never
+scanned into the queue. Importing a backup removes its automatic-upload markers.
+Turning automatic uploads off cancels queued automatic work; manual uploads remain
+explicitly available. Environment/account changes cannot move an existing job to
+another rider. Disabling Offline mode alone does not enable automatic uploads.
+
+The upload response does not contain a browser URL, and obtaining ride details
+would need additional read scopes. For now the success action opens BIKEYARD,
+not an invented per-ride URL. No `rides:read_all`, email, social or trail permissions
+are requested. BIKEYARD's TCX accounting and trail processing are independent of
+Nakvali's canonical Rust figures and still need comparison using a representative
+shuttle-containing recording before promising equal totals.
+
+The published website still describes the current public release as forthcoming;
+update its feature copy and privacy notice when shipping the integration. No live
+upload or public APK publication is part of local implementation verification.

@@ -116,9 +116,13 @@ internal fun SettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(NakvaliSpacing.medium))
         NakvaliPanel(Modifier.fillMaxWidth()) {
             Column {
-                SettingToggle("Offline mode", "Keep every activity local and skip sync attempts.", offline) {
+                SettingToggle("Offline mode", "Pause automatic uploads. Manual exports remain available.", offline) {
                     offline = it
                     preferences.edit().putBoolean(RecorderSettings.OFFLINE_MODE, it).apply()
+                    if (it) {
+                        val bikeyard = com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(context)
+                        bikeyard.setSettings(false, bikeyard.state.value.visibility)
+                    }
                 }
                 NakvaliDivider(Modifier.padding(horizontal = NakvaliSpacing.large))
                 SettingToggle(

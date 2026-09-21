@@ -3917,3 +3917,65 @@ requires login in the available browser session; no production settings changed.
 Coolify will manage the website TLS certificate after the HTTPS service routes
 are configured and deployed. The website changes still need to reach Git before
 Coolify can build them.
+
+## 2026-09-21 — Public website verified after Coolify deployment
+
+The owner deployed commit `3be3f5a` through Coolify; deployment
+`cv0wz388zeueeo7ikfvcypsd` is finished and the application reports healthy.
+Verified trusted HTTPS without bypassing certificate checks: `/`, `/privacy`,
+`/terms`, `/oauth/bikeyard/callback` and `/.well-known/assetlinks.json` all return
+200 at `nakvali.whekin.dev`, without redirects. Privacy/Terms contain the approved
+contact; the callback sends `Cache-Control: no-store`; the association is JSON
+with the expected release certificate. `/api/v1/me` returns the Go API's JSON 401
+`access_key_required`, confirming the API path survives proxy routing. BIKEYARD
+registration URLs are now live. On-device App Link verification, authenticated
+API validation and BIKEYARD OAuth/upload remain separate pending checks.
+
+## 2026-09-21 — Direct BIKEYARD connection and upload queue
+
+Integrated the owner's sandbox and live public client IDs in Android. The profile
+now offers environment selection, PKCE connection/cancellation, explicit private
+or public visibility, optional automatic uploads and disconnect. The activity
+export sheet offers a confirmed whole-ride BIKEYARD upload in place of the Strava
+button; the old Strava implementation is retained for compatibility. Google/Firebase
+identity is unchanged. Default environment is sandbox, auto-upload is off, and
+visibility is private.
+
+The device talks directly to BIKEYARD with `profile:read rides:write`. A strict
+HTTPS callback, random state/verifier, consumed-once code and serialized rotating
+refresh protect the connection. Android Keystore encrypts the atomic state file
+outside backups. Refresh ambiguity/process death requires reconnecting; revocation
+failure is reported honestly after clearing the local connection. No credentials
+or callback URLs are logged by the integration.
+
+WorkManager sends Rust-derived riding-only TCX. The first prepared file and
+metadata remain fixed across retries, using a stable recording-based external ID.
+The queue is bound to environment and rider, respects Retry-After, polls processing
+receipts and distinguishes a duplicate in another rider's account. Read scopes
+are deliberately absent; the completed action opens BIKEYARD rather than inventing
+a per-ride URL that the upload receipt does not provide.
+
+Automatic consent is captured on newly saved entries, so startup can repair a
+save/enqueue crash without sweeping old rides into uploads. Restore clears incoming
+consent markers. Offline mode stops automatic work; enabling auto-upload explicitly
+disables Offline mode. Saving reads an immutable consent snapshot without waiting
+for the mutex used by network operations. Manual retry remains possible after auto
+uploads are disabled. Neither edits nor reprocessing silently replace a remote ride.
+
+Verified: 137 core recording unit tests pass, including 22 new protocol/state tests;
+Android debug/release assembly, release vital lint and debug lint pass. Release
+certificate matches the published association. Built with the new API origin
+`https://nakvali.whekin.dev`. Updated only the existing Pixel 9 Pro emulator in
+place (debug key); did not uninstall/clear data or touch the phone. Checked profile
+in light/dark themes and at 1080x1920 with font scale 1.3, then restored dimensions,
+font scale and light theme. Verified a forged callback is visibly rejected after
+process restart. Existing emulator rides were not edited or uploaded.
+
+Not yet verified: an actual authorized sandbox round trip or upload, connected-state
+UI with a real BIKEYARD session, release App Link dispatch on a device, and BIKEYARD's
+TCX distance/pause/shuttle semantics. Chrome's first-run Terms require owner consent;
+asked separately and left acceptance pending. No live authorization/upload, public
+APK release, website update, commit or push was performed for this implementation.
+The locally signed APK is ready for a controlled connection test. Published website
+copy still describes the integration as forthcoming until a release is actually
+shipped.

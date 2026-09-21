@@ -111,6 +111,7 @@ fun ProfileScreen(
         onAddBike = viewModel::addBike,
         onSelectBike = viewModel::selectBike,
         modifier = modifier,
+        connections = { BikeyardSettings(viewModel) },
     )
 }
 
@@ -126,6 +127,7 @@ private fun ProfileContent(
     onAddBike: (String, BikeType) -> Unit,
     onSelectBike: (String) -> Unit,
     modifier: Modifier = Modifier,
+    connections: @Composable () -> Unit = {},
 ) {
     var showAddBike by remember { mutableStateOf(false) }
 
@@ -148,6 +150,8 @@ private fun ProfileContent(
                 is ProfileUiState.SignedIn -> SignedInAccount(state, onRetrySync)
             }
         }
+
+        connections()
 
         ProfileSection(
             title = "Bikes",

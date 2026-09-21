@@ -167,6 +167,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                         it.stravaExportStatus == StravaExportStatus.PROCESSING
                 }
                 .forEach { StravaExportWorker.enqueue(appContext, it.id) }
+            com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(appContext).recover(_recordings.value)
             refreshStravaConnection()
         }
     }
@@ -310,6 +311,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         val currentRecordingIds = _recordings.value.mapTo(mutableSetOf(), LocalRecording::id)
         _recordings.value = (
             _recordings.value + incomingRecordings.filter { currentRecordingIds.add(it.id) }
+                .map { it.copy(bikeyardAutoRequest = null) }
             ).sortedByDescending(LocalRecording::startedAtMs)
 
         val currentBikeIds = _bikes.value.mapTo(mutableSetOf(), Bike::id)
@@ -1029,8 +1031,11 @@ class RecordingRepository private constructor(private val appContext: Context) {
         val offline = RecorderSettings.preferences(appContext)
             .getBoolean(RecorderSettings.OFFLINE_MODE, true)
         scope.launch {
+            val bikeyard = com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(appContext)
+            val autoRequest = bikeyard.automaticRequest()
             updateEntry(id) {
                 it.withMetadata(title, description, bike).copy(
+                    bikeyardAutoRequest = autoRequest,
                     savedAtMs = System.currentTimeMillis(),
                     status = if (offline || !UPLOADS_ENABLED) {
                         RecordingStatus.RECORDED
@@ -1046,6 +1051,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 }
             }
             if (UPLOADS_ENABLED && !offline) UploadWorker.enqueue(appContext, id)
+            if (autoRequest != null) awaitRecording(id)?.let { bikeyard.upload(it, autoRequest) }
         }
     }
 
@@ -1077,6 +1083,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         // queued; a worker that already ran to completion is unaffected.
         UploadWorker.cancel(appContext, id)
         StravaExportWorker.cancel(appContext, id)
+        com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(appContext).deleteRecording(id)
         indexMutex.withLock {
             _recordings.update { list -> list.filterNot { it.id == id } }
             saveIndex()

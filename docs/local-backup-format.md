@@ -90,3 +90,12 @@ Both fields are optional, so an index written before them decodes unchanged and
 the format version stays 1. As with transport annotations, restoring onto a
 device that already holds the ride keeps that device's entry, so a trim authored
 on another phone is not imported.
+
+### BIKEYARD connection and save-time consent
+
+BIKEYARD tokens, rider profile, delivery receipts and prepared upload snapshots
+live under Android `noBackupFilesDir` and are not included in the local archive.
+The recording index may contain an optional `bikeyard_auto_request` with the
+account/environment key, opt-in identifier and selected visibility from the save.
+This is a crash-recovery marker, not a credential. Restore explicitly clears it
+on imported entries: importing an archive never authorizes automatic uploads.

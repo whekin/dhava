@@ -87,6 +87,8 @@ data class LocalRecording(
     @SerialName("bike_name") val bikeName: String? = null,
     @SerialName("bike_type") val bikeType: BikeType? = null,
     @SerialName("saved_at_ms") val savedAtMs: Long? = null,
+    /** Save-time opt-in only; restored archives never inherit upload consent. */
+    @SerialName("bikeyard_auto_request") val bikeyardAutoRequest: com.nakvali.core.recording.bikeyard.BikeyardAutoRequest? = null,
     /**
      * Server-assigned activity id, persisted as soon as `create` succeeds so
      * a retried upload skips create and reuses it (idempotency across

@@ -1018,3 +1018,27 @@ currently identifies that repository as `whekin/dhava`; earlier references to
 `whekin/nakvali` were not a verified repository rename. Until the first actual
 release exists, the landing links to the release list and does not promise a
 working APK download. BIKEYARD uploads are similarly labelled as forthcoming.
+
+## 2026-09-21 — BIKEYARD uploads are device-owned and consent is captured at save
+
+Android connects directly using the registered public PKCE clients, independent
+of Firebase and the Nakvali API. Request only profile identity and upload access.
+Sandbox is the initial environment, automatic uploads default off, and visibility
+defaults private. The existing Google account remains a separate product identity.
+
+Automatic upload consent is recorded with each newly saved ride so a crash between
+index persistence and WorkManager enqueue is recoverable without uploading the
+existing archive. Restores strip that marker. Queues are bound to both environment
+and rider; disconnect clears local integration data and pending work. Global
+Offline mode disables automatic BIKEYARD work, and opting into automatic uploads
+explicitly turns Offline mode off.
+
+An upload freezes its TCX and metadata before the first network attempt, retaining
+a stable recording-based external ID across retries. Reprocessing or editing does
+not silently create another remote ride: the current API has no update endpoint.
+Raw sensors never leave the device through this integration. BIKEYARD's own
+processing remains authoritative for its results, not a copy of Rust timing.
+
+Tokens are encrypted with Android Keystore outside all backups. A refresh request
+is single-use; ambiguous completion requires reconnecting rather than replaying a
+possibly consumed refresh token. The in-flight marker survives process death.

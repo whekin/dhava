@@ -68,8 +68,7 @@
                     android:host="strava"
                     android:path="/connected" />
             </intent-filter>
-            <!-- Registration foundation only; OAuth exchange is added after
-                 the BIKEYARD client is registered. Trust this exact path. -->
+            <!-- BIKEYARD uses PKCE and a verified, exact HTTPS callback. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
