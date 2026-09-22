@@ -72,9 +72,8 @@ claims are neither persisted nor logged.
 
 If `/me` is unavailable, the Firebase session stays signed in and Profile reports
 `Local only`; recording, local segments and raw archives continue to work. A 401 gets
-one forced token refresh before becoming a retryable state. The anonymous installation
-credential used by the current Strava prototype remains separate until its deliberate
-account-migration step.
+one forced token refresh before becoming a retryable state. BIKEYARD connects directly from Android using its own PKCE session; it does not
+replace or share Firebase identity.
 
 The private-alpha `X-Nakvali-Access-Key` remains an additional deployment perimeter,
 but it is not user authentication and must not be required by a public release.

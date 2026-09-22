@@ -6,9 +6,19 @@ import java.util.Base64
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class BikeyardEnvironment(val clientId: String, val apiOrigin: String) {
-    SANDBOX("yb_test_joajw5rzf57c5fukf7jb", "https://sandbox.yard.bike"),
-    LIVE("yb_live_3dnewziryr55f5hvrgd2", "https://open.yard.bike"),
+enum class BikeyardEnvironment {
+    // Kept only to decode and retire state written by the sandbox alpha.
+    SANDBOX,
+    LIVE;
+
+    val clientId: String get() {
+        check(this == LIVE) { "Sandbox connections are no longer supported" }
+        return "yb_live_3dnewziryr55f5hvrgd2"
+    }
+    val apiOrigin: String get() {
+        check(this == LIVE) { "Sandbox connections are no longer supported" }
+        return "https://open.yard.bike"
+    }
 }
 
 @Serializable
@@ -43,7 +53,6 @@ data class BikeyardUpload(
 
 data class BikeyardUiState(
     val loading: Boolean = true,
-    val environment: BikeyardEnvironment = BikeyardEnvironment.SANDBOX,
     val connected: Boolean = false,
     val connecting: Boolean = false,
     val riderName: String? = null,
@@ -73,7 +82,7 @@ internal data class BikeyardPending(val state: String, val verifier: String, val
 
 @Serializable
 internal data class BikeyardStoredState(
-    val environment: BikeyardEnvironment = BikeyardEnvironment.SANDBOX,
+    val environment: BikeyardEnvironment = BikeyardEnvironment.LIVE,
     val tokens: BikeyardTokens? = null,
     val pending: BikeyardPending? = null,
     val autoConsentId: String? = null,
@@ -83,7 +92,7 @@ internal data class BikeyardStoredState(
 ) {
     val accountKey: String? get() = tokens?.let { "${environment.name}:${it.riderId}" }
     fun ui() = BikeyardUiState(
-        loading = false, environment = environment, connected = tokens != null,
+        loading = false, connected = tokens != null,
         connecting = pending != null, riderName = tokens?.riderName,
         accountKey = accountKey, automatic = autoConsentId != null,
         visibility = visibility, uploads = uploads, message = message,

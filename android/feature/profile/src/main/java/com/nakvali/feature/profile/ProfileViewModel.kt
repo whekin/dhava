@@ -20,7 +20,6 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     }
     fun disconnectBikeyard() = bikeyardRepository.disconnect()
     fun cancelBikeyard() = bikeyardRepository.cancelConnect()
-    fun bikeyardEnvironment(environment: com.nakvali.core.recording.bikeyard.BikeyardEnvironment) = bikeyardRepository.changeEnvironment(environment)
     fun bikeyardSettings(automatic: Boolean, visibility: com.nakvali.core.recording.bikeyard.BikeyardVisibility) = bikeyardRepository.setSettings(automatic, visibility)
 
     val bikes: StateFlow<List<Bike>> = repository.bikes

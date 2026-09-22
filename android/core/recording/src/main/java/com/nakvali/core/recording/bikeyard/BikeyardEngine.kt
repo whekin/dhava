@@ -16,9 +16,22 @@ internal class BikeyardEngine(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val mutex = Mutex()
-    @Volatile private var data = store.read().let {
-        if (it.tokens?.refreshInFlight == true) it.copy(tokens = null, autoConsentId = null,
-            message = "Token refresh was interrupted. Connect BIKEYARD again") else it
+    private val restored = store.read()
+    val retiredSandbox = restored.environment == BikeyardEnvironment.SANDBOX
+    @Volatile private var data = restored.let {
+        when {
+            it.environment != BikeyardEnvironment.LIVE -> BikeyardStoredState(
+                message = "Connect your BIKEYARD account. The test connection has been removed",
+            )
+            it.tokens?.refreshInFlight == true -> it.copy(tokens = null, autoConsentId = null,
+                message = "Token refresh was interrupted. Connect BIKEYARD again")
+            else -> it
+        }
+    }
+    init {
+        // Persist retirement before any queued worker can make a network request.
+        // Existing live tokens, receipts and consent are retained unchanged.
+        if (data != restored) store.write(data)
     }
     private val _state = MutableStateFlow(data.ui())
     val state = _state.asStateFlow()
@@ -77,11 +90,6 @@ internal class BikeyardEngine(
         } finally {
             _state.value = data.ui()
         }
-    }
-
-    suspend fun changeEnvironment(environment: BikeyardEnvironment) = mutex.withLock {
-        check(data.tokens == null && data.pending == null) { "Disconnect before switching environments" }
-        save(BikeyardStoredState(environment = environment))
     }
 
     suspend fun settings(automatic: Boolean, visibility: BikeyardVisibility) = mutex.withLock {

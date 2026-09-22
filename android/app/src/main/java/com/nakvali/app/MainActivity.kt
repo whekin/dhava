@@ -81,7 +81,6 @@ class MainActivity : ComponentActivity() {
                 .finishConnect(callback)
             return
         }
-        handleStravaRedirect(intent)
         if (intent?.action == RecordingService.ACTION_OPEN_RECORDING) {
             openRecorderRequest++
             // Do not replay the navigation request after a configuration change.
@@ -89,13 +88,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun handleStravaRedirect(intent: Intent?) {
-        val data = intent?.data ?: return
-        if (data.scheme == "nakvali" && data.host == "strava" && data.path == "/connected") {
-            RecordingRepository.getInstance(this)
-                .onStravaOAuthRedirect(data.getQueryParameter("result"))
-        }
-    }
+
 }
 
 @Composable

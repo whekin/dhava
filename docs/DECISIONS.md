@@ -1042,3 +1042,38 @@ processing remains authoritative for its results, not a copy of Rust timing.
 Tokens are encrypted with Android Keystore outside all backups. A refresh request
 is single-use; ambiguous completion requires reconnecting rather than replaying a
 possibly consumed refresh token. The in-flight marker survives process death.
+
+## 2026-09-21 — Production-only BIKEYARD and lossless compact TCX
+
+The owner confirmed live OAuth works and asked to remove sandbox after a failure
+on its consent page. The app now exposes only the production connection. Keep the
+legacy sandbox enum solely to deserialize and retire its state, without carrying
+its credentials, pending callbacks, consent or queued rides into live. Existing
+live sessions and preferences are preserved.
+
+Reduce TCX size by removing XML formatting whitespace, not samples or precision.
+The same change applies to file exports and BIKEYARD uploads. Keep the 20 MB guard
+and frozen retry snapshots. Longer rides that remain too large need an explicit
+format/receiver decision (FIT, supported compression, or a larger provider limit),
+not silent point thinning or splitting one activity into several uploads.
+
+## 2026-09-21 — FIT and gzip are file options; provider delivery stays explicit
+
+Use Garmin's official Java FIT SDK as a serialization dependency. Fusion, run
+boundaries and odometer remain Rust-owned. Export sampling selects existing points
+at approximately 1 Hz while preserving run/gap endpoints, or retains the full
+canonical track at 5 Hz. It does not change canonical timing or stored recordings.
+FIT adds standard time128 and a declared millisecond-fraction developer field for
+aware readers; the UI makes compatibility limits visible. Gzip is independent,
+lossless file compression, including FIT, TCX and GPX.
+
+Keep BIKEYARD delivery on the existing 5 Hz riding-only TCX until its compression
+and FIT sub-second import behavior are confirmed. Manual file-format controls must
+not silently mutate a previously authorized background job or its frozen snapshot.
+Airtime, jump count and related fields are future work pending algorithms and a
+versioned receiver contract; no placeholder metrics are emitted now.
+
+Remove Strava integration code end-to-end, including Android jobs/callbacks and Go
+routes/store/client/config/OpenAPI definitions. Retain applied SQL migration history
+and ignore retired recording-index fields on read; removal does not erase existing
+rides or execute a destructive database migration.

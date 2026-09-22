@@ -1,7 +1,7 @@
 # Roadmap — recorder first
 
 Nakvali is currently a high-quality, offline-first MTB recorder that will export
-activities to Strava. Segments, leaderboards and social features are frozen until
+activities to BIKEYARD. Segments, leaderboards and social features are frozen until
 the recorder is trustworthy enough to replace a dedicated bike computer.
 
 ## Phase 0 — Foundation ✅
@@ -34,17 +34,29 @@ skeleton and deployment scaffolding.
 - GPX export through Android Share: raw GPS and processed 5 Hz tracks ✅
 - Canonical finalized horizontal GPX with explicit pause sections ✅
 - Add Rust-finalized elevation to the processed GPX ✅
-- One-time `Connect with Strava`, then one-tap per-activity export with offline queue,
-  retry and duplicate protection — implemented locally; live OAuth/upload verification
-  awaits a registered Strava app and public backend callback
-- Minimal Go OAuth/upload broker for Strava credentials; implemented and tested
-  locally, while the recorder itself remains fully usable without backend connectivity
-- Coolify private-alpha deployment contract: proxy-only API, PostGIS persistence,
-  startup migrations, readiness healthcheck, shared alpha perimeter and raw uploads
-  disabled — prepared and locally verified; first live deployment pending
-- FIT export with pause semantics and sport metadata
-- Upgrade Strava uploads from GPX to FIT once canonical pause and device metadata are
-  stable
+- Direct BIKEYARD PKCE connection, manual uploads and opt-in automatic uploads of
+  new saved rides; live authorization confirmed by the owner
+- FIT, TCX and GPX file export with explicit 1/5 Hz selection and optional gzip
+  compression; file export options do not alter canonical data or timing
+- BIKEYARD delivery uses riding-only TCX.GZ at 5 Hz with asynchronous receipt
+  polling; FIT sub-second time handling still needs receiver verification
+- Strava connection, Android delivery worker and Go broker removed; old recording
+  indexes remain readable and historical database migrations are retained
+- Coolify deployment: separate static website and API under `nakvali.whekin.dev`,
+  persistent PostGIS, raw uploads disabled; live HTTPS verified
+
+## Future — BIKEYARD ride metrics
+
+- Agree a versioned contract with BIKEYARD for air time, jump count and later
+  derived riding metrics, once their Rust algorithms and rider-facing semantics
+  are ready; do not send fabricated zeros or unfinished metrics now
+- Keep metrics sourced from the canonical on-device Rust artifact, with units,
+  algorithm version and quality/uncertainty where applicable
+- Decide together whether metrics belong in FIT developer fields or a separate
+  API payload; file-format support alone does not imply BIKEYARD consumes them
+- Keep a stable association with the uploaded ride and define how recomputation
+  updates metrics before implementing synchronization; no raw sensor upload
+  is introduced by this extension
 
 ## Phase 4 — Recorder polish
 

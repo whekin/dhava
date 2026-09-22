@@ -34,8 +34,8 @@ nakvaliApiAccessKey=replace-with-the-private-alpha-key
 ```
 
 The access key is compiled into the APK. It is only a private-alpha perimeter,
-not user authentication, and must be rotated if the APK is distributed. Never put
-the Strava client secret in Gradle properties or in the app.
+not user authentication, and must be rotated if the APK is distributed. Never put server credentials or OAuth access/refresh tokens in Gradle properties
+or in the app binary. BIKEYARD client IDs are public identifiers.
 
 You can override either property for a single build with Gradle `-P` arguments.
 Without an override, debug builds target the Android emulator host at

@@ -3979,3 +3979,118 @@ APK release, website update, commit or push was performed for this implementatio
 The locally signed APK is ready for a controlled connection test. Published website
 copy still describes the integration as forthcoming until a release is actually
 shipped.
+
+## 2026-09-21 — Live-only BIKEYARD and smaller TCX files
+
+The owner confirmed production authorization works; sandbox fails after consent
+inside BIKEYARD. At their request removed the environment picker and sandbox UI
+copy, defaulting all new connections to the live client. The sandbox enum remains
+only for reading old encrypted state, with no usable test credentials/endpoints.
+Migration retires sandbox tokens, pending state, consent, queue and prepared files
+before workers run; it never converts a test job into a production upload. Existing
+live credentials, consent, visibility and receipts remain unchanged.
+
+Investigated TCX size before asking BIKEYARD to increase its 20 MB upload limit.
+The existing pretty-printed XML spends bytes on indentation for every 5 Hz sample.
+A deterministic 54,000-point fixture (roughly three hours, three laps) reproduced
+the limit: 21,158,873 bytes, failing the 20 MB assertion. Removing only formatting
+whitespace produces 14,840,566 bytes, a 29.9% reduction. XML parsing confirms all
+54,000 points and three laps remain; existing coordinate, altitude, timestamp,
+odometer, shuttle-boundary and escaped-name tests pass. New coverage preserves
+meaningful whitespace in the rider's name. No thinning, precision reduction,
+changed Rust calculations or algorithm version bump.
+
+Both file exports and new BIKEYARD snapshots use compact TCX. Already prepared
+live snapshots remain frozen across retries. Still-oversized exports show their
+actual MB size; the limit remains enforced without silently splitting activities.
+FIT, provider-supported gzip or a larger BIKEYARD limit remain future options.
+The owner's specific oversized TCX was not provided or measured; the numbers above
+are for the controlled fixture, not a claim about that recording.
+
+Validation: 141 recording tests pass, debug/release builds and debug/release vital
+lint pass. Verified the legacy sandbox migration and absence of picker on the
+emulator. Signed release installed on S25 with `adb install -r`, after checking
+there was no recording service; no uninstall/data clearing. Release certificate
+is unchanged. No live uploads were initiated for this verification. Changes remain
+local and uncommitted.
+
+## 2026-09-21 — FIT/GZIP file export, visible 1/5 Hz controls, and Strava retirement
+
+Added FIT through Garmin's official Java SDK 21.214.0, alongside TCX and GPX.
+The export sheet now selects format with chips, exposes `5 Hz detail` (off selects
+approximately 1 Hz with all run/gap endpoints retained), and offers independent
+`Gzip compression`. Save and Share use the same settings, filename suffix and
+MIME type. Original GPS/health exports can be compressed too; sensor archives are
+already gzip and never compressed twice. File compression runs on IO, not the UI
+thread. Canonical data, Rust calculations, raw files and algorithm version stay
+unchanged.
+
+FIT writes File ID, Device Info, records, laps, timer start/stop events, Session
+and Activity using the Rust-derived export points and odometer. MTB/e-MTB metadata
+is retained. Whole-second timestamps carry standard time128 and a declared exact
+`timestamp_fraction_ms` developer field for aware readers. The UI warns that some
+FIT readers ignore fractional time; the canonical result never depends on decoding
+FIT. Unicode titles are bounded by code points to respect the FIT field byte limit.
+No airtime/jump-count placeholders are written. Their future BIKEYARD contract,
+units, provenance, quality and update semantics are recorded in ROADMAP.
+
+For the same 54,000-point fixture: compact TCX 14,189,169 bytes, TCX.GZ 940,839,
+FIT 1,296,764 and FIT.GZ 575,432. Official Garmin decoding verifies CRC, sample
+count, exact millisecond extension, coordinates/height within format precision,
+laps, odometer and paused timer semantics. Gzip round-trips exact original bytes.
+The native BIKEYARD upload remains whole riding-only 5 Hz TCX until its owner
+confirms compressed-file support and FIT sub-second parsing; file controls do not
+silently change the durable upload queue or already prepared retry snapshots.
+
+Removed Strava's UI plumbing, mobile API client/worker/callback, legacy export
+fields, Go broker/client/store/handlers/config and OpenAPI schemas/routes. Startup
+cancels old jobs by class tag and clears the retired installation credential;
+legacy recording indexes still load and ignore retired fields. Historical SQL
+migrations are retained; no table drop, remote revocation or data deletion was
+executed. Updated deployment, authentication, release and privacy documentation.
+Server-route retirement needs deployment; no server was changed in this session.
+
+Validation: 147 core recording and 40 activity unit tests pass; debug/release APKs,
+debug lint and release vital lint pass; Go vet/test/build, Compose validation, web
+checks/build and OpenAPI reference validation pass. The release APK was installed
+on S25 with `adb install -r`; its device hash matches the final local APK. The
+existing certificate and application data were retained. No BIKEYARD ride was
+uploaded during this verification.
+
+UI verification remains limited: the original emulator ran out of installation
+space, then succeeded after Android-managed cache trimming. Added one clearly
+labelled synthetic recording while retaining its four existing entries, but found
+that emulator was being used by another application and stopped interacting with
+it. A new isolated `small_phone` emulator (5580) displayed the synthetic activity,
+then its System UI repeatedly ANRed, including with software graphics, no window
+and more RAM. No AndroidRuntime crash from Nakvali was observed. Stopped and removed
+only that newly created isolated emulator. S25 was locked; asked the owner to unlock
+it for the export-sheet and system Save/Share checks. Do not claim that end-to-end
+UI flow has passed yet. No commit, push, backend or website deployment performed.
+
+## 2026-09-22 — Gzip + asynchronous BIKEYARD uploads; sensor-metrics proposal
+
+Verified the new official OpenAPI contract: compressed GPX/TCX/FIT, 20 MB as sent,
+128 MB unpacked, `Prefer: respond-async` → 202 processing receipt. Android now sends
+TCX.GZ with that header and gzip MIME. It compresses the existing frozen TCX snapshot
+without changing bytes after decompression, metadata or external ID. This also
+supports legacy queued plain snapshots. The prepared-file limit is now 128 MB;
+the compressed transmission is checked against 20 MB before POST. Temporary gzip
+is removed after the request. Existing durable upload-ID polling handles 202;
+when the server already has the file, local-file absence no longer prevents polling.
+
+Reviewed the actual Rust sensor analysis. Experimental airtime windows and landing
+|accel|/9.81 peaks already exist, but mounting/gaps/saturation/quality and export-scope
+semantics are not ready to call them validated bike jumps. Wrote a proposal in
+`docs/bikeyard-sensor-metrics.md`: versioned JSON metrics with exact event timestamps,
+track association, scope, provenance/quality, and later consistent FIT/XML mapping.
+No guessed fields or sensor metrics are transmitted, and no message/APK was sent to
+Pavel. This is an implementation plus design task, not authorization to contact him.
+
+Validation: release assembly and debug/release vital lint pass. Core recording
+unit tests cover gzip decompression to the exact original bytes, multipart MIME
+and filename, async preference and 202 decoding, temporary-file cleanup, and
+persisted upload receipt recovery across a new engine instance without another
+POST. No real account upload was initiated. APK rebuilt locally; not installed,
+published, committed or pushed in this iteration. Sensor-metrics design is a
+proposal, not a guarantee that BIKEYARD already accepts those fields.

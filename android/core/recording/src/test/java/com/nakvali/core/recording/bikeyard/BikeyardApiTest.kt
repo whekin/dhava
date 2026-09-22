@@ -23,33 +23,39 @@ class BikeyardApiTest {
 
     @Test fun `public code exchange sends PKCE to selected environment without a secret`() = runBlocking {
         val api = api(200, tokenJson) { request ->
-            assertEquals("https://sandbox.yard.bike/oauth/token", request.url.toString())
+            assertEquals("https://open.yard.bike/oauth/token", request.url.toString())
             val body = request.body as FormBody
             val fields = (0 until body.size).associate { body.name(it) to body.value(it) }
-            assertEquals(BikeyardEnvironment.SANDBOX.clientId, fields["client_id"])
+            assertEquals(BikeyardEnvironment.LIVE.clientId, fields["client_id"])
             assertEquals(BikeyardPkce.REDIRECT_URI, fields["redirect_uri"])
             assertEquals("verifier", fields["code_verifier"])
             assertEquals("authorization_code", fields["grant_type"])
             assertFalse(fields.containsKey("client_secret")); assertNull(request.header("Authorization"))
         }
-        assertEquals("test-refresh", api.exchange(BikeyardEnvironment.SANDBOX, "code", "verifier").refreshToken)
+        assertEquals("test-refresh", api.exchange(BikeyardEnvironment.LIVE, "code", "verifier").refreshToken)
     }
 
     @Test fun `upload explicitly sends visibility and external id and parses duplicate receipt`() = runBlocking {
-        val job = BikeyardUpload("key", "ride", "SANDBOX:rider", BikeyardVisibility.PRIVATE, false,
+        val job = BikeyardUpload("key", "ride", "LIVE:rider", BikeyardVisibility.PRIVATE, false,
             externalId = "nakvali-ride", name = "Ride", description = "", bikeType = "emtb")
         val file = File.createTempFile("bikeyard", ".tcx").apply { writeText("<test/>") }
         try {
             val api = api(409, """{"error":{"code":"duplicate_ride","message":"duplicate"},"upload":{"id":"upload","status":"duplicate","ride_id":null,"duplicate_of":null}}""") { request ->
-                assertEquals("https://sandbox.yard.bike/v1/uploads", request.url.toString())
+                assertEquals("https://open.yard.bike/v1/uploads", request.url.toString())
                 assertEquals("Bearer access", request.header("Authorization"))
+                assertEquals("respond-async", request.header("Prefer"))
+                val multipart = request.body as okhttp3.MultipartBody
+                val filePart = multipart.parts.first().body
+                assertEquals("application/gzip", filePart.contentType().toString())
+                val compressed = okio.Buffer().also { filePart.writeTo(it) }.readByteArray()
+                assertEquals("<test/>", java.util.zip.GZIPInputStream(compressed.inputStream()).reader().readText())
                 val buffer = okio.Buffer(); request.body!!.writeTo(buffer); val body = buffer.readUtf8()
                 assertTrue(body.contains("name=\"visibility\"\r\n\r\nprivate"))
                 assertTrue(body.contains("name=\"external_id\"\r\n\r\nnakvali-ride"))
-                assertTrue(body.contains("filename=\"nakvali.tcx\""))
+                assertTrue(body.contains("filename=\"nakvali.tcx.gz\""))
                 assertFalse(body.contains("trail_condition"))
             }
-            val receipt = api.upload(BikeyardEnvironment.SANDBOX, "access", job, file)
+            val receipt = api.upload(BikeyardEnvironment.LIVE, "access", job, file)
             assertEquals("duplicate", receipt.status); assertNull(receipt.duplicateOf)
         } finally { file.delete() }
     }
@@ -67,4 +73,18 @@ class BikeyardApiTest {
         try { tokens.tokens(0); fail("Missing write scope must be rejected") }
         catch (error: BikeyardFailure) { assertEquals(BikeyardFailure.Kind.AUTH, error.kind) }
     }
+    @Test fun `async acceptance is decoded and gzip temporary is removed`() = runBlocking {
+        val file = File.createTempFile("bikeyard-async", ".tcx").apply { writeText("<test/>") }
+        val job = BikeyardUpload("key", "ride", "LIVE:rider", BikeyardVisibility.PRIVATE, false,
+            externalId = "nakvali-ride", name = "Ride", description = "", bikeType = "mtb")
+        try {
+            val api = api(202, """{"id":"upload","status":"processing","ride_id":null}""") {
+                assertEquals("respond-async", it.header("Prefer"))
+            }
+            assertEquals("processing", api.upload(BikeyardEnvironment.LIVE, "access", job, file).status)
+            assertEquals("<test/>", file.readText())
+            assertFalse(File(file.parentFile, "${file.name}.gz").exists())
+        } finally { file.delete() }
+    }
+
 }

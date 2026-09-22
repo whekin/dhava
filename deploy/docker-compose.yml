@@ -34,10 +34,6 @@ services:
       API_ACCESS_KEY: ${API_ACCESS_KEY:?API_ACCESS_KEY is required}
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       RAW_UPLOADS_ENABLED: "false"
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
-      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
-      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
-      STRAVA_APP_REDIRECT_URL: ${STRAVA_APP_REDIRECT_URL:-nakvali://strava/connected}
     expose:
       - "8080"
     secrets:

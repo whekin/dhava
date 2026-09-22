@@ -42,8 +42,8 @@ the whole stack on deployment. The existing `db-data-v2` volume must stay intact
    If this Coolify version does not expose the setting for Compose, remove the
    generated strip middleware from that router using custom labels; inspect the
    actual generated router names instead of pasting guessed labels.
-7. Set `PUBLIC_BASE_URL=https://nakvali.whekin.dev` (origin only), redeploy, and
-   verify trusted HTTPS. Keep `/healthz` and `/readyz` checks on the old API domain
+7. Redeploy and verify trusted HTTPS. `PUBLIC_BASE_URL` is no longer needed by
+   the Go backend after removing the Strava broker. Keep `/healthz` and `/readyz` checks on the old API domain
    or use internal container healthchecks; the web's `/healthz` checks only web.
 8. After the new API route works, build Android with
    `-PnakvaliApiBaseUrl=https://nakvali.whekin.dev`. Do not put `/api/v1` into this
@@ -129,22 +129,24 @@ after an HTTPS service domain is saved and deployed.
 
 ## Registered clients and Android implementation (2026-09-21)
 
-The owner registered a public PKCE client for each environment:
+Production client: `yb_live_3dnewziryr55f5hvrgd2`. This identifier is public,
+not a credential. Android requests only `profile:read rides:write`; a sample with
+`rides:read` cannot authorize uploads. The callback stays exactly
+`https://nakvali.whekin.dev/oauth/bikeyard/callback`.
 
-- Sandbox: `yb_test_joajw5rzf57c5fukf7jb`
-- Live: `yb_live_3dnewziryr55f5hvrgd2`
+Profile → BIKEYARD connects directly to the live account. Sandbox selection was
+removed at the owner's request after a failure on BIKEYARD's sandbox consent page;
+the owner confirmed live authorization works. Existing live credentials, upload
+receipts and auto-upload preferences survive the update. Legacy sandbox state is
+recognized only for migration: its tokens, pending authorization, consent and jobs
+are discarded locally, never redirected into a live account. New connections
+default to private visibility with automatic uploads off.
 
-These identifiers are public, not credentials. Android requests only
-`profile:read rides:write`; a sample with `rides:read` cannot authorize uploads.
-The callback stays exactly `https://nakvali.whekin.dev/oauth/bikeyard/callback`.
-Never replace generated state/challenge values with the example's placeholders.
-
-Profile → BIKEYARD selects Sandbox or Live while disconnected. The initial default
-is Sandbox. Connection uses the system browser, a fresh random state/verifier,
-S256, strict callback matching and a consumed-once pending flow. A release-signed
-APK can verify the published App Link. Debug builds are deliberately not trusted
-by the public domain; use a release build for the real browser return, or explicitly
-select supported links on a test device. No debug certificate is published.
+Connection uses the system browser, a fresh random state/verifier, S256, strict
+callback matching and a consumed-once pending flow. A release-signed APK verifies
+the published App Link. Debug builds are deliberately not trusted by the public
+domain; use a release build for the real browser return. No debug certificate is
+published.
 
 The direct Android client lives under `core/recording/bikeyard`. AES-GCM with an
 Android Keystore key encrypts state stored under `noBackupFilesDir`; it contains
@@ -182,3 +184,56 @@ shuttle-containing recording before promising equal totals.
 The published website still describes the current public release as forthcoming;
 update its feature copy and privacy notice when shipping the integration. No live
 upload or public APK publication is part of local implementation verification.
+
+## TCX size
+
+The exporter now emits compact XML for both file export and BIKEYARD upload.
+Only indentation and inter-element line breaks are removed; sample count, 5 Hz
+timestamps, coordinate/elevation values, odometer and lap boundaries are unchanged.
+A deterministic 54,000-point, three-lap fixture decreased from 21,158,873 to
+14,840,566 bytes (29.9%). The test parses the output and verifies all points/laps.
+Names retain their original internal whitespace and XML escaping.
+
+The 20,000,000-byte upload guard remains. Files still above the limit are reported
+with their actual size; no sampling reduction or automatic splitting is performed.
+Already prepared live upload snapshots are never rewritten, preserving retry
+idempotency. Failed preparation of an oversized file can be retried with the new
+serializer. FIT or provider-supported compressed TCX are future options; gzip
+upload support has not been established and must not be assumed.
+
+
+## File export formats and retired Strava integration
+
+FIT/FIT.GZ, TCX/TCX.GZ and GPX/GPX.GZ are available through the activity's file
+export controls, with explicit 1/5 Hz sampling. See [activity export](activity-export.md)
+for precision and compatibility. BIKEYARD's automatic/manual API delivery remains
+TCX at 5 Hz until its new compression support and FIT timestamp handling are
+verified; file options do not silently change that queue.
+
+Strava's UI, OAuth callback, Android uploader/worker, Go broker/store access,
+configuration variables and OpenAPI endpoints have been removed. Startup cancels
+legacy WorkManager jobs by their class tag and clears the old installation
+credential preference. Old recording indexes still decode, ignoring retired
+Strava fields. Applied SQL migration history is retained; no destructive table or
+remote-account deletion accompanies code removal. Deploy the backend changes to
+retire the server routes; source removal alone does not modify an already-running
+server. No new activity or account identity depends on Strava.
+
+## 2026-09-22: compressed asynchronous delivery
+
+The current provider contract now supports `.tcx.gz`/`.fit.gz`/`.gpx.gz` with a
+20 MB transmitted-file limit and 128 MB uncompressed limit. Android now sends
+`nakvali.tcx.gz` as `application/gzip` in multipart with `Prefer: respond-async`.
+The existing immutable plain TCX snapshot is retained, including for jobs queued
+before this update; each POST compresses those exact bytes without rebuilding the
+track or changing its external ID. Temporary gzip output is removed after sending.
+A 202 processing receipt is persisted and polled through GET `/v1/uploads/{id}`;
+completion/own duplicate/foreign duplicate/failure remain distinct. A process
+restart resumes polling rather than uploading a second ride. Polling does not
+need a local snapshot once a receipt ID is known. WorkManager retains bounded
+retry/backoff and the existing Retry-After handling for rate-limit responses.
+
+FIT upload is still a separate compatibility decision. The immediate delivery
+change is TCX.GZ, preserving millisecond timestamps and existing receiver behavior.
+Sensor metrics are proposed in [bikeyard-sensor-metrics.md](bikeyard-sensor-metrics.md)
+and are not sent without a receiver contract and validated event semantics.

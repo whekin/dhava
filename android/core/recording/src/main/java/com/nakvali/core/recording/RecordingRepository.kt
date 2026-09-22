@@ -84,7 +84,6 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val transportMutex = Mutex()
     private var correctedActivity: Pair<CorrectionCacheKey, CanonicalActivityArtifact>? = null
     private val uploader = ActivityUploader()
-    private val stravaApi = StravaApi(StravaCredentialStore(appContext))
     private data class Calculation(val size: Long, val modified: Long, val progress: com.nakvali.fusion.CanonicalProgress, val finished: Boolean = false)
     private val calculations = MutableStateFlow<Map<String, Calculation>>(emptyMap())
     private val canonicalStore = CanonicalActivityStore(
@@ -122,10 +121,6 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val _uploads = MutableStateFlow<Map<String, UploadState>>(emptyMap())
     val uploads: StateFlow<Map<String, UploadState>> = _uploads.asStateFlow()
 
-    private val _stravaConnection =
-        MutableStateFlow<StravaConnectionState>(StravaConnectionState.Loading)
-    val stravaConnection: StateFlow<StravaConnectionState> = _stravaConnection.asStateFlow()
-
     private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
     val bikes: StateFlow<List<Bike>> = _bikes.asStateFlow()
 
@@ -161,14 +156,11 @@ class RecordingRepository private constructor(private val appContext: Context) {
             _recordings.value
                 .filter { UPLOADS_ENABLED && it.status == RecordingStatus.PENDING_UPLOAD }
                 .forEach { UploadWorker.enqueue(appContext, it.id) }
-            _recordings.value
-                .filter {
-                    it.stravaExportStatus == StravaExportStatus.QUEUED ||
-                        it.stravaExportStatus == StravaExportStatus.PROCESSING
-                }
-                .forEach { StravaExportWorker.enqueue(appContext, it.id) }
+            // Retire persisted jobs from the removed integration; no worker can send them.
+            androidx.work.WorkManager.getInstance(appContext)
+                .cancelAllWorkByTag("com.nakvali.core.recording.StravaExportWorker")
+            appContext.getSharedPreferences("strava_connection", Context.MODE_PRIVATE).edit().clear().apply()
             com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(appContext).recover(_recordings.value)
-            refreshStravaConnection()
         }
     }
 
@@ -1082,7 +1074,6 @@ class RecordingRepository private constructor(private val appContext: Context) {
         // files underneath it are being removed. A no-op when nothing is
         // queued; a worker that already ran to completion is unaffected.
         UploadWorker.cancel(appContext, id)
-        StravaExportWorker.cancel(appContext, id)
         com.nakvali.core.recording.bikeyard.BikeyardRepository.getInstance(appContext).deleteRecording(id)
         indexMutex.withLock {
             _recordings.update { list -> list.filterNot { it.id == id } }
@@ -1116,126 +1107,6 @@ class RecordingRepository private constructor(private val appContext: Context) {
             UploadWorker.enqueue(appContext, id)
         }
     }
-
-    // --- Strava connection/export ------------------------------------------
-
-    /** Returns the mobile OAuth URL; the caller opens it with ACTION_VIEW. */
-    suspend fun beginStravaConnect(): String {
-        _stravaConnection.value = StravaConnectionState.Connecting
-        return runCatching { stravaApi.beginConnect() }
-            .onFailure { error ->
-                _stravaConnection.value = StravaConnectionState.Unavailable(
-                    stravaConnectionError(error),
-                )
-            }
-            .getOrThrow()
-    }
-
-    /** Rechecks server-owned OAuth state after app launch or deep-link return. */
-    fun refreshStravaConnection() {
-        scope.launch {
-            _stravaConnection.value = runCatching { stravaApi.connection() }
-                .getOrElse { error ->
-                    StravaConnectionState.Unavailable(
-                        stravaConnectionError(error),
-                    )
-                }
-        }
-    }
-
-    fun onStravaOAuthRedirect(result: String?) {
-        when (result) {
-            "connected" -> refreshStravaConnection()
-            "denied" -> _stravaConnection.value = StravaConnectionState.Disconnected
-            else -> _stravaConnection.value = StravaConnectionState.Unavailable(
-                "Could not connect Strava",
-            )
-        }
-    }
-
-    /** One tap is durable: persist queued before asking WorkManager to run. */
-    fun exportToStrava(id: String) {
-        scope.launch {
-            updateEntry(id) {
-                it.copy(
-                    stravaExportStatus = StravaExportStatus.QUEUED,
-                    stravaError = null,
-                )
-            }
-            StravaExportWorker.enqueue(appContext, id)
-        }
-    }
-
-    fun retryStravaExport(id: String) = exportToStrava(id)
-
-    internal suspend fun performStravaExport(recording: LocalRecording): StravaExportStatus {
-        val artifact = canonicalActivity(recording.id)
-            ?: throw IllegalStateException("Processed track is unavailable")
-        check(artifact.finalizedTrack.isNotEmpty()) { "Processed track is empty" }
-        val output = File(
-            appContext.cacheDir,
-            "strava/nakvali-${recording.id.take(8)}-processed.tcx",
-        )
-        // TCX, because Strava derives a GPX's distance from its coordinates and
-        // charges the rider for the straight line across every excluded shuttle.
-        // Always the whole ride: one recording has one Strava activity, and the
-        // index entry has room for exactly one upload to describe.
-        TcxExporter.write(
-            points = artifact.exportPoints(excludeTransport = true, runs = artifact.ridingRuns())
-                .also { check(it.size >= 2) { "No riding track remains after excluding transport" } },
-            name = recording.title ?: "Nakvali ride",
-            output = output,
-        )
-        val response = try {
-            stravaApi.export(recording, artifact.algorithmVersion, output)
-        } finally {
-            output.delete()
-        }
-        val status = when (response.status) {
-            "uploaded" -> StravaExportStatus.UPLOADED
-            "failed" -> StravaExportStatus.FAILED
-            else -> StravaExportStatus.PROCESSING
-        }
-        updateEntry(recording.id) {
-            it.copy(
-                stravaExportStatus = status,
-                stravaUploadId = response.stravaUploadId ?: it.stravaUploadId,
-                stravaActivityId = response.stravaActivityId ?: it.stravaActivityId,
-                stravaError = response.error,
-            )
-        }
-        return status
-    }
-
-    internal suspend fun onStravaExportRetry(id: String, message: String) {
-        updateEntry(id) {
-            it.copy(
-                stravaExportStatus = StravaExportStatus.PROCESSING,
-                stravaError = message.takeIf(String::isNotBlank),
-            )
-        }
-    }
-
-    internal suspend fun onStravaExportFailed(id: String, message: String) {
-        updateEntry(id) {
-            it.copy(
-                stravaExportStatus = StravaExportStatus.FAILED,
-                stravaError = message.takeIf(String::isNotBlank) ?: "Strava export failed",
-            )
-        }
-    }
-
-    internal suspend fun onStravaConnectionLost(id: String, message: String) {
-        _stravaConnection.value = StravaConnectionState.Disconnected
-        onStravaExportFailed(id, message.ifBlank { "Connect Strava again" })
-    }
-
-    private fun stravaConnectionError(error: Throwable): String =
-        if (error is StravaApiException) {
-            error.message ?: "Strava connection is unavailable"
-        } else {
-            "Nakvali backend is unreachable"
-        }
 
     /** Adds a bike to the local garage and returns it. */
     fun addBike(name: String, type: BikeType, makeActive: Boolean = false): Bike {

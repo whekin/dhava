@@ -18,7 +18,6 @@ import (
 	"github.com/whekin/nakvali/backend/internal/config"
 	"github.com/whekin/nakvali/backend/internal/identity"
 	"github.com/whekin/nakvali/backend/internal/store"
-	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 func main() {
@@ -93,32 +92,6 @@ func main() {
 		logger.Info("firebase identity verification enabled", "project_id", cfg.FirebaseProjectID)
 	} else {
 		logger.Warn("firebase identity verification disabled; FIREBASE_PROJECT_ID is not set")
-	}
-	if cfg.StravaConfigured() && pool != nil {
-		stravaClient := nakvalistrava.NewClient(
-			&http.Client{Timeout: 30 * time.Second},
-			cfg.StravaClientID,
-			cfg.StravaClientSecret,
-		)
-		stravaService := nakvalistrava.NewService(
-			store.New(pool),
-			stravaClient,
-			nakvalistrava.Config{
-				ClientID:       cfg.StravaClientID,
-				PublicBaseURL:  cfg.PublicBaseURL,
-				AppRedirectURL: cfg.StravaAppRedirectURL,
-			},
-		)
-		routerOptions = append(routerOptions, api.WithStravaBroker(stravaService))
-		logger.Info("strava broker enabled", "callback_origin", cfg.PublicBaseURL)
-	} else {
-		logger.Warn(
-			"strava broker disabled; requires database and Strava configuration",
-			"database_configured",
-			pool != nil,
-			"strava_configured",
-			cfg.StravaConfigured(),
-		)
 	}
 
 	srv := &http.Server{

@@ -16,7 +16,6 @@ import (
 	"github.com/whekin/nakvali/backend/internal/blob"
 	"github.com/whekin/nakvali/backend/internal/identity"
 	"github.com/whekin/nakvali/backend/internal/store"
-	nakvalistrava "github.com/whekin/nakvali/backend/internal/strava"
 )
 
 // maxRawBodyBytes caps raw recording uploads at 256 MB.
@@ -29,29 +28,12 @@ type Server struct {
 	db              Datastore     // nil when the pool is nil
 	blobs           blob.Store
 	maxRawBodyBytes int64
-	strava          StravaBroker
 	identity        identity.Verifier
 	accessKey       string
 	rawUploads      bool
 }
 
-// StravaBroker is the OAuth/upload behavior exposed through the HTTP API.
-// The interface keeps handler tests independent of PostgreSQL and Strava.
-type StravaBroker interface {
-	BeginConnect(context.Context, string) (nakvalistrava.ConnectStart, error)
-	CompleteConnect(context.Context, string, string, string) error
-	AppRedirectURL(string) string
-	Connection(context.Context, string) (nakvalistrava.ConnectionStatus, error)
-	Export(context.Context, string, nakvalistrava.ExportRequest) (nakvalistrava.ExportStatus, error)
-}
-
 type RouterOption func(*Server)
-
-func WithStravaBroker(broker StravaBroker) RouterOption {
-	return func(server *Server) {
-		server.strava = broker
-	}
-}
 
 // WithIdentityVerifier enables Firebase ID-token authentication for user routes.
 func WithIdentityVerifier(verifier identity.Verifier) RouterOption {
@@ -61,7 +43,7 @@ func WithIdentityVerifier(verifier identity.Verifier) RouterOption {
 }
 
 // WithAccessKey protects private-alpha API routes with X-Nakvali-Access-Key.
-// Health/readiness and the browser-facing Strava callback remain public.
+// Health and readiness remain public.
 func WithAccessKey(key string) RouterOption {
 	return func(server *Server) {
 		server.accessKey = key
@@ -125,8 +107,6 @@ func newRouterWithOptions(
 	r.Get("/readyz", s.handleReadyz)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// The browser returns here from Strava and cannot carry the private app header.
-		r.Get("/strava/oauth/callback", s.handleStravaOAuthCallback)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAccessKey)
@@ -136,9 +116,6 @@ func newRouterWithOptions(
 				r.Put("/activities/{id}/raw", s.handleUploadRaw)
 				r.Post("/activities/{id}/finish", s.handleFinishActivity)
 			}
-			r.Post("/strava/connect", s.handleBeginStravaConnect)
-			r.Get("/strava/connection", s.handleStravaConnection)
-			r.Post("/strava/exports", s.handleStravaExport)
 		})
 	})
 

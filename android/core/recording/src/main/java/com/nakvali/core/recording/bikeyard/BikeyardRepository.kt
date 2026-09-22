@@ -26,14 +26,15 @@ class BikeyardRepository private constructor(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _state = MutableStateFlow(BikeyardUiState())
     val state = _state.asStateFlow()
+    private val snapshots = File(context.noBackupFilesDir, "bikeyard/uploads")
     private val engine = scope.async {
         BikeyardEngine(BikeyardEncryptedStore(context), BikeyardApi()).also { core ->
+            if (core.retiredSandbox) snapshots.deleteRecursively()
             scope.launch { core.state.collect { _state.value = it } }
         }
     }
     @Volatile private var automaticPaused = false
     private var connectionJob: Job? = null
-    private val snapshots = File(context.noBackupFilesDir, "bikeyard/uploads")
 
     init {
         scope.launch {
@@ -56,11 +57,6 @@ class BikeyardRepository private constructor(private val context: Context) {
     fun cancelConnect() {
         connectionJob?.cancel()
         action { cancelConnect() }
-    }
-    fun changeEnvironment(environment: BikeyardEnvironment) = action {
-        changeEnvironment(environment)
-        BikeyardUploadWorker.cancelAll(context)
-        snapshots.deleteRecursively()
     }
     fun setSettings(automatic: Boolean, visibility: BikeyardVisibility): Job {
         automaticPaused = !automatic
@@ -139,13 +135,16 @@ class BikeyardRepository private constructor(private val context: Context) {
                 val temporary = File(file.parentFile, "${file.name}.tmp")
                 try {
                     TcxExporter.write(points, job.name, temporary)
-                    check(temporary.length() <= 20_000_000) { "The processed track exceeds BIKEYARD’s 20 MB limit" }
+                    check(temporary.length() <= 128_000_000) {
+                        val sizeMb = String.format(java.util.Locale.US, "%.1f", temporary.length() / 1_000_000.0)
+                        "TCX is $sizeMb MB; BIKEYARD accepts 128 MB before gzip compression. You can export individual runs as files"
+                    }
                     check(temporary.renameTo(file)) { "Could not save the upload snapshot" }
                 } finally { temporary.delete() }
                 if (!core.prepared(key)) { file.delete(); return@withContext true }
             }
             // Do not regenerate a file whose first request may already have succeeded.
-            check(file.isFile) { "Upload snapshot is missing. Reconnect before preparing another upload" }
+            check(job.uploadId != null || file.isFile) { "Upload snapshot is missing. Reconnect before preparing another upload" }
             val complete = core.process(key, file)
             if (core.state.value.uploads.firstOrNull { it.key == key }?.status == BikeyardUploadStatus.UPLOADED) file.delete()
             complete

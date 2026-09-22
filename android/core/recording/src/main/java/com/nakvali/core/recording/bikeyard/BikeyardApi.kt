@@ -1,6 +1,7 @@
 package com.nakvali.core.recording.bikeyard
 
 import java.io.File
+import com.nakvali.core.recording.TrackFileExport
 import java.io.IOException
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -99,15 +100,24 @@ internal class BikeyardApi(
     }
 
     override suspend fun upload(environment: BikeyardEnvironment, token: String, job: BikeyardUpload, file: File): BikeyardReceipt {
-        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", "nakvali.tcx", file.asRequestBody("application/vnd.garmin.tcx+xml".toMediaType()))
-            .addFormDataPart("external_id", job.externalId)
-            .addFormDataPart("name", job.name).addFormDataPart("description", job.description)
-            .addFormDataPart("bike_type", job.bikeType).addFormDataPart("visibility", job.visibility.wire)
-            .build()
-        return request(authorized(environment, token, "/v1/uploads").post(body).build(), duplicate = true) {
-            json.decodeFromString(it)
-        }
+        // Keep the canonical retry snapshot unchanged; compress its exact bytes.
+        if (file.length() > 128_000_000) throw BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
+            "The processed track exceeds BIKEYARD’s 128 MB unpacked limit")
+        val compressed = TrackFileExport.gzip(file)
+        try {
+            if (compressed.length() > 20_000_000) throw BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
+                "The compressed track exceeds BIKEYARD’s 20 MB upload limit")
+            val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("file", "nakvali.tcx.gz", compressed.asRequestBody("application/gzip".toMediaType()))
+                .addFormDataPart("external_id", job.externalId)
+                .addFormDataPart("name", job.name).addFormDataPart("description", job.description)
+                .addFormDataPart("bike_type", job.bikeType).addFormDataPart("visibility", job.visibility.wire)
+                .build()
+            return request(authorized(environment, token, "/v1/uploads")
+                .header("Prefer", "respond-async").post(body).build(), duplicate = true) {
+                json.decodeFromString(it)
+            }
+        } finally { compressed.delete() }
     }
 
     override suspend fun receipt(environment: BikeyardEnvironment, token: String, id: String): BikeyardReceipt =

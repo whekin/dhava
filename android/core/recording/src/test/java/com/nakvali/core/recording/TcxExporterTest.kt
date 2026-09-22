@@ -69,4 +69,38 @@ class TcxExporterTest {
         assertEquals(listOf("Ride & trail"), texts(root, "Notes"))
         assertTrue(texts(root, "Intensity").all { it == "Active" })
     }
+    @Test fun `three hours at 5 Hz fit below 20 MB without dropping samples`() {
+        val file = Files.createTempFile("nakvali-long-ride", ".tcx").toFile()
+        val points = List(54_000) { index ->
+            TrackExportPoint(
+                timestampMs = 1_770_000_000_000 + index * 200L,
+                lat = 41.700123456789 + index * 0.0000001,
+                lon = 44.800987654321 + index * 0.0000001,
+                altitudeM = 1400.123456789 - index * 0.01,
+                runId = index / 18_000, odometerM = index * 0.73,
+            )
+        }
+        try {
+            TcxExporter.write(points, "Three long runs", file)
+            println("54,000-point TCX size: ${file.length()} bytes")
+            assertTrue("TCX is ${file.length()} bytes", file.length() < 20_000_000)
+            var count = 0
+            var laps = 0
+            val parser = javax.xml.parsers.SAXParserFactory.newInstance().newSAXParser()
+            parser.parse(file, object : org.xml.sax.helpers.DefaultHandler() {
+                override fun startElement(uri: String?, localName: String?, qName: String?, attributes: org.xml.sax.Attributes?) {
+                    if (qName == "Trackpoint") count++
+                    if (qName == "Lap") laps++
+                }
+            })
+            assertEquals(points.size, count)
+            assertEquals(3, laps)
+        } finally { file.delete() }
+    }
+
+    @Test fun `compact XML preserves whitespace inside rider supplied names`() {
+        val root = write(listOf(TrackExportPoint(1_000, 41.7, 44.8)), "  Ride & trail\n  second line  ")
+        assertEquals(listOf("  Ride & trail\n  second line  "), texts(root, "Notes"))
+    }
+
 }

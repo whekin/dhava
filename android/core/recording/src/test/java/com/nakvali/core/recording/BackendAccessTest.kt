@@ -9,7 +9,7 @@ class BackendAccessTest {
     @Test
     fun `configured key is added without touching authorization`() {
         val request = Request.Builder()
-            .url("https://api.example.com/api/v1/strava/connection")
+            .url("https://api.example.com/api/v1/me")
             .header("Authorization", "Bearer device-token")
             .withNakvaliAccessKey("alpha-key")
             .build()

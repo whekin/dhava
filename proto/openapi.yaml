@@ -134,128 +134,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-  /strava/connect:
-    post:
-      summary: Start or restart the one-time Strava OAuth connection
-      operationId: beginStravaConnect
-      security:
-        - privateAlphaAccessKey: []
-          deviceBearer: []
-      responses:
-        "200":
-          description: Mobile OAuth URL to open outside the app
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/StravaConnectResponse" }
-        "401":
-          description: Missing or invalid anonymous device credential
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "503":
-          description: Strava broker is not configured
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-  /strava/connection:
-    get:
-      summary: Get this app installation's Strava connection state
-      operationId: getStravaConnection
-      security:
-        - privateAlphaAccessKey: []
-          deviceBearer: []
-      responses:
-        "200":
-          description: Current connection state
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/StravaConnection" }
-        "401":
-          description: Missing or invalid anonymous device credential
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-  /strava/oauth/callback:
-    get:
-      summary: Strava browser callback; exchanges code server-side and redirects to Nakvali
-      operationId: completeStravaConnect
-      security: []
-      parameters:
-        - { name: state, in: query, schema: { type: string } }
-        - { name: code, in: query, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string } }
-        - { name: error, in: query, schema: { type: string } }
-      responses:
-        "302":
-          description: Redirect to `nakvali://strava/connected?result=...`
-  /strava/exports:
-    post:
-      summary: Idempotently export one canonical processed track to Strava
-      description: >
-        Raw GPS, IMU, barometer and health data are never accepted. Repeating the
-        same external_id polls the existing Strava upload instead of submitting
-        a second activity. The client excludes canonical LikelyMotorized points,
-        preserving original timestamps and separate track segments across
-        excluded transport, manual pauses and recording gaps. No remaining riding
-        track is an export error on the client; existing uploads are not replaced.
-
-        The upload data type is taken from the file extension, which must be
-        `.gpx` or `.tcx`. Prefer TCX: it states its own DistanceMeters, so a
-        reader charges nothing for the straight line across excluded transport,
-        and each riding run arrives as its own lap.
-
-        external_id identifies the exported artifact, not the recording: it
-        carries the algorithm version and the rider's trim, so re-exporting an
-        activity the rider has since trimmed is a new upload rather than a poll
-        of the old one. The server never parses the file and stores no track.
-      operationId: exportActivityToStrava
-      security:
-        - privateAlphaAccessKey: []
-          deviceBearer: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file, external_id, title, sport_type]
-              properties:
-                file:
-                  type: string
-                  format: binary
-                  description: Canonical processed track, named with a .gpx or .tcx extension
-                external_id: { type: string, maxLength: 200 }
-                title: { type: string, maxLength: 200 }
-                description: { type: string, maxLength: 5000 }
-                sport_type:
-                  type: string
-                  enum: [MountainBikeRide, EMountainBikeRide]
-      responses:
-        "200":
-          description: Strava activity is ready
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/StravaExportStatus" }
-        "202":
-          description: Upload accepted and still processing
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/StravaExportStatus" }
-        "409":
-          description: Strava has not been connected
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "413":
-          description: GPX exceeds 32 MB
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "422":
-          description: Strava rejected or could not process the GPX
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/StravaExportStatus" }
 components:
   securitySchemes:
     privateAlphaAccessKey:
@@ -265,12 +143,6 @@ components:
       description: >
         Shared private-alpha perimeter key compiled only into owner test builds.
         This is not user authentication and must be replaced before public distribution.
-    deviceBearer:
-      type: http
-      scheme: bearer
-      description: >
-        Random per-installation credential generated and retained by Android.
-        The backend stores only its SHA-256 hash; it is not a Nakvali user account.
     firebaseBearer:
       type: http
       scheme: bearer
@@ -325,26 +197,6 @@ components:
       required: [error]
       properties:
         error: { type: string, examples: [db_unavailable] }
-    StravaConnectResponse:
-      type: object
-      required: [authorize_url]
-      properties:
-        authorize_url: { type: string, format: uri }
-    StravaConnection:
-      type: object
-      required: [connected]
-      properties:
-        connected: { type: boolean }
-        athlete_id: { type: integer, format: int64 }
-        athlete_name: { type: string }
-    StravaExportStatus:
-      type: object
-      required: [status]
-      properties:
-        status: { type: string, enum: [processing, uploaded, failed] }
-        strava_upload_id: { type: integer, format: int64 }
-        strava_activity_id: { type: integer, format: int64 }
-        error: { type: string }
     GpsPoint:
       type: object
       required: [timestampMs, lat, lon]

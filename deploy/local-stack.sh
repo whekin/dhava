@@ -26,7 +26,6 @@ fi
 
 export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nakvali-local}
 export API_ACCESS_KEY=${API_ACCESS_KEY:-nakvali-local}
-export PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://127.0.0.1:8080}
 # Local-only preview contact; production defaults to the owner-approved address.
 export NAKVALI_CONTACT_EMAIL=${NAKVALI_CONTACT_EMAIL:-local@localhost}
 export FIREBASE_PROJECT_ID=$firebase_project_id

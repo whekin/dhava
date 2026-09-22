@@ -5,7 +5,9 @@ import java.time.Instant
 import java.util.Locale
 
 /**
- * Creates a Garmin TCX v2 activity.
+ * Creates a compact Garmin TCX v2 activity, preserving every exported sample.
+ * Whitespace between elements has no meaning; omitting it avoids spending
+ * megabytes of the receiver’s file limit on pretty-print indentation.
  *
  * The reason to prefer it over GPX is `DistanceMeters`: TCX states the distance
  * instead of leaving readers to derive it from coordinates, so an excluded
@@ -22,51 +24,51 @@ object TcxExporter {
     fun write(points: List<TrackExportPoint>, name: String, output: File): File {
         output.parentFile?.mkdirs()
         output.bufferedWriter().use { out ->
-            out.appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-            out.appendLine("<TrainingCenterDatabase xmlns=\"$SCHEMA\"")
-            out.appendLine("    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"")
-            out.appendLine("    xsi:schemaLocation=\"$SCHEMA http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd\">")
-            out.appendLine("  <Activities>")
-            out.appendLine("    <Activity Sport=\"Biking\">")
-            out.appendLine("      <Id>${time(points.firstOrNull()?.timestampMs ?: 0)}</Id>")
+            out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            out.append("<TrainingCenterDatabase xmlns=\"$SCHEMA\"")
+            out.append("    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"")
+            out.append("    xsi:schemaLocation=\"$SCHEMA http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd\">")
+            out.append("<Activities>")
+            out.append("<Activity Sport=\"Biking\">")
+            out.append("<Id>${time(points.firstOrNull()?.timestampMs ?: 0)}</Id>")
             points.groupBy { it.runId }.values.forEach { lap ->
                 val first = lap.first()
                 val last = lap.last()
-                out.appendLine("      <Lap StartTime=\"${time(first.timestampMs)}\">")
-                out.appendLine("        <TotalTimeSeconds>${
+                out.append("<Lap StartTime=\"${time(first.timestampMs)}\">")
+                out.append("<TotalTimeSeconds>${
                     decimal((last.timestampMs - first.timestampMs) / 1_000.0)
                 }</TotalTimeSeconds>")
-                out.appendLine("        <DistanceMeters>${
+                out.append("<DistanceMeters>${
                     decimal(last.odometerM - first.odometerM)
                 }</DistanceMeters>")
-                // Required by the schema and unknown to us; Strava ignores it.
-                out.appendLine("        <Calories>0</Calories>")
-                out.appendLine("        <Intensity>Active</Intensity>")
-                out.appendLine("        <TriggerMethod>Manual</TriggerMethod>")
-                out.appendLine("        <Track>")
+                // Required by the TCX schema; no calorie measurement is available.
+                out.append("<Calories>0</Calories>")
+                out.append("<Intensity>Active</Intensity>")
+                out.append("<TriggerMethod>Manual</TriggerMethod>")
+                out.append("<Track>")
                 lap.forEach { point ->
-                    out.appendLine("          <Trackpoint>")
-                    out.appendLine("            <Time>${time(point.timestampMs)}</Time>")
-                    out.appendLine("            <Position>")
-                    out.appendLine("              <LatitudeDegrees>${point.lat}</LatitudeDegrees>")
-                    out.appendLine("              <LongitudeDegrees>${point.lon}</LongitudeDegrees>")
-                    out.appendLine("            </Position>")
-                    point.altitudeM?.let { out.appendLine("            <AltitudeMeters>$it</AltitudeMeters>") }
-                    out.appendLine("            <DistanceMeters>${decimal(point.odometerM)}</DistanceMeters>")
-                    out.appendLine("          </Trackpoint>")
+                    out.append("<Trackpoint>")
+                    out.append("<Time>${time(point.timestampMs)}</Time>")
+                    out.append("<Position>")
+                    out.append("<LatitudeDegrees>${point.lat}</LatitudeDegrees>")
+                    out.append("<LongitudeDegrees>${point.lon}</LongitudeDegrees>")
+                    out.append("</Position>")
+                    point.altitudeM?.let { out.append("<AltitudeMeters>$it</AltitudeMeters>") }
+                    out.append("<DistanceMeters>${decimal(point.odometerM)}</DistanceMeters>")
+                    out.append("</Trackpoint>")
                 }
-                out.appendLine("        </Track>")
-                out.appendLine("      </Lap>")
+                out.append("</Track>")
+                out.append("</Lap>")
             }
-            out.appendLine("      <Notes>${TrackExport.escape(name)}</Notes>")
-            out.appendLine("      <Creator xsi:type=\"Device_t\">")
-            out.appendLine("        <Name>Nakvali</Name>")
-            out.appendLine("        <UnitId>0</UnitId>")
-            out.appendLine("        <ProductID>0</ProductID>")
-            out.appendLine("      </Creator>")
-            out.appendLine("    </Activity>")
-            out.appendLine("  </Activities>")
-            out.appendLine("</TrainingCenterDatabase>")
+            out.append("<Notes>${TrackExport.escape(name)}</Notes>")
+            out.append("<Creator xsi:type=\"Device_t\">")
+            out.append("<Name>Nakvali</Name>")
+            out.append("<UnitId>0</UnitId>")
+            out.append("<ProductID>0</ProductID>")
+            out.append("</Creator>")
+            out.append("</Activity>")
+            out.append("</Activities>")
+            out.append("</TrainingCenterDatabase>")
         }
         return output
     }

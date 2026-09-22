@@ -25,17 +25,8 @@ internal fun BikeyardSettings(viewModel: ProfileViewModel) {
     Column(Modifier.fillMaxWidth().padding(vertical = NakvaliSpacing.large), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         NakvaliSectionLabel("BIKEYARD")
         Text(if (state.connected) state.riderName ?: "Connected rider" else "Your rides in BIKEYARD", style = MaterialTheme.typography.titleLarge)
-        Text(if (state.environment == BikeyardEnvironment.SANDBOX) "Sandbox · test rides only" else "Live · your BIKEYARD account", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (!state.connected && !state.connecting) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BikeyardEnvironment.entries.forEach { environment ->
-                    FilterChip(selected = state.environment == environment,
-                        onClick = { viewModel.bikeyardEnvironment(environment) },
-                        enabled = !state.loading,
-                        label = { Text(if (environment == BikeyardEnvironment.SANDBOX) "Sandbox" else "Live") })
-                }
-            }
             NakvaliPrimaryButton("Connect BIKEYARD", enabled = !state.loading, modifier = Modifier.fillMaxWidth(), onClick = {
                 viewModel.connectBikeyard { result ->
                     result.onSuccess { url ->
@@ -73,7 +64,7 @@ internal fun BikeyardSettings(viewModel: ProfileViewModel) {
     }
     if (confirmAutomatic) AlertDialog(
         onDismissRequest = { confirmAutomatic = false }, title = { Text("Upload new rides automatically?") },
-        text = { Text("This turns off Offline mode. New rides you save will upload to ${state.riderName} in ${state.environment.name.lowercase()}, with visibility ${state.visibility.label.lowercase()}. Processed tracks and ride details are sent; raw sensor files stay here.") },
+        text = { Text("This turns off Offline mode. New rides you save will upload to ${state.riderName}, with visibility ${state.visibility.label.lowercase()}. Processed tracks and ride details are sent; raw sensor files stay here.") },
         confirmButton = { TextButton(onClick = { viewModel.bikeyardSettings(true, state.visibility); confirmAutomatic = false }) { Text("Enable uploads") } },
         dismissButton = { TextButton(onClick = { confirmAutomatic = false }) { Text("Cancel") } },
     )

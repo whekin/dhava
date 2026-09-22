@@ -76,25 +76,26 @@ import { site } from '../data/site';
     </p>
     <h2>Exports and connected services</h2>
     <p>
-      A GPX or TCX export can contain precise locations, timestamps and
+      A FIT, GPX or TCX export can contain precise locations, timestamps and
       altitude. Android’s save or share flow sends the file to the destination
       you select. Local diagnostic and backup exports may include raw sensor
       data; share them only with a recipient you intend.
     </p>
     <p>
-      Some development builds include an optional Strava connection. If you use
-      it, the Nakvali backend stores the connection credentials and export
-      status, and sends the processed ride you request to Strava.
+      If you connect BIKEYARD in a compatible Nakvali build, the app asks for
+      profile access and permission to upload rides. Connection tokens and your
+      connected profile are encrypted on your phone outside the ride backup.
+      You choose individual uploads or opt into automatic uploads of newly saved
+      rides, with your selected visibility. Processed tracks and ride metadata
+      go directly to BIKEYARD; original sensor files stay on the phone.
     </p>
     <p>
-      <strong>
-        BIKEYARD uploads are planned, not available in the current build.
-      </strong>{' '}
-      The intended flow asks you to connect BIKEYARD and choose uploads or opt
-      into automatic uploads of new saved rides. It will send processed tracks
-      and selected ride metadata with your chosen visibility. Original sensor
-      files will stay on the phone. This notice will be updated when that
-      integration is available.
+      Disconnecting removes local connection data and stops queued uploads. If
+      the app cannot reach BIKEYARD to revoke access, it tells you to finish
+      revocation in BIKEYARD’s connected apps. Already uploaded rides remain in
+      BIKEYARD until you manage them there. Older development builds may have
+      used other connected services; removing an integration does not itself
+      delete data previously sent to those services.
     </p>
     <h2>This website and operational data</h2>
     <p>

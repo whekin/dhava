@@ -41,6 +41,7 @@ kotlinxCoroutines = "1.11.0"
 playServicesLocation = "21.4.0"
 okhttp = "5.4.0"
 workManager = "2.11.2"
+garminFit = "21.214.0"
 
 # Identity
 googleServices = "4.5.0"
@@ -56,6 +57,7 @@ junit = "4.13.2"
 maplibre = "13.4.1"
 
 [libraries]
+garmin-fit = { group = "com.garmin", name = "fit", version.ref = "garminFit" }
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidxAnnotation" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }

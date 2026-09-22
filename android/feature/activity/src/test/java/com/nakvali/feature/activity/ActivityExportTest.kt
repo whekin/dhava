@@ -51,4 +51,13 @@ class ActivityExportTest {
             assertTrue(closed)
         } finally { source.delete() }
     }
+    @Test fun `share MIME follows compressed file for every supported track format`() {
+        for (kind in listOf(ActivityExportKind.RIDING_ONLY, ActivityExportKind.RIDING_ONLY_TCX, ActivityExportKind.RIDING_ONLY_FIT)) {
+            val plain = PreparedActivityExport(File("ride.${kind.extension}"), kind, ExportDestination.SHARE)
+            val gzip = plain.copy(file = File("ride.${kind.extension}.gz"))
+            assertEquals(kind.mimeType, plain.mimeType)
+            assertEquals("application/gzip", gzip.mimeType)
+        }
+    }
+
 }

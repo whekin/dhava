@@ -86,8 +86,6 @@ import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordingStatus
 import com.nakvali.core.recording.RideSegmentRun
 import com.nakvali.core.recording.RecorderSettings
-import com.nakvali.core.recording.StravaConnectionState
-import com.nakvali.core.recording.StravaExportStatus
 import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliEmptyState
 import com.nakvali.core.ui.NakvaliMetric
@@ -130,7 +128,6 @@ fun ActivityDetailScreen(
     val segmentRuns by viewModel.segmentRuns.collectAsState()
     val bikes by viewModel.bikes.collectAsState()
     val healthLogAvailable by viewModel.healthLogAvailable.collectAsState()
-    val stravaConnection by viewModel.stravaConnection.collectAsState()
     val exportState by viewModel.exportState.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val transportEditor by viewModel.transportEditor.collectAsState()
@@ -164,7 +161,7 @@ fun ActivityDetailScreen(
                     pendingSavePath = prepared.file.absolutePath
                     saveFileLauncher.launch(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
-                        type = prepared.kind.mimeType
+                        type = prepared.mimeType
                         putExtra(Intent.EXTRA_TITLE, prepared.file.name)
                     })
                     viewModel.exportFeedback()
@@ -172,7 +169,7 @@ fun ActivityDetailScreen(
                 ExportDestination.SHARE -> {
                     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", prepared.file)
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
-                        type = prepared.kind.mimeType
+                        type = prepared.mimeType
                         putExtra(Intent.EXTRA_STREAM, uri)
                         clipData = android.content.ClipData.newRawUri(prepared.file.name, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -241,7 +238,6 @@ fun ActivityDetailScreen(
         segmentRuns = segmentRuns,
         bikes = bikes,
         healthLogAvailable = healthLogAvailable,
-        stravaConnection = stravaConnection,
         developerMode = developerMode,
         onBack = onBack,
         loading = loading,
@@ -254,29 +250,6 @@ fun ActivityDetailScreen(
         onAddBike = viewModel::addBike,
         onEditSave = viewModel::updateMetadata,
         onDelete = viewModel::deleteActivity,
-        onConnectStrava = {
-            viewModel.beginStravaConnect { result ->
-                val authorizeUrl = result.getOrElse { error ->
-                    Toast.makeText(
-                        context,
-                        error.message ?: "Could not connect Strava",
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                    return@beginStravaConnect
-                }
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authorizeUrl)))
-            }
-        },
-        onExportStrava = viewModel::exportToStrava,
-        onRetryStrava = viewModel::retryStravaExport,
-        onViewStrava = { activityId ->
-            context.startActivity(
-                Intent(
-                    Intent.ACTION_VIEW,
-                    Uri.parse("https://www.strava.com/activities/$activityId"),
-                ),
-            )
-        },
         modifier = modifier,
     )
 }
@@ -295,12 +268,11 @@ private fun ActivityDetailContent(
     segmentRuns: List<RideSegmentRun>?,
     bikes: List<Bike>,
     healthLogAvailable: Boolean,
-    stravaConnection: StravaConnectionState,
     developerMode: Boolean,
     onBack: () -> Unit,
     loading: ActivityLoadingState,
     exportState: ActivityExportState,
-    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope, ActivityExportOptions) -> Unit,
     onEditTransport: () -> Unit,
     onEditTrim: () -> Unit,
     onCreateSegment: () -> Unit,
@@ -308,10 +280,6 @@ private fun ActivityDetailContent(
     onAddBike: (name: String, type: BikeType) -> Bike,
     onEditSave: (title: String, description: String, bike: Bike?) -> Unit,
     onDelete: () -> Unit,
-    onConnectStrava: () -> Unit,
-    onExportStrava: () -> Unit,
-    onRetryStrava: () -> Unit,
-    onViewStrava: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var trackMode by remember(developerMode) { mutableStateOf(TrackMode.Fusion) }
@@ -429,7 +397,6 @@ private fun ActivityDetailContent(
                 },
                 processedExportAvailable = processedExportAvailable,
                 healthLogAvailable = healthLogAvailable,
-                stravaConnection = stravaConnection,
                 loading = loading,
                 exportState = exportState,
                 onExport = onExport,
@@ -437,10 +404,6 @@ private fun ActivityDetailContent(
                 onEditTrim = onEditTrim,
                 onCreateSegment = onCreateSegment,
                 onOpenSegment = onOpenSegment,
-                onConnectStrava = onConnectStrava,
-                onExportStrava = onExportStrava,
-                onRetryStrava = onRetryStrava,
-                onViewStrava = onViewStrava,
                 onEdit = { showEdit = true },
                 onDelete = { confirmDelete = true },
             )
@@ -573,18 +536,13 @@ private fun ActivityDetailsSheet(
     onProfilePointSelected: (RideProfilePoint) -> Unit,
     processedExportAvailable: Boolean,
     healthLogAvailable: Boolean,
-    stravaConnection: StravaConnectionState,
     loading: ActivityLoadingState,
     exportState: ActivityExportState,
-    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope, ActivityExportOptions) -> Unit,
     onEditTransport: () -> Unit,
     onEditTrim: () -> Unit,
     onCreateSegment: () -> Unit,
     onOpenSegment: (String) -> Unit,
-    onConnectStrava: () -> Unit,
-    onExportStrava: () -> Unit,
-    onRetryStrava: () -> Unit,
-    onViewStrava: (Long) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -649,15 +607,10 @@ private fun ActivityDetailsSheet(
                     // a missing file makes the option pointless.
                     rawRecordingAvailable = !(track is TrackState.Failed && track.rawFileMissing),
                     healthLogAvailable = healthLogAvailable,
-                    stravaConnection = stravaConnection,
                     recording = recording,
                     ride = ride,
                     exportState = exportState,
                     onExport = onExport,
-                    onConnectStrava = onConnectStrava,
-                    onExportStrava = onExportStrava,
-                    onRetryStrava = onRetryStrava,
-                    onViewStrava = onViewStrava,
                 )
                 ActivityOverflowMenu(
                     enabled = recording != null,
@@ -1237,12 +1190,11 @@ private fun ActivityDetailContentPreview() {
             segmentRuns = emptyList(),
             bikes = emptyList(),
             healthLogAvailable = true,
-            stravaConnection = StravaConnectionState.Connected("Alex Rider"),
             developerMode = false,
             onBack = {},
             loading = ActivityLoadingState(phase = ActivityLoadPhase.READY),
             exportState = ActivityExportState(),
-            onExport = { _, _, _ -> },
+            onExport = { _, _, _, _ -> },
             onEditTransport = {},
             onEditTrim = {},
             onCreateSegment = {},
@@ -1250,10 +1202,6 @@ private fun ActivityDetailContentPreview() {
             onAddBike = { name, type -> Bike("preview-bike", name, type) },
             onEditSave = { _, _, _ -> },
             onDelete = {},
-            onConnectStrava = {},
-            onExportStrava = {},
-            onRetryStrava = {},
-            onViewStrava = {},
         )
     }
 }
@@ -1276,7 +1224,6 @@ private fun ExportMenuPreview() {
                     processedLoading = false,
                     rawRecordingAvailable = true,
                     healthLogAvailable = true,
-                    stravaConnection = StravaConnectionState.Disconnected,
                     recording = LocalRecording(
                         id = "preview",
                         startedAtMs = 1_767_000_000_000,
@@ -1284,11 +1231,7 @@ private fun ExportMenuPreview() {
                     initiallyExpanded = true,
                     exportState = ActivityExportState(),
                     ride = null,
-                    onExport = { _, _, _ -> },
-                    onConnectStrava = {},
-                    onExportStrava = {},
-                    onRetryStrava = {},
-                    onViewStrava = {},
+                    onExport = { _, _, _, _ -> },
                 )
             }
         }

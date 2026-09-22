@@ -61,23 +61,17 @@ Set these as Coolify secrets/variables before the first deployment:
   `/run/secrets/firebase-service-account.json`; it is not passed into the API process
   environment or embedded in the image. Never commit or paste its contents into logs
   or chat.
-- `PUBLIC_BASE_URL` — required HTTPS origin without a trailing slash, for
-  example `https://api.example.com`.
 - `NAKVALI_CONTACT_EMAIL` — public support/privacy email (default `whekins@gmail.com`), passed to the
   web image at build time. It appears on the site and is not a secret. Rebuild
   the web image after changing it.
 - `LOG_LEVEL` — optional; defaults to `info`.
-- `STRAVA_CLIENT_ID` and `STRAVA_CLIENT_SECRET` — optional until the Strava app
-  is registered.
-- `STRAVA_APP_REDIRECT_URL` — optional; defaults to
-  `nakvali://strava/connected`.
 
 Do not create `GOOGLE_APPLICATION_CREDENTIALS` in Coolify. The backend passes the
 fixed runtime-secret path directly to the Firebase Admin SDK. If an older deployment
 left this variable in Coolify, remove it after updating the Compose source.
 
 Keep `RAW_UPLOADS_ENABLED=false`; it is fixed in the production Compose file.
-Never paste the access key, Strava secret, database password, or Coolify token
+Never paste the access key, database password, or Coolify token
 into chat, Git, screenshots, or deployment logs.
 
 For optional local Firebase verification, put the downloaded private JSON at the
@@ -122,12 +116,13 @@ Expected results are `200`, `200`, `401`, then `401`: the final request passes t
 private-alpha perimeter but intentionally has no Firebase bearer token. Complete the
 end-to-end check from the Android Profile screen; a valid signed-in request returns
 `200` and creates or refreshes the local user. Also verify that the database volume is
-persistent and configure encrypted daily database backups before relying on Strava:
-OAuth tokens are stored in Postgres. Test a restore, not only backup creation.
-
-When Strava credentials are added, register the hostname from
-`PUBLIC_BASE_URL` as its Authorization Callback Domain. The full callback is
-`$PUBLIC_BASE_URL/api/v1/strava/oauth/callback`.
+persistent and configure encrypted daily database backups. Test a restore, not only
+backup creation. The backend no longer exposes Strava routes or consumes its
+credentials. Historical migration 0004 is retained for existing installations;
+its tables are not used by running code, and no destructive database migration
+is performed by this removal. Remove obsolete Strava environment variables from
+Coolify when deploying this change. `PUBLIC_BASE_URL` is no longer consumed by
+the Go service; Android's API origin remains a separate build setting.
 
 ## Codex access to Coolify
 

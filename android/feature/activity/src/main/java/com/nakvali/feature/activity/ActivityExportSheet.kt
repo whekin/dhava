@@ -25,9 +25,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.nakvali.core.recording.CanonicalRideTotals
+import com.nakvali.core.recording.TrackFileFormat
+import com.nakvali.core.recording.TrackExportRate
 import com.nakvali.core.recording.LocalRecording
-import com.nakvali.core.recording.StravaConnectionState
-import com.nakvali.core.recording.StravaExportStatus
 import com.nakvali.fusion.RideRun
 import com.nakvali.core.ui.NakvaliSizes
 import com.nakvali.core.ui.NakvaliSpacing
@@ -42,16 +42,11 @@ internal fun ActivityExportButton(
     processedLoading: Boolean,
     rawRecordingAvailable: Boolean,
     healthLogAvailable: Boolean,
-    stravaConnection: StravaConnectionState,
     recording: LocalRecording?,
     ride: CanonicalRideTotals?,
     exportState: ActivityExportState,
     initiallyExpanded: Boolean = false,
-    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
-    onConnectStrava: () -> Unit,
-    onExportStrava: () -> Unit,
-    onRetryStrava: () -> Unit,
-    onViewStrava: (Long) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope, ActivityExportOptions) -> Unit,
 ) {
     var expanded by rememberSaveable(recording?.id) { mutableStateOf(initiallyExpanded) }
     IconButton(
@@ -75,10 +70,8 @@ internal fun ActivityExportButton(
     ) {
         ActivityExportPanel(
             runs, rawGpsAvailable, processedAvailable, processedLoading, rawRecordingAvailable,
-            healthLogAvailable, stravaConnection, recording, ride, exportState,
+            healthLogAvailable, recording, ride, exportState,
             onClose = { expanded = false }, onExport = onExport,
-            onConnectStrava = onConnectStrava, onExportStrava = onExportStrava,
-            onRetryStrava = onRetryStrava, onViewStrava = onViewStrava,
         )
     }
 }
@@ -91,16 +84,11 @@ private fun ActivityExportPanel(
     processedLoading: Boolean,
     rawRecordingAvailable: Boolean,
     healthLogAvailable: Boolean,
-    stravaConnection: StravaConnectionState,
     recording: LocalRecording?,
     ride: CanonicalRideTotals?,
     exportState: ActivityExportState,
     onClose: () -> Unit,
-    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope) -> Unit,
-    onConnectStrava: () -> Unit,
-    onExportStrava: () -> Unit,
-    onRetryStrava: () -> Unit,
-    onViewStrava: (Long) -> Unit,
+    onExport: (ActivityExportKind, ExportDestination, ActivityExportScope, ActivityExportOptions) -> Unit,
 ) {
     var kind by rememberSaveable(recording?.id) { mutableStateOf(ActivityExportKind.RIDING_ONLY_TCX) }
     // Held by start time, not ordinal: a transport edit or a trim renumbers runs.
@@ -109,6 +97,8 @@ private fun ActivityExportPanel(
         ?.takeIf { start -> runs.any { it.startedAtMs == start } }
         ?.let { ActivityExportScope.OneRun(it) }
         ?: ActivityExportScope.WholeActivity
+    var highRate by rememberSaveable(recording?.id) { mutableStateOf(true) }
+    var gzip by rememberSaveable(recording?.id) { mutableStateOf(false) }
     var diagnosticsExpanded by rememberSaveable { mutableStateOf(false) }
     val isTrack = kind.isProcessedTrack
     val ready = when {
@@ -130,26 +120,39 @@ private fun ActivityExportPanel(
         }
         Column(
             Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
-                .padding(horizontal = NakvaliSpacing.xLarge).selectableGroup(),
+                .padding(horizontal = NakvaliSpacing.xLarge),
             verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
         ) {
             recording?.title?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            FileChoice(
-                title = "TCX track",
-                description = "States riding distance and one lap per run",
-                selected = isTrack && kind.isTcx,
-                enabled = !busy && (processedAvailable || processedLoading),
-                onClick = { kind = ActivityExportKind.processedTrack(tcx = true, excludeTransport = kind.excludesTransport) },
-            )
-            FileChoice(
-                title = "GPX track",
-                description = "Widest support · readers add the distance across removed transport",
-                selected = isTrack && !kind.isTcx,
-                enabled = !busy && (processedAvailable || processedLoading),
-                onClick = { kind = ActivityExportKind.processedTrack(tcx = false, excludeTransport = kind.excludesTransport) },
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TrackFileFormat.entries.forEach { format ->
+                    FilterChip(
+                        selected = isTrack && kind.format == format,
+                        onClick = { kind = ActivityExportKind.processedTrack(format, kind.excludesTransport) },
+                        enabled = !busy && (processedAvailable || processedLoading),
+                        label = { Text(format.name) }, modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (isTrack) {
+                Text(when (kind.format) {
+                    TrackFileFormat.FIT -> "Compact binary · distance, laps and timer events"
+                    TrackFileFormat.TCX -> "XML · distance and one lap per run"
+                    TrackFileFormat.GPX -> "Wide support · some readers count gaps as distance"
+                }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ExportToggle("5 Hz detail", if (highRate) "Detailed processed track; original data unchanged" else
+                    "1 Hz export; endpoints of runs and gaps are retained", highRate, !busy) { highRate = it }
+                if (kind.isFit && highRate) Text(
+                    "Some FIT readers ignore fractional time. Use 1 Hz for wider compatibility.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (kind != ActivityExportKind.RAW_RECORDING) {
+                ExportToggle("Gzip compression", if (gzip) ".${kind.extension}.gz · the receiving app must support gzip" else
+                    "Smaller file without losing any data", gzip, !busy) { gzip = it }
+            }
             if (isTrack && runs.size > 1) {
                 HorizontalDivider(Modifier.padding(vertical = NakvaliSpacing.small))
                 FileChoice(
@@ -184,7 +187,7 @@ private fun ActivityExportPanel(
                     }
                     Switch(
                         checked = kind.excludesTransport,
-                        onCheckedChange = { kind = ActivityExportKind.processedTrack(tcx = kind.isTcx, excludeTransport = it) },
+                        onCheckedChange = { kind = ActivityExportKind.processedTrack(kind.format, excludeTransport = it) },
                         enabled = !busy && processedAvailable,
                         modifier = Modifier.semantics { contentDescription = "Exclude transport" },
                     )
@@ -194,7 +197,7 @@ private fun ActivityExportPanel(
                         processedLoading -> "Preparing track… You can still export original files below."
                         !processedAvailable -> "Processed track unavailable. Original files are available below."
                         !kind.excludesTransport -> "Includes the full recorded day. Your original recording is kept."
-                        ride != null && kind.isTcx ->
+                        ride != null && (kind.isTcx || kind.isFit) ->
                             String.format(Locale.US, "%.1f km of riding · the file states this distance", ride.distanceM / 1000)
                         ride != null ->
                             String.format(Locale.US, "%.1f km of riding · readers may report more", ride.distanceM / 1000)
@@ -246,7 +249,7 @@ private fun ActivityExportPanel(
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium)) {
                 Button(
-                    onClick = { onExport(kind, ExportDestination.SAVE, scope) }, enabled = ready && !busy,
+                    onClick = { onExport(kind, ExportDestination.SAVE, scope, ActivityExportOptions(if (highRate) TrackExportRate.FIVE_HZ else TrackExportRate.ONE_HZ, gzip)) }, enabled = ready && !busy,
                     modifier = Modifier.weight(1f).heightIn(min = NakvaliSizes.primaryActionHeight),
                 ) {
                     Icon(Icons.Outlined.SaveAlt, null, Modifier.size(20.dp))
@@ -254,7 +257,7 @@ private fun ActivityExportPanel(
                     Text("Save file")
                 }
                 OutlinedButton(
-                    onClick = { onExport(kind, ExportDestination.SHARE, scope) }, enabled = ready && !busy,
+                    onClick = { onExport(kind, ExportDestination.SHARE, scope, ActivityExportOptions(if (highRate) TrackExportRate.FIVE_HZ else TrackExportRate.ONE_HZ, gzip)) }, enabled = ready && !busy,
                     modifier = Modifier.weight(1f).heightIn(min = NakvaliSizes.primaryActionHeight),
                 ) {
                     Icon(Icons.Default.Share, null, Modifier.size(20.dp))
@@ -315,66 +318,15 @@ private fun FileChoice(title: String, description: String, selected: Boolean, en
     }
 }
 
+
 @Composable
-private fun StravaAction(
-    connection: StravaConnectionState, recording: LocalRecording?, available: Boolean,
-    onConnect: () -> Unit, onExport: () -> Unit, onRetry: () -> Unit, onView: (Long) -> Unit,
-) {
-    val status = recording?.stravaExportStatus
-    val id = recording?.stravaActivityId
-    val label: String
-    val description: String
-    val enabled: Boolean
-    val action: () -> Unit
-    when {
-        status == StravaExportStatus.UPLOADED && id != null -> {
-            label = "View on Strava"
-            description = "Activity already uploaded"
-            enabled = true
-            action = { onView(id) }
+private fun ExportToggle(title: String, description: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = NakvaliSpacing.medium)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        status == StravaExportStatus.QUEUED -> {
-            label = "Strava upload queued"
-            description = "Will send when a network is available"
-            enabled = false
-            action = {}
-        }
-        status == StravaExportStatus.PROCESSING -> {
-            label = "Sending to Strava…"
-            description = "The upload is being processed"
-            enabled = false
-            action = {}
-        }
-        connection is StravaConnectionState.Connected -> {
-            label = if (status == StravaExportStatus.FAILED) "Retry Strava upload" else "Send to Strava"
-            description = recording?.stravaError
-                ?: "Whole activity, transport excluded · a single run is file-only"
-            enabled = available && recording != null
-            action = if (status == StravaExportStatus.FAILED) onRetry else onExport
-        }
-        connection == StravaConnectionState.Loading || connection == StravaConnectionState.Connecting -> {
-            label = "Connecting to Strava…"
-            description = "You can save or share a file below"
-            enabled = false
-            action = {}
-        }
-        else -> {
-            label = "Connect Strava"
-            description = "Optional · save and share work without an account"
-            enabled = true
-            action = onConnect
-        }
-    }
-    // A multi-line action is a row, not a capsule-shaped text button: the
-    // button's shape would clip its first/last line at large font scales.
-    Column(
-        Modifier.fillMaxWidth().heightIn(min = NakvaliSizes.secondaryControl)
-            .clickable(enabled = enabled, role = Role.Button, onClick = action)
-            .padding(vertical = NakvaliSpacing.small),
-        verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.xSmall),
-    ) {
-        Text(label, style = MaterialTheme.typography.titleSmall,
-            color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled,
+            modifier = Modifier.semantics { contentDescription = title })
     }
 }

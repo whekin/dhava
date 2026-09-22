@@ -59,7 +59,7 @@ class BikeyardEngineTest {
         val store = MemoryStore(BikeyardStoredState()); val core = engine(store, Remote())
         val url = core.beginConnect().toHttpUrl(); val first = store.value.pending!!
         assertEquals(BikeyardPkce.SCOPES, url.queryParameter("scope"))
-        assertEquals(BikeyardEnvironment.SANDBOX.clientId, url.queryParameter("client_id"))
+        assertEquals(BikeyardEnvironment.LIVE.clientId, url.queryParameter("client_id"))
         assertEquals(BikeyardPkce.challenge(first.verifier), url.queryParameter("code_challenge"))
         assertNotEquals(first.verifier, first.state)
         core.beginConnect(); assertNotEquals(first.state, store.value.pending!!.state)
@@ -198,6 +198,48 @@ class BikeyardEngineTest {
         assertNotNull(withTimeout(100) { core.automaticRequest() })
         remote.uploadGate!!.complete(Unit)
         assertTrue(upload.await())
+    }
+
+    @Test fun `sandbox state is retired without converting its tokens or queue to live`() {
+        val legacy = connected().copy(
+            environment = BikeyardEnvironment.SANDBOX,
+            pending = BikeyardPending("old-state", "old-verifier", clock),
+            autoConsentId = "old-consent",
+            uploads = listOf(BikeyardUpload("old-key", "recording", "SANDBOX:rider",
+                BikeyardVisibility.PUBLIC, true, externalId = "old", name = "Test", description = "", bikeType = "mtb")),
+        )
+        val store = MemoryStore(legacy)
+        val core = engine(store, Remote())
+        assertEquals(BikeyardEnvironment.LIVE, store.value.environment)
+        assertNull(store.value.tokens); assertNull(store.value.pending)
+        assertNull(store.value.autoConsentId); assertTrue(store.value.uploads.isEmpty())
+        assertFalse(core.state.value.connected)
+        assertEquals(BikeyardVisibility.PRIVATE, core.state.value.visibility)
+    }
+
+    @Test fun `existing live session and opt in survive the production migration`() {
+        val original = connected().copy(autoConsentId = "consent", visibility = BikeyardVisibility.PUBLIC)
+        val store = MemoryStore(original)
+        val core = engine(store, Remote())
+        assertEquals(original, store.value)
+        assertTrue(core.state.value.connected); assertTrue(core.state.value.automatic)
+        assertEquals("Test Rider", core.state.value.riderName)
+    }
+
+    @Test fun `async receipt survives process restart without another upload`() = runBlocking {
+        var time = clock
+        val remote = Remote().apply { receipt = BikeyardReceipt("upload", "processing") }
+        val store = MemoryStore(connected())
+        val first = BikeyardEngine(store, remote) { time }
+        val job = queue(first)
+        assertFalse(first.process(job.key, file))
+        assertEquals("upload", store.value.uploads.single().uploadId)
+        time += 31000
+        remote.receipt = BikeyardReceipt("upload", "complete", rideId = "finished")
+        val restarted = BikeyardEngine(store, remote) { time }
+        assertTrue(restarted.process(job.key, File("missing-local-snapshot")))
+        assertEquals(1, remote.uploads)
+        assertEquals("finished", restarted.state.value.uploads.single().rideId)
     }
 
 }

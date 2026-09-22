@@ -41,15 +41,15 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
     val upload = recording?.let { state.uploadFor(it.id) }
     var confirmUpload by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("BIKEYARD · ${if (state.environment == BikeyardEnvironment.SANDBOX) "sandbox" else "live"}", style = MaterialTheme.typography.titleMedium)
-        Text("Whole ride · processed TCX without transport. Original recordings stay on this phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("BIKEYARD", style = MaterialTheme.typography.titleMedium)
+        Text("Whole ride · compressed TCX without transport. Original recordings stay on this phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val label = when {
             state.loading -> "Loading BIKEYARD…"
             state.connecting -> "Finish connecting in your browser"
             upload?.status == BikeyardUploadStatus.UPLOADED -> "Uploaded to BIKEYARD"
             upload?.status == BikeyardUploadStatus.DUPLICATE -> "Duplicate track — review in BIKEYARD"
             !state.connected -> "Connect BIKEYARD"
-            upload?.status == BikeyardUploadStatus.QUEUED -> "Queued · waiting for network or retry"
+            upload?.status == BikeyardUploadStatus.QUEUED -> if (upload.uploadId != null) "BIKEYARD is processing the ride…" else "Queued · waiting for network or retry"
             upload?.status == BikeyardUploadStatus.UPLOADING -> "Uploading to BIKEYARD…"
             upload != null -> "Retry BIKEYARD upload"
             else -> "Upload to BIKEYARD"
@@ -74,7 +74,7 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
     }
     if (confirmUpload && recording != null) AlertDialog(
         onDismissRequest = { confirmUpload = false }, title = { Text("Upload this ride?") },
-        text = { Text("Send the whole processed ride to ${state.riderName} in ${state.environment.name.lowercase()}. Visibility: ${(upload?.visibility ?: state.visibility).label}. Change the default in Profile → BIKEYARD. A retry keeps the original queued file and settings.") },
+        text = { Text("Send the whole processed ride to ${state.riderName}. Visibility: ${(upload?.visibility ?: state.visibility).label}. Change the default in Profile → BIKEYARD. A retry keeps the original queued file and settings.") },
         confirmButton = { TextButton(onClick = { viewModel.upload(recording); confirmUpload = false }) { Text("Upload") } },
         dismissButton = { TextButton(onClick = { confirmUpload = false }) { Text("Cancel") } },
     )

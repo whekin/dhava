@@ -20,9 +20,10 @@ import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.RecordLine
 import com.nakvali.core.recording.RecordingRepository
 import com.nakvali.core.recording.RideSegmentRun
-import com.nakvali.core.recording.StravaConnectionState
 import com.nakvali.core.recording.StoredRideBounds
-import com.nakvali.core.recording.TcxExporter
+import com.nakvali.core.recording.TrackFileFormat
+import com.nakvali.core.recording.TrackFileExport
+import com.nakvali.core.recording.TrackExportRate
 import com.nakvali.core.recording.TrackExport
 import com.nakvali.core.recording.TrackExportPoint
 import com.nakvali.core.recording.exportPoints
@@ -105,6 +106,8 @@ enum class ActivityExportKind(val mimeType: String, val extension: String) {
      */
     RIDING_ONLY_TCX("application/vnd.garmin.tcx+xml", "tcx"),
     PROCESSED_5_HZ_TCX("application/vnd.garmin.tcx+xml", "tcx"),
+    RIDING_ONLY_FIT("application/vnd.ant.fit", "fit"),
+    PROCESSED_5_HZ_FIT("application/vnd.ant.fit", "fit"),
     RAW_GPS("application/gpx+xml", "gpx"),
     /** The raw sensor recording as-is, for diagnostics/bug reports. */
     RAW_RECORDING("application/gzip", "jsonl.gz"),
@@ -114,16 +117,19 @@ enum class ActivityExportKind(val mimeType: String, val extension: String) {
 
     val isProcessedTrack: Boolean
         get() = this == RIDING_ONLY || this == PROCESSED_5_HZ ||
-            this == RIDING_ONLY_TCX || this == PROCESSED_5_HZ_TCX
-    val excludesTransport: Boolean get() = this == RIDING_ONLY || this == RIDING_ONLY_TCX
+            this == RIDING_ONLY_TCX || this == PROCESSED_5_HZ_TCX ||
+            this == RIDING_ONLY_FIT || this == PROCESSED_5_HZ_FIT
+    val excludesTransport: Boolean get() = this == RIDING_ONLY || this == RIDING_ONLY_TCX || this == RIDING_ONLY_FIT
     val isTcx: Boolean get() = this == RIDING_ONLY_TCX || this == PROCESSED_5_HZ_TCX
 
+    val isFit: Boolean get() = this == RIDING_ONLY_FIT || this == PROCESSED_5_HZ_FIT
+    val format: TrackFileFormat get() = when { isFit -> TrackFileFormat.FIT; isTcx -> TrackFileFormat.TCX; else -> TrackFileFormat.GPX }
+
     companion object {
-        fun processedTrack(tcx: Boolean, excludeTransport: Boolean): ActivityExportKind = when {
-            tcx && excludeTransport -> RIDING_ONLY_TCX
-            tcx -> PROCESSED_5_HZ_TCX
-            excludeTransport -> RIDING_ONLY
-            else -> PROCESSED_5_HZ
+        fun processedTrack(format: TrackFileFormat, excludeTransport: Boolean): ActivityExportKind = when (format) {
+            TrackFileFormat.FIT -> if (excludeTransport) RIDING_ONLY_FIT else PROCESSED_5_HZ_FIT
+            TrackFileFormat.TCX -> if (excludeTransport) RIDING_ONLY_TCX else PROCESSED_5_HZ_TCX
+            TrackFileFormat.GPX -> if (excludeTransport) RIDING_ONLY else PROCESSED_5_HZ
         }
     }
 }
@@ -197,7 +203,6 @@ class ActivityDetailViewModel(
     /** Bikes for the edit sheet's picker. */
     val bikes: StateFlow<List<Bike>> = repository.bikes
 
-    val stravaConnection: StateFlow<StravaConnectionState> = repository.stravaConnection
 
     private val _healthLogAvailable = MutableStateFlow(
         repository.recordingHealthFile(recordingId).isFile,
@@ -220,20 +225,6 @@ class ActivityDetailViewModel(
         viewModelScope.launch { repository.deleteActivity(recordingId) }
     }
 
-    fun beginStravaConnect(onResult: (Result<String>) -> Unit) {
-        viewModelScope.launch {
-            onResult(runCatching { repository.beginStravaConnect() })
-        }
-    }
-
-    fun exportToStrava() {
-        repository.exportToStrava(recordingId)
-    }
-
-    fun retryStravaExport() {
-        repository.retryStravaExport(recordingId)
-    }
-
     /**
      * The activity's riding runs, enumerated in Rust. Published here rather than
      * derived in the export sheet so the picker, the file's laps and any future
@@ -249,14 +240,22 @@ class ActivityDetailViewModel(
         kind: ActivityExportKind,
         destination: ExportDestination,
         scope: ActivityExportScope = ActivityExportScope.WholeActivity,
+        options: ActivityExportOptions = ActivityExportOptions(),
     ) {
         if (_exportState.value.busy || _exportState.value.prepared != null) return
         _exportState.value = ActivityExportState(busy = true, message = "Preparing file…")
-        export(kind, scope) { result ->
-            _exportState.value = result.fold(
-                onSuccess = { ActivityExportState(prepared = PreparedActivityExport(it, kind, destination)) },
-                onFailure = { ActivityExportState(error = it.message ?: "Could not prepare the file. Try again.") },
-            )
+        export(kind, scope, options.rate) { result ->
+            viewModelScope.launch(Dispatchers.IO) {
+                val ready = result.mapCatching { file ->
+                    if (options.gzip && !file.name.endsWith(".gz")) TrackFileExport.gzip(file) else file
+                }
+                withContext(Dispatchers.Main) {
+                    _exportState.value = ready.fold(
+                        onSuccess = { ActivityExportState(prepared = PreparedActivityExport(it, kind, destination)) },
+                        onFailure = { ActivityExportState(error = it.message ?: "Could not prepare the file. Try again.") },
+                    )
+                }
+            }
         }
     }
 
@@ -286,6 +285,7 @@ class ActivityDetailViewModel(
     private fun export(
         kind: ActivityExportKind,
         scope: ActivityExportScope,
+        rate: TrackExportRate,
         onResult: (Result<File>) -> Unit,
     ) {
         if (kind == ActivityExportKind.RAW_RECORDING) {
@@ -296,7 +296,8 @@ class ActivityDetailViewModel(
             exportHealthLog(onResult)
             return
         }
-        val title = recording.value?.title ?: "Nakvali ride"
+        val metadata = recording.value
+        val title = metadata?.title ?: "Nakvali ride"
         val replay = (_diagnostics.value as? DiagnosticTrackState.Loaded)?.replay
         val artifact = canonicalArtifact
         val run = (scope as? ActivityExportScope.OneRun)
@@ -342,8 +343,8 @@ class ActivityDetailViewModel(
         }
         val scopeSuffix = run?.let { "-run${it.index + 1u}" }.orEmpty()
         val suffix = when (kind) {
-            ActivityExportKind.RIDING_ONLY, ActivityExportKind.RIDING_ONLY_TCX -> "riding-only"
-            ActivityExportKind.PROCESSED_5_HZ, ActivityExportKind.PROCESSED_5_HZ_TCX -> "processed-5hz"
+            ActivityExportKind.RIDING_ONLY, ActivityExportKind.RIDING_ONLY_TCX, ActivityExportKind.RIDING_ONLY_FIT -> "riding-only-${rate.hz}hz"
+            ActivityExportKind.PROCESSED_5_HZ, ActivityExportKind.PROCESSED_5_HZ_TCX, ActivityExportKind.PROCESSED_5_HZ_FIT -> "processed-${rate.hz}hz"
             ActivityExportKind.RAW_GPS -> "raw-gps"
             ActivityExportKind.RAW_RECORDING, ActivityExportKind.HEALTH_LOG -> error("unreachable")
         } + scopeSuffix
@@ -353,8 +354,8 @@ class ActivityDetailViewModel(
                     getApplication<Application>().cacheDir,
                     "exports/nakvali-${recordingId.take(8)}-$suffix.${kind.extension}",
                 )
-                if (kind.isTcx) TcxExporter.write(points, title, output)
-                else GpxExporter.write(points, title, output)
+                val sampled = if (kind.isProcessedTrack) TrackFileExport.sample(points, rate) else points
+                TrackFileExport.write(sampled, title, output, kind.format, metadata?.bikeType)
             }
             withContext(Dispatchers.Main) { onResult(result) }
         }
