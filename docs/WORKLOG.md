@@ -4338,3 +4338,19 @@ absence of the locally configured alpha key bytes inside the public APK.
 Rust workspace tests/Clippy, Android core-recording and activity unit tests,
 debug lint, debug/release assembly and Astro checks/build passed. No live
 authenticated sensor PUT was performed in this preparation step.
+
+## 2026-09-25 — Published 0.1.0-test2 Android preview
+
+Fetched origin/main (no divergence), committed the full airtime/BIKEYARD release
+as `b1ea2bd`, and pushed main plus annotated tag `v0.1.0-test2`. Published a
+GitHub prerelease with signed `nakvali.apk` and `SHA256SUMS.txt`. The public APK
+was built with a blank alpha API access key and has SHA-256
+`8e4978bf74feeadf620c64b70e39bf429b69a60d4236be15ca45e5103e252303`;
+GitHub's asset digest matches exactly. Package `com.nakvali.app`, versionCode 3,
+versionName `0.1.0-test2` and the existing release certificate were verified.
+
+Coolify briefly returned 503 during the push deployment, then recovered to
+200. The live homepage now contains the versioned APK download URL and the
+updated privacy page describes separate airtime consent. No authenticated
+sensor-metrics PUT has been run yet: the released feature is available for the
+owner's first private field test, with automatic metrics off by default.
