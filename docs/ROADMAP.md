@@ -52,11 +52,15 @@ skeleton and deployment scaffolding.
   are ready; do not send fabricated zeros or unfinished metrics now
 - Keep metrics sourced from the canonical on-device Rust artifact, with units,
   algorithm version and quality/uncertainty where applicable
-- Decide together whether metrics belong in FIT developer fields or a separate
-  API payload; file-format support alone does not imply BIKEYARD consumes them
-- Keep a stable association with the uploaded ride and define how recomputation
-  updates metrics before implementing synchronization; no raw sensor upload
-  is introduced by this extension
+- Per-event local airtime detail shows duration and phone acceleration peaks
+  before/after air; takeoff angle and landing smoothness need mounting alignment,
+  a defined signal model and field validation before they become metrics
+- Pilot BIKEYARD’s published JSON attachment keyed by the completed `ride_id`:
+  private-ride submission of candidate timing only, manually or through a
+  separate automatic opt-in for new rides, with frozen retry bytes and measured
+  sensor coverage; validate map placement across TCX breaks before broader use
+- Keep timestamps, event status and units consistent across this API and any later
+  FIT/XML extensions; no raw sensor or GPS data is added to the attachment
 
 ## Phase 4 — Recorder polish
 
@@ -68,6 +72,10 @@ skeleton and deployment scaffolding.
 - Audio/haptic preferences
 - Rust-only post-ride ActivityState map visualization — implemented locally;
   labelled field calibration pending
+- Reduce stationary map clutter without changing raw data; show possible airtime
+  only when an event can be placed within a continuous riding section. Overview
+  groups nearby events into small count markers; close zoom reveals individual
+  events. Validate grouping, legibility and GPS interpolation on field recordings.
 - Adaptive stationary IMU disk persistence with two-second full-rate pre-roll —
   implemented locally; long physical-device validation pending
 

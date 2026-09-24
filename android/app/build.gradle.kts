@@ -42,8 +42,8 @@ android {
         applicationId = "com.nakvali.app"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 2
-        versionName = "0.1.0-test1"
+        versionCode = 3
+        versionName = "0.1.0-test2"
 
         val apiBaseUrl = (project.findProperty("nakvaliApiBaseUrl") as String?)
             ?: "http://10.0.2.2:8080"

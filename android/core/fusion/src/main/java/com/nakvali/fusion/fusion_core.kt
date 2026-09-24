@@ -804,6 +804,8 @@ internal open class UniffiVTableCallbackInterfaceCanonicalObserver(
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -858,6 +860,8 @@ fun uniffi_fusion_core_checksum_func_segment_match_version(
 fun uniffi_fusion_core_checksum_func_segment_search_bounds(
 ): Short
 fun uniffi_fusion_core_checksum_func_selection_overlap(
+): Short
+fun uniffi_fusion_core_checksum_func_sensor_metrics_evidence(
 ): Short
 fun uniffi_fusion_core_checksum_method_canonicalobserver_on_progress(
 ): Short
@@ -1010,6 +1014,8 @@ fun uniffi_fusion_core_fn_func_segment_match_version(uniffi_out_err: UniffiRustC
 fun uniffi_fusion_core_fn_func_segment_search_bounds(`definition`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_selection_overlap(`existing`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,`startPosition`: Double,`endPosition`: Double,uniffi_out_err: UniffiRustCallStatus,
+): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_sensor_metrics_evidence(`path`: RustBuffer.ByValue,`scopes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun ffi_fusion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
@@ -1195,6 +1201,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_selection_overlap() != 12877.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_sensor_metrics_evidence() != 8839.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_method_canonicalobserver_on_progress() != 26592.toShort()) {
@@ -2607,7 +2616,12 @@ data class AirtimeWindow (
     /**
      * Peak |accel| within 300 ms after landing, in g (9.81 m/s^2).
      */
-    var `landingPeakG`: kotlin.Double
+    var `landingPeakG`: kotlin.Double,
+    /**
+     * Peak phone acceleration magnitude in the 300 ms before the interval,
+     * including gravity. None if there is too little pre-air evidence.
+     */
+    var `takeoffPeakG`: kotlin.Double?
 ) {
 
     companion object
@@ -2622,19 +2636,22 @@ public object FfiConverterTypeAirtimeWindow: FfiConverterRustBuffer<AirtimeWindo
             FfiConverterLong.read(buf),
             FfiConverterLong.read(buf),
             FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
         )
     }
 
     override fun allocationSize(value: AirtimeWindow) = (
             FfiConverterLong.allocationSize(value.`startMs`) +
             FfiConverterLong.allocationSize(value.`durationMs`) +
-            FfiConverterDouble.allocationSize(value.`landingPeakG`)
+            FfiConverterDouble.allocationSize(value.`landingPeakG`) +
+            FfiConverterOptionalDouble.allocationSize(value.`takeoffPeakG`)
     )
 
     override fun write(value: AirtimeWindow, buf: ByteBuffer) {
             FfiConverterLong.write(value.`startMs`, buf)
             FfiConverterLong.write(value.`durationMs`, buf)
             FfiConverterDouble.write(value.`landingPeakG`, buf)
+            FfiConverterOptionalDouble.write(value.`takeoffPeakG`, buf)
     }
 }
 
@@ -4316,6 +4333,80 @@ public object FfiConverterTypeSelectionOverlap: FfiConverterRustBuffer<Selection
 
 
 /**
+ * Measured IMU availability and candidate events inside exported riding time.
+ */
+data class SensorMetricsEvidence (
+    var `coverage`: kotlin.Double,
+    var `sampleRateHz`: kotlin.Double?,
+    var `events`: List<AirtimeWindow>
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSensorMetricsEvidence: FfiConverterRustBuffer<SensorMetricsEvidence> {
+    override fun read(buf: ByteBuffer): SensorMetricsEvidence {
+        return SensorMetricsEvidence(
+            FfiConverterDouble.read(buf),
+            FfiConverterOptionalDouble.read(buf),
+            FfiConverterSequenceTypeAirtimeWindow.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SensorMetricsEvidence) = (
+            FfiConverterDouble.allocationSize(value.`coverage`) +
+            FfiConverterOptionalDouble.allocationSize(value.`sampleRateHz`) +
+            FfiConverterSequenceTypeAirtimeWindow.allocationSize(value.`events`)
+    )
+
+    override fun write(value: SensorMetricsEvidence, buf: ByteBuffer) {
+            FfiConverterDouble.write(value.`coverage`, buf)
+            FfiConverterOptionalDouble.write(value.`sampleRateHz`, buf)
+            FfiConverterSequenceTypeAirtimeWindow.write(value.`events`, buf)
+    }
+}
+
+
+
+/**
+ * One continuous, already-selected section of the exported ride.
+ */
+data class SensorTimeScope (
+    var `startedAtMs`: kotlin.Long,
+    var `endedAtMs`: kotlin.Long
+) {
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSensorTimeScope: FfiConverterRustBuffer<SensorTimeScope> {
+    override fun read(buf: ByteBuffer): SensorTimeScope {
+        return SensorTimeScope(
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SensorTimeScope) = (
+            FfiConverterLong.allocationSize(value.`startedAtMs`) +
+            FfiConverterLong.allocationSize(value.`endedAtMs`)
+    )
+
+    override fun write(value: SensorTimeScope, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`startedAtMs`, buf)
+            FfiConverterLong.write(value.`endedAtMs`, buf)
+    }
+}
+
+
+
+/**
  * One decimated track point for map display (~1 Hz).
  */
 data class TrackPoint (
@@ -5903,6 +5994,34 @@ public object FfiConverterSequenceTypeSegmentElevationPoint: FfiConverterRustBuf
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeSensorTimeScope: FfiConverterRustBuffer<List<SensorTimeScope>> {
+    override fun read(buf: ByteBuffer): List<SensorTimeScope> {
+        val len = buf.getInt()
+        return List<SensorTimeScope>(len) {
+            FfiConverterTypeSensorTimeScope.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<SensorTimeScope>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeSensorTimeScope.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<SensorTimeScope>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeSensorTimeScope.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeTrackPoint: FfiConverterRustBuffer<List<TrackPoint>> {
     override fun read(buf: ByteBuffer): List<TrackPoint> {
         val len = buf.getInt()
@@ -6305,6 +6424,16 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_selection_overlap(
         FfiConverterSequenceTypeSegmentDefinition.lower(`existing`),FfiConverterSequenceTypeCanonicalTrackPoint.lower(`track`),FfiConverterDouble.lower(`startPosition`),FfiConverterDouble.lower(`endPosition`),_status)
+}
+    )
+    }
+
+
+    @Throws(FusionException::class) fun `sensorMetricsEvidence`(`path`: kotlin.String, `scopes`: List<SensorTimeScope>): SensorMetricsEvidence {
+            return FfiConverterTypeSensorMetricsEvidence.lift(
+    uniffiRustCallWithError(FusionException) { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_sensor_metrics_evidence(
+        FfiConverterString.lower(`path`),FfiConverterSequenceTypeSensorTimeScope.lower(`scopes`),_status)
 }
     )
     }

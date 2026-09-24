@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.util.zip.GZIPOutputStream
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +15,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CanonicalActivityStoreTest {
+    @Test fun `legacy airtime window decodes without takeoff evidence`() {
+        val old = """{"startMs":1000,"durationMs":420,"landingPeakG":3.4}"""
+        val window = Json.decodeFromString<CanonicalAirtimeWindow>(old)
+
+        assertEquals(420L, window.durationMs)
+        assertEquals(null, window.takeoffPeakG)
+    }
+
     @Test fun `reuses valid cache and rebuilds when raw or algorithm changes`() = runBlocking {
         val root = Files.createTempDirectory("nakvali-artifact").toFile()
         val raw = root.resolve("ride.jsonl.gz").apply { writeText("raw-v1") }

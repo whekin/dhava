@@ -132,6 +132,7 @@ data class CanonicalAirtimeWindow(
     val startMs: Long,
     val durationMs: Long,
     val landingPeakG: Double,
+    val takeoffPeakG: Double? = null,
 )
 
 @Serializable
@@ -265,6 +266,7 @@ private fun RideAnalysis.toCanonicalAnalysis(): CanonicalAnalysis = CanonicalAna
             startMs = window.startMs,
             durationMs = window.durationMs,
             landingPeakG = window.landingPeakG,
+            takeoffPeakG = window.takeoffPeakG,
         )
     },
     track = track.map { point ->
@@ -292,7 +294,7 @@ fun CanonicalActivityArtifact.toRideAnalysis(): RideAnalysis = RideAnalysis(
     avgMovingSpeedMps = analysis.avgMovingSpeedMps,
     airtimeTotalMs = analysis.airtimeTotalMs,
     airtimeWindows = analysis.airtimeWindows.map { window ->
-        AirtimeWindow(window.startMs, window.durationMs, window.landingPeakG)
+        AirtimeWindow(window.startMs, window.durationMs, window.landingPeakG, window.takeoffPeakG)
     },
     track = analysis.track.map { point ->
         TrackPoint(

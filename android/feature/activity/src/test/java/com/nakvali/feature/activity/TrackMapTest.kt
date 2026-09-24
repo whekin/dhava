@@ -1,6 +1,7 @@
 package com.nakvali.feature.activity
 
 import com.nakvali.fusion.ActivityState
+import com.nakvali.fusion.AirtimeWindow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -100,6 +101,85 @@ class TrackMapTest {
     }
 
     @Test
+    fun `ride map hides still sample cloud while diagnostic samples remain intact`() {
+        val points = listOf(
+            point(1_000, ActivityState.DOWNHILL),
+            point(2_000, ActivityState.STILL),
+            point(3_000, ActivityState.STILL),
+            point(4_000, ActivityState.DOWNHILL),
+        )
+
+        assertEquals(4, points.toPointFeatureCollectionOrNull()!!.features()!!.size)
+        assertEquals(2, points.toVisibleFusionPointFeatureCollectionOrNull()!!.features()!!.size)
+    }
+
+    @Test
+    fun `airtime candidate is placed between fixes in a continuous riding section`() {
+        val points = listOf(
+            point(1_000, ActivityState.DOWNHILL),
+            point(2_000, ActivityState.DOWNHILL, offset = 0.001),
+            point(3_000, ActivityState.DOWNHILL, offset = 0.002),
+        )
+        val candidates = points.placeAirtimeCandidates(listOf(AirtimeWindow(1_250, 500, 3.0, null)))
+
+        assertEquals(1, candidates.size)
+        assertEquals(0, candidates.single().eventIndex)
+        assertEquals(points[0].lat + 0.00025, candidates.single().start.lat, 0.0000001)
+        assertEquals(500L, candidates.single().durationMs)
+    }
+
+    @Test
+    fun `placed candidate keeps its original event index when earlier event has no location`() {
+        val points = listOf(
+            point(1_000, ActivityState.DOWNHILL),
+            point(2_000, ActivityState.DOWNHILL, offset = 0.001),
+            point(3_000, ActivityState.DOWNHILL, offset = 0.002),
+        )
+        val candidates = points.placeAirtimeCandidates(listOf(
+            AirtimeWindow(100, 250, 2.0, null),
+            AirtimeWindow(1_250, 500, 3.0, 1.8),
+        ))
+
+        assertEquals(1, candidates.size)
+        assertEquals(1, candidates.single().eventIndex)
+        assertEquals(1.8, candidates.single().takeoffPeakG!!, 0.0)
+    }
+
+    @Test
+    fun `overview groups nearby airtime without moving or overlapping its anchors`() {
+        val candidates = listOf(0, 12, 25, 80).mapIndexed { index, x ->
+            val point = MapTrackPoint(lat = x.toDouble(), lon = 44.8, sectionId = 0)
+            MapAirtimeCandidate(index, point, point, index * 1_000L, 300, null, 2.0)
+        }
+
+        val markers = clusterAirtimeOverview(candidates, minSpacingPx = 36f) { point ->
+            point.lat.toFloat() to 0f
+        }
+
+        assertEquals(listOf(3, 1), markers.map { it.count })
+        assertEquals(listOf(0, 3), markers.map { it.candidate.eventIndex })
+        assertEquals(80.0, markers[1].candidate.start.lat, 0.0)
+    }
+
+    @Test
+    fun `airtime is unplaced across a pause or shuttle`() {
+        val paused = listOf(
+            point(1_000, ActivityState.DOWNHILL, sectionId = 0),
+            point(2_000, ActivityState.DOWNHILL, sectionId = 0, offset = 0.001),
+            point(3_000, ActivityState.DOWNHILL, sectionId = 1, offset = 0.002),
+            point(4_000, ActivityState.DOWNHILL, sectionId = 1, offset = 0.003),
+        )
+        val shuttle = listOf(
+            point(1_000, ActivityState.DOWNHILL),
+            point(2_000, ActivityState.LIKELY_MOTORIZED, offset = 0.001),
+            point(3_000, ActivityState.DOWNHILL, offset = 0.002),
+        )
+
+        assertEquals(emptyList<MapAirtimeCandidate>(), paused.placeAirtimeCandidates(listOf(AirtimeWindow(1_750, 500, 3.0, null))))
+        assertEquals(emptyList<MapAirtimeCandidate>(), shuttle.placeAirtimeCandidates(listOf(AirtimeWindow(1_750, 500, 3.0, null))))
+    }
+
+    @Test
     fun `state change shares a boundary vertex without leaving a line gap`() {
         val downhillStart = point(0, ActivityState.DOWNHILL)
         val sharedBoundary = point(1_000, ActivityState.DOWNHILL, offset = 0.001)
@@ -167,15 +247,15 @@ class TrackMapTest {
     @Test
     fun `a real stop aggregates into one marker at its middle`() {
         val arrival = point(0, ActivityState.DOWNHILL)
-        val still = (1..20).map { step ->
+        val still = (1..70).map { step ->
             point(step * 1_000L, ActivityState.STILL, confidence = 0.8, offset = 0.001)
         }
-        val departure = point(21_000, ActivityState.TRANSIT, offset = 0.002)
+        val departure = point(71_000, ActivityState.TRANSIT, offset = 0.002)
 
         val markers = (listOf(arrival) + still + departure).aggregatedStopMarkers()
 
         assertEquals(1, markers.size)
-        assertEquals(19_000L, markers.single().durationMs)
+        assertEquals(69_000L, markers.single().durationMs)
         assertEquals(0.8, markers.single().confidence!!, 0.000_001)
     }
 
@@ -192,13 +272,26 @@ class TrackMapTest {
     }
 
     @Test
+    fun `ordinary short pause does not clutter the ride overview`() {
+        val points = buildList {
+            add(point(1_000, ActivityState.DOWNHILL))
+            (2..32).forEach { second ->
+                add(point(second * 1_000L, ActivityState.STILL, offset = 0.001))
+            }
+            add(point(33_000, ActivityState.DOWNHILL, offset = 0.002))
+        }
+
+        assertEquals(emptyList<StopMarker>(), points.aggregatedStopMarkers())
+    }
+
+    @Test
     fun `a traffic light inside a vehicle is not a rider stop`() {
         val inTraffic = buildList {
             add(point(0, ActivityState.LIKELY_MOTORIZED))
-            (1..40).forEach { step ->
+            (1..70).forEach { step ->
                 add(point(step * 1_000L, ActivityState.STILL, offset = 0.001))
             }
-            add(point(41_000, ActivityState.LIKELY_MOTORIZED, offset = 0.002))
+            add(point(71_000, ActivityState.LIKELY_MOTORIZED, offset = 0.002))
         }
 
         assertEquals(emptyList<StopMarker>(), inTraffic.aggregatedStopMarkers())
@@ -208,10 +301,10 @@ class TrackMapTest {
     fun `getting off the shuttle and standing is still a stop`() {
         val arrival = buildList {
             add(point(0, ActivityState.LIKELY_MOTORIZED))
-            (1..40).forEach { step ->
+            (1..70).forEach { step ->
                 add(point(step * 1_000L, ActivityState.STILL, offset = 0.001))
             }
-            add(point(41_000, ActivityState.DOWNHILL, offset = 0.002))
+            add(point(71_000, ActivityState.DOWNHILL, offset = 0.002))
         }
 
         assertEquals(1, arrival.aggregatedStopMarkers().size)

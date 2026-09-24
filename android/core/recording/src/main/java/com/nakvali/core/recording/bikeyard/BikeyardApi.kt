@@ -58,6 +58,12 @@ internal data class BikeyardReceipt(
 )
 
 @Serializable
+internal data class BikeyardMetricsReceipt(
+    @SerialName("ride_id") val rideId: String,
+    val revision: Int,
+)
+
+@Serializable
 private data class BikeyardDuplicate(val upload: BikeyardReceipt)
 
 internal interface BikeyardRemote {
@@ -67,6 +73,7 @@ internal interface BikeyardRemote {
     suspend fun revoke(environment: BikeyardEnvironment, token: String)
     suspend fun upload(environment: BikeyardEnvironment, token: String, job: BikeyardUpload, file: File): BikeyardReceipt
     suspend fun receipt(environment: BikeyardEnvironment, token: String, id: String): BikeyardReceipt
+    suspend fun putMetrics(environment: BikeyardEnvironment, token: String, rideId: String, file: File): BikeyardMetricsReceipt
 }
 
 internal class BikeyardApi(
@@ -125,10 +132,24 @@ internal class BikeyardApi(
             json.decodeFromString(it)
         }
 
+    override suspend fun putMetrics(
+        environment: BikeyardEnvironment, token: String, rideId: String, file: File,
+    ): BikeyardMetricsReceipt {
+        require(rideId.matches(Regex("[0-9a-fA-F-]{36}")))
+        if (file.length() > 20_000_000) throw BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
+            "Sensor metrics exceed BIKEYARD’s 20 MB limit")
+        return request(
+            authorized(environment, token, "/v1/rides/$rideId/sensor-metrics")
+                .put(file.asRequestBody("application/json".toMediaType())).build(),
+            metrics = true,
+        ) { json.decodeFromString(it) }
+    }
+
     private fun authorized(environment: BikeyardEnvironment, token: String, path: String) =
         Request.Builder().url(environment.apiOrigin + path).header("Authorization", "Bearer $token")
 
-    private suspend inline fun <reified T> request(request: Request, duplicate: Boolean = false, decode: (String) -> T): T {
+    private suspend inline fun <reified T> request(request: Request, duplicate: Boolean = false,
+        metrics: Boolean = false, decode: (String) -> T): T {
         try {
             execute(request).use { response ->
                 val body = response.body.string()
@@ -136,10 +157,16 @@ internal class BikeyardApi(
                 if (!response.isSuccessful) {
                     val retryAt = retryAt(response.header("Retry-After"), System.currentTimeMillis())
                     throw when (response.code) {
-                        401, 403 -> BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads")
+                        401 -> BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads")
+                        403 -> if (metrics) BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
+                            "This BIKEYARD ride cannot receive sensor metrics") else
+                            BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads")
                         408, 429 -> BikeyardFailure(BikeyardFailure.Kind.RETRY, "BIKEYARD is busy. Upload will retry", retryAt)
                         in 500..599 -> BikeyardFailure(BikeyardFailure.Kind.RETRY, "BIKEYARD is unavailable. Upload will retry", retryAt)
-                        413 -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, "The processed file exceeds BIKEYARD’s 20 MB limit")
+                        413 -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, if (metrics)
+                            "Sensor metrics exceed BIKEYARD’s limit" else "The processed file exceeds BIKEYARD’s 20 MB limit")
+                        422 -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
+                            if (metrics) "BIKEYARD rejected sensor metrics for this ride" else "BIKEYARD rejected the upload")
                         else -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, "BIKEYARD rejected the request (HTTP ${response.code})")
                     }
                 }

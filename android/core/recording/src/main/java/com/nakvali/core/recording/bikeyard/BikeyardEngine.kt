@@ -95,9 +95,33 @@ internal class BikeyardEngine(
     suspend fun settings(automatic: Boolean, visibility: BikeyardVisibility) = mutex.withLock {
         check(!automatic || data.tokens != null) { "Connect BIKEYARD first" }
         val consent = if (automatic) data.autoConsentId ?: BikeyardPkce.random() else null
-        save(data.copy(autoConsentId = consent, visibility = visibility, message = null,
-            uploads = data.uploads.map {
-                if (!automatic && it.automatic && it.status in activeStatuses) it.copy(status = BikeyardUploadStatus.CANCELLED, error = "Automatic uploads turned off") else it
+        val keepMetrics = automatic && visibility == BikeyardVisibility.PRIVATE && data.autoMetrics
+        save(data.copy(autoConsentId = consent, autoMetrics = keepMetrics,
+            visibility = visibility, message = null,
+            uploads = data.uploads.map { job ->
+                val stopTrack = !automatic && job.automatic && job.status in activeStatuses
+                val stopMetrics = !keepMetrics && job.metricsAutomatic &&
+                    job.metricsStatus in activeMetricsStatuses
+                job.copy(
+                    status = if (stopTrack) BikeyardUploadStatus.CANCELLED else job.status,
+                    error = if (stopTrack) "Automatic uploads turned off" else job.error,
+                    metricsStatus = if (stopMetrics) BikeyardMetricsStatus.CANCELLED else job.metricsStatus,
+                    metricsError = if (stopMetrics) "Automatic airtime sync turned off" else job.metricsError,
+                )
+            }))
+    }
+
+    suspend fun metricsSettings(enabled: Boolean, mounting: BikeyardMounting) = mutex.withLock {
+        check(!enabled || (data.tokens != null && data.autoConsentId != null &&
+            data.visibility == BikeyardVisibility.PRIVATE)) {
+            "Enable private automatic ride uploads first"
+        }
+        save(data.copy(autoMetrics = enabled, metricsMounting = mounting,
+            uploads = data.uploads.map { job ->
+                if (!enabled && job.metricsAutomatic && job.metricsStatus in activeMetricsStatuses) {
+                    job.copy(metricsStatus = BikeyardMetricsStatus.CANCELLED,
+                        metricsError = "Automatic airtime sync turned off")
+                } else job
             }))
     }
 
@@ -107,7 +131,9 @@ internal class BikeyardEngine(
         val snapshot = data
         val account = snapshot.accountKey ?: return null
         val consent = snapshot.autoConsentId ?: return null
-        return BikeyardAutoRequest(account, consent, snapshot.visibility)
+        return BikeyardAutoRequest(account, consent, snapshot.visibility,
+            snapshot.autoMetrics && snapshot.visibility == BikeyardVisibility.PRIVATE,
+            snapshot.metricsMounting)
     }
 
     suspend fun enqueue(recordingId: String, title: String, description: String, bikeType: String,
@@ -123,6 +149,8 @@ internal class BikeyardEngine(
         val job = BikeyardUpload(
             key = BikeyardPkce.random(), recordingId = recordingId, accountKey = account,
             visibility = automatic?.visibility ?: data.visibility, automatic = automatic != null,
+            metricsAutomatic = automatic?.sensorMetrics == true,
+            metricsMounting = automatic?.mounting ?: BikeyardMounting.UNKNOWN,
             externalId = "nakvali-$recordingId", name = title.take(120), description = description.take(2000), bikeType = bikeType,
         )
         require(job.externalId.length <= 128 && job.externalId.all { it.code in 33..126 })
@@ -130,9 +158,9 @@ internal class BikeyardEngine(
         job
     }
 
-    suspend fun prepared(key: String): Boolean = mutex.withLock {
+    suspend fun prepared(key: String, sensorScopes: List<BikeyardSensorScope> = emptyList()): Boolean = mutex.withLock {
         val job = data.uploads.firstOrNull { it.key == key && it.status in activeStatuses } ?: return@withLock false
-        update(job.copy(prepared = true)); true
+        update(job.copy(prepared = true, sensorScopes = sensorScopes)); true
     }
 
     suspend fun fail(key: String, message: String) = mutex.withLock {
@@ -216,9 +244,70 @@ internal class BikeyardEngine(
         }
     }
 
+    suspend fun queueMetrics(key: String, manual: Boolean = false): Boolean = mutex.withLock {
+        val job = data.uploads.firstOrNull { it.key == key } ?: return@withLock false
+        if (job.status != BikeyardUploadStatus.UPLOADED || job.rideId == null || job.sensorScopes.isEmpty() ||
+            job.visibility != BikeyardVisibility.PRIVATE ||
+            job.accountKey != data.accountKey || data.tokens == null) return@withLock false
+        if (!manual && (!job.metricsAutomatic || !data.autoMetrics)) return@withLock false
+        if (job.metricsStatus in activeMetricsStatuses) return@withLock true
+        update(job.copy(metricsStatus = BikeyardMetricsStatus.QUEUED,
+            metricsAutomatic = !manual && job.metricsAutomatic,
+            metricsError = null, metricsRetryAtMs = 0))
+        true
+    }
+
+    suspend fun failMetrics(key: String, message: String) = mutex.withLock {
+        data.uploads.firstOrNull { it.key == key && it.status == BikeyardUploadStatus.UPLOADED }
+            ?.let { update(it.copy(metricsStatus = BikeyardMetricsStatus.FAILED, metricsError = message)) }
+    }
+
+    suspend fun processMetrics(key: String, file: File): Boolean = mutex.withLock {
+        var job = data.uploads.firstOrNull { it.key == key } ?: return@withLock true
+        if (job.metricsStatus !in activeMetricsStatuses || job.status != BikeyardUploadStatus.UPLOADED) {
+            return@withLock true
+        }
+        if (job.metricsAutomatic && !data.autoMetrics) {
+            update(job.copy(metricsStatus = BikeyardMetricsStatus.CANCELLED,
+                metricsError = "Automatic airtime sync turned off"))
+            return@withLock true
+        }
+        if (job.metricsRetryAtMs > now()) return@withLock false
+        val rideId = job.rideId
+        if (job.accountKey != data.accountKey || rideId == null) {
+            update(job.copy(metricsStatus = BikeyardMetricsStatus.NEEDS_AUTH,
+                metricsError = "Reconnect the original BIKEYARD account"))
+            return@withLock true
+        }
+        job = job.copy(metricsStatus = BikeyardMetricsStatus.UPLOADING, metricsError = null)
+        update(job)
+        try {
+            val receipt = remote.putMetrics(data.environment, token(), rideId, file)
+            if (receipt.rideId != rideId || receipt.revision < 1) {
+                throw BikeyardFailure(BikeyardFailure.Kind.RETRY, "BIKEYARD returned an incomplete metrics receipt")
+            }
+            update(job.copy(metricsStatus = BikeyardMetricsStatus.UPLOADED,
+                metricsRevision = receipt.revision))
+            true
+        } catch (error: BikeyardFailure) {
+            if (error.kind == BikeyardFailure.Kind.AUTH) {
+                save(data.copy(tokens = null, autoConsentId = null, message = error.message))
+            }
+            val status = when (error.kind) {
+                BikeyardFailure.Kind.AUTH -> BikeyardMetricsStatus.NEEDS_AUTH
+                BikeyardFailure.Kind.RETRY -> BikeyardMetricsStatus.QUEUED
+                BikeyardFailure.Kind.PERMANENT -> BikeyardMetricsStatus.FAILED
+            }
+            update(job.copy(metricsStatus = status, metricsError = error.message,
+                metricsRetryAtMs = error.retryAtMs))
+            status !in activeMetricsStatuses
+        }
+    }
+
     private fun update(job: BikeyardUpload) = save(data.copy(uploads = data.uploads.map { if (it.key == job.key) job else it }))
 
     companion object {
         val activeStatuses = setOf(BikeyardUploadStatus.QUEUED, BikeyardUploadStatus.UPLOADING)
+        val activeMetricsStatuses = setOf(BikeyardMetricsStatus.QUEUED, BikeyardMetricsStatus.UPLOADING)
     }
 }

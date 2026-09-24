@@ -30,7 +30,29 @@ enum class BikeyardVisibility(val wire: String, val label: String) {
 enum class BikeyardUploadStatus { QUEUED, UPLOADING, UPLOADED, FAILED, NEEDS_AUTH, DUPLICATE, CANCELLED }
 
 @Serializable
-data class BikeyardAutoRequest(val accountKey: String, val consentId: String, val visibility: BikeyardVisibility)
+enum class BikeyardMetricsStatus { NONE, QUEUED, UPLOADING, UPLOADED, FAILED, NEEDS_AUTH, CANCELLED }
+
+@Serializable
+enum class BikeyardMounting(val wire: String, val label: String) {
+    UNKNOWN("unknown", "Not sure"),
+    POCKET("pocket", "Pocket"),
+    HANDLEBAR("handlebar", "Handlebar"),
+    FRAME("frame", "Frame"),
+    BODY("body", "Firmly on body"),
+    BAG("bag", "Bag"),
+}
+
+@Serializable
+data class BikeyardAutoRequest(
+    val accountKey: String,
+    val consentId: String,
+    val visibility: BikeyardVisibility,
+    val sensorMetrics: Boolean = false,
+    val mounting: BikeyardMounting = BikeyardMounting.UNKNOWN,
+)
+
+@Serializable
+data class BikeyardSensorScope(val startedAtMs: Long, val endedAtMs: Long)
 
 @Serializable
 data class BikeyardUpload(
@@ -45,10 +67,17 @@ data class BikeyardUpload(
     val description: String,
     val bikeType: String,
     val prepared: Boolean = false,
+    val sensorScopes: List<BikeyardSensorScope> = emptyList(),
     val uploadId: String? = null,
     val rideId: String? = null,
     val retryAtMs: Long = 0,
     val error: String? = null,
+    val metricsStatus: BikeyardMetricsStatus = BikeyardMetricsStatus.NONE,
+    val metricsAutomatic: Boolean = false,
+    val metricsMounting: BikeyardMounting = BikeyardMounting.UNKNOWN,
+    val metricsError: String? = null,
+    val metricsRetryAtMs: Long = 0,
+    val metricsRevision: Int? = null,
 )
 
 data class BikeyardUiState(
@@ -58,6 +87,8 @@ data class BikeyardUiState(
     val riderName: String? = null,
     val accountKey: String? = null,
     val automatic: Boolean = false,
+    val automaticMetrics: Boolean = false,
+    val metricsMounting: BikeyardMounting = BikeyardMounting.UNKNOWN,
     val visibility: BikeyardVisibility = BikeyardVisibility.PRIVATE,
     val uploads: List<BikeyardUpload> = emptyList(),
     val message: String? = null,
@@ -86,6 +117,8 @@ internal data class BikeyardStoredState(
     val tokens: BikeyardTokens? = null,
     val pending: BikeyardPending? = null,
     val autoConsentId: String? = null,
+    val autoMetrics: Boolean = false,
+    val metricsMounting: BikeyardMounting = BikeyardMounting.UNKNOWN,
     val visibility: BikeyardVisibility = BikeyardVisibility.PRIVATE,
     val uploads: List<BikeyardUpload> = emptyList(),
     val message: String? = null,
@@ -95,6 +128,8 @@ internal data class BikeyardStoredState(
         loading = false, connected = tokens != null,
         connecting = pending != null, riderName = tokens?.riderName,
         accountKey = accountKey, automatic = autoConsentId != null,
+        automaticMetrics = autoConsentId != null && autoMetrics,
+        metricsMounting = metricsMounting,
         visibility = visibility, uploads = uploads, message = message,
     )
 }

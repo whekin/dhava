@@ -21,6 +21,8 @@ internal fun BikeyardSettings(viewModel: ProfileViewModel) {
     val state by viewModel.bikeyard.collectAsState()
     val context = LocalContext.current
     var confirmAutomatic by remember { mutableStateOf(false) }
+    var confirmAutomaticMetrics by remember { mutableStateOf(false) }
+    var showMountingMenu by remember { mutableStateOf(false) }
     var confirmDisconnect by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = NakvaliSpacing.large), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         NakvaliSectionLabel("BIKEYARD")
@@ -57,6 +59,36 @@ internal fun BikeyardSettings(viewModel: ProfileViewModel) {
                     if (it) confirmAutomatic = true else viewModel.bikeyardSettings(false, state.visibility)
                 }, modifier = Modifier.semantics { contentDescription = "Automatic BIKEYARD uploads" })
             }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text("Experimental airtime", style = MaterialTheme.typography.titleMedium)
+                    Text("Send candidate events with new private rides. Phone G stays local.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = state.automaticMetrics,
+                    enabled = state.automatic && state.visibility == BikeyardVisibility.PRIVATE,
+                    onCheckedChange = {
+                        if (it) confirmAutomaticMetrics = true
+                        else viewModel.bikeyardMetricsSettings(false, state.metricsMounting)
+                    },
+                    modifier = Modifier.semantics { contentDescription = "Automatic experimental airtime sync" },
+                )
+            }
+            if (state.automaticMetrics) Box {
+                TextButton(onClick = { showMountingMenu = true }) {
+                    Text("Phone position: ${state.metricsMounting.label}")
+                }
+                DropdownMenu(expanded = showMountingMenu, onDismissRequest = { showMountingMenu = false }) {
+                    BikeyardMounting.entries.forEach { mounting ->
+                        DropdownMenuItem(text = { Text(mounting.label) }, onClick = {
+                            viewModel.bikeyardMetricsSettings(true, mounting)
+                            showMountingMenu = false
+                        })
+                    }
+                }
+            }
             Text("Queued rides keep the visibility chosen when queued. Edits after an upload are not synced.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { confirmDisconnect = true }) { Text("Disconnect BIKEYARD") }
         }
@@ -67,6 +99,18 @@ internal fun BikeyardSettings(viewModel: ProfileViewModel) {
         text = { Text("This turns off Offline mode. New rides you save will upload to ${state.riderName}, with visibility ${state.visibility.label.lowercase()}. Processed tracks and ride details are sent; raw sensor files stay here.") },
         confirmButton = { TextButton(onClick = { viewModel.bikeyardSettings(true, state.visibility); confirmAutomatic = false }) { Text("Enable uploads") } },
         dismissButton = { TextButton(onClick = { confirmAutomatic = false }) { Text("Cancel") } },
+    )
+    if (confirmAutomaticMetrics) AlertDialog(
+        onDismissRequest = { confirmAutomaticMetrics = false },
+        title = { Text("Sync possible airtime automatically?") },
+        text = { Text("For new private rides, Nakvali will send candidate event times, measured " +
+            "sensor coverage and phone position after the track is accepted. Raw sensor files, " +
+            "GPS coordinates and phone G peaks stay on this device. Candidates are experimental.") },
+        confirmButton = { TextButton(onClick = {
+            viewModel.bikeyardMetricsSettings(true, state.metricsMounting)
+            confirmAutomaticMetrics = false
+        }) { Text("Enable airtime sync") } },
+        dismissButton = { TextButton(onClick = { confirmAutomaticMetrics = false }) { Text("Cancel") } },
     )
     if (confirmDisconnect) AlertDialog(
         onDismissRequest = { confirmDisconnect = false }, title = { Text("Disconnect BIKEYARD?") },

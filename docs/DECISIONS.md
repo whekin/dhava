@@ -1077,3 +1077,41 @@ Remove Strava integration code end-to-end, including Android jobs/callbacks and 
 routes/store/client/config/OpenAPI definitions. Retain applied SQL migration history
 and ignore retired recording-index fields on read; removal does not erase existing
 rides or execute a destructive database migration.
+
+## 2026-09-24 — Airtime detail distinguishes phone evidence from riding mechanics
+
+The local activity detail can show each experimental airborne candidate's duration
+and acceleration-magnitude peaks before and after the interval, as measured at
+the phone. Unknown pre-air evidence is shown as unavailable. Map position comes
+from timestamps within one continuous riding section and is approximate; an
+unplaceable event remains available in the detail without an invented marker.
+
+Do not label phone acceleration as rider G-force, or infer a takeoff angle or
+landing-smoothness score from an arbitrarily mounted phone. Those metrics require
+a defined bike-relative orientation/mounting model and field validation. The
+local UI does not imply that BIKEYARD accepts or publishes these extra values.
+The displayed g values are raw maxima of phone acceleration magnitude in
+300 ms windows near the candidate, not sustained force or confirmed takeoff/
+landing load. Do not cap high readings merely because they look implausible for
+a rider; inspect the timestamped IMU window and phone mounting first.
+
+## 2026-09-25 — BIKEYARD sensor metrics use separate private-ride consent
+
+The published BIKEYARD v1 endpoint accepts one JSON document per owned ride,
+returns 200 on an identical retry and permits replacement. Nakvali sends
+candidate airtime timestamps only after the processed TCX has a confirmed
+`ride_id`. The rider may explicitly submit metrics for a private ride or enable
+a separate automatic switch for new saved private rides. Phone mounting is
+chosen in the manual dialog or automatic settings and frozen with consent.
+The document omits GPS, raw IMU,
+phone G peaks, jump counts and validated status. Track-upload success remains
+independent of metrics success.
+
+The uploaded TCX's continuous riding time scopes are frozen in the encrypted
+ledger when that track is prepared. Later metrics calculations use those same
+scopes even if local trim/transport annotations or Rust algorithms change. A
+legacy uploaded job without frozen scopes cannot attach provisional metrics:
+the server does not expose its original track for a trustworthy comparison.
+Automatic metrics sync defaults off and requires a separate explicit choice;
+automatic *ride* upload consent is not inherited. Turning it off cancels queued
+automatic metrics while leaving confirmed track uploads intact.

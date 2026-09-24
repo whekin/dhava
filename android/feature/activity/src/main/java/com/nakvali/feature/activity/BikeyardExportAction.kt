@@ -23,6 +23,7 @@ internal class BikeyardExportViewModel(application: Application) : AndroidViewMo
     private val repository = BikeyardRepository.getInstance(application)
     val state = repository.state
     fun upload(recording: LocalRecording) = repository.upload(recording)
+    fun syncMetrics(recordingId: String, mounting: BikeyardMounting) = repository.syncMetrics(recordingId, mounting)
     fun connect(onResult: (Result<String>) -> Unit) {
         viewModelScope.launch { onResult(runCatching { repository.beginConnect() }) }
     }
@@ -40,6 +41,9 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
     val context = LocalContext.current
     val upload = recording?.let { state.uploadFor(it.id) }
     var confirmUpload by remember { mutableStateOf(false) }
+    var confirmMetrics by remember { mutableStateOf(false) }
+    var selectedMounting by remember { mutableStateOf(BikeyardMounting.UNKNOWN) }
+    var mountingMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("BIKEYARD", style = MaterialTheme.typography.titleMedium)
         Text("Whole ride · compressed TCX without transport. Original recordings stay on this phone.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -69,6 +73,37 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
         if (state.connecting) TextButton(onClick = viewModel::cancelConnect) { Text("Cancel connection") }
         upload?.let { Text("Visibility: ${it.visibility.label}", style = MaterialTheme.typography.bodySmall) }
         (upload?.error ?: state.message)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (upload?.status == BikeyardUploadStatus.UPLOADED && upload.rideId != null) {
+            if (upload.sensorScopes.isEmpty()) {
+                Text("Airtime sync needs a ride uploaded with this app version; earlier track boundaries were not saved.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (upload.visibility == BikeyardVisibility.PRIVATE) {
+                val metricsWaiting = upload.metricsStatus == BikeyardMetricsStatus.QUEUED ||
+                    upload.metricsStatus == BikeyardMetricsStatus.UPLOADING
+                val metricsLabel = when (upload.metricsStatus) {
+                    BikeyardMetricsStatus.NONE -> "Send experimental airtime"
+                    BikeyardMetricsStatus.QUEUED, BikeyardMetricsStatus.UPLOADING -> "Syncing airtime…"
+                    BikeyardMetricsStatus.UPLOADED -> "Update experimental airtime"
+                    BikeyardMetricsStatus.FAILED -> "Retry airtime sync"
+                    BikeyardMetricsStatus.NEEDS_AUTH -> "Reconnect to sync airtime"
+                    BikeyardMetricsStatus.CANCELLED -> "Send airtime manually"
+                }
+                TextButton(onClick = { confirmMetrics = true }, enabled = state.connected && !metricsWaiting) {
+                    Text(metricsLabel)
+                }
+                if (upload.metricsStatus == BikeyardMetricsStatus.UPLOADED) {
+                    Text("Sensor metrics revision ${upload.metricsRevision ?: 1} in BIKEYARD",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                upload.metricsError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } else {
+                Text("Experimental airtime sync is available for private rides only.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (terminal) TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://yard.bike"))) }) { Text("Open BIKEYARD") }
         if (recording?.savedAtMs == null) Text("Save this ride before uploading.", style = MaterialTheme.typography.bodySmall)
     }
@@ -77,5 +112,33 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
         text = { Text("Send the whole processed ride to ${state.riderName}. Visibility: ${(upload?.visibility ?: state.visibility).label}. Change the default in Profile → BIKEYARD. A retry keeps the original queued file and settings.") },
         confirmButton = { TextButton(onClick = { viewModel.upload(recording); confirmUpload = false }) { Text("Upload") } },
         dismissButton = { TextButton(onClick = { confirmUpload = false }) { Text("Cancel") } },
+    )
+    if (confirmMetrics && recording != null) AlertDialog(
+        onDismissRequest = { confirmMetrics = false },
+        title = { Text("Send possible airtime?") },
+        text = {
+            Column {
+                Text("Send candidate event times and measured sensor coverage for this private ride. " +
+                    "No GPS coordinates, raw sensors or phone G peaks are included.")
+                Box {
+                    TextButton(onClick = { mountingMenu = true }) {
+                        Text("Phone position: ${selectedMounting.label}")
+                    }
+                    DropdownMenu(expanded = mountingMenu, onDismissRequest = { mountingMenu = false }) {
+                        BikeyardMounting.entries.forEach { mounting ->
+                            DropdownMenuItem(text = { Text(mounting.label) }, onClick = {
+                                selectedMounting = mounting
+                                mountingMenu = false
+                            })
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = {
+            viewModel.syncMetrics(recording.id, selectedMounting)
+            confirmMetrics = false
+        }) { Text("Send candidates") } },
+        dismissButton = { TextButton(onClick = { confirmMetrics = false }) { Text("Cancel") } },
     )
 }

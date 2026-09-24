@@ -2,9 +2,8 @@
 
 ## Public download location
 
-The actual public repository is currently `whekin/dhava` (verified 2026-09-21);
-no GitHub releases exist yet. Use its GitHub Releases for signed APKs. The website
-links to the releases list until a real downloadable release is published.
+The public repository is `whekin/dhava`. Its `v0.1.0-test2` prerelease carries
+the signed, keyless `nakvali.apk`; the website links directly to that asset.
 
 For each public release, use a unique version code, a version/tag matching the
 APK, release notes, the stable asset name `nakvali.apk`, and an SHA-256 checksum.
@@ -86,6 +85,12 @@ From the repository root:
 just prod
 just android-prod-bundle
 ```
+
+For a **public** APK, override the local alpha perimeter key with an empty
+value: `cd android && ./gradlew :app:assembleRelease -PnakvaliApiAccessKey=`.
+Verify the generated release `BuildConfig.API_ACCESS_KEY` is empty before
+uploading. This public artifact retains local tracking and direct BIKEYARD
+integration; owner-only Nakvali backend access is unavailable without that key.
 
 The APK and Play-compatible bundle are written to:
 

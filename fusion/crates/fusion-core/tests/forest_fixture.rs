@@ -3,7 +3,10 @@
 //! at 1 Hz, no baro. The rider does two bunny hops (around t ≈ +19.8 s and
 //! +23.3 s) and rides down a short stair drop.
 
-use fusion_core::{ALGORITHM_VERSION, ElevationSource, analyze_recording, finalize_recording};
+use fusion_core::{
+    ALGORITHM_VERSION, ElevationSource, SensorTimeScope, analyze_recording, finalize_recording,
+    sensor_metrics_evidence,
+};
 
 fn fixture_path() -> String {
     concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/forest-30s.jsonl.gz").to_owned()
@@ -77,6 +80,22 @@ fn real_forest_recording_analyzes_plausibly() {
 
     assert_eq!(a.algorithm_version, ALGORITHM_VERSION);
     assert!(a.descent_m >= 0.0 && a.ascent_m >= 0.0);
+}
+
+#[test]
+fn real_forest_recording_produces_measured_sensor_evidence() {
+    let analysis = analyze_recording(fixture_path()).unwrap();
+    let evidence = sensor_metrics_evidence(
+        fixture_path(),
+        vec![SensorTimeScope {
+            started_at_ms: analysis.started_at_ms,
+            ended_at_ms: analysis.ended_at_ms,
+        }],
+    )
+    .unwrap();
+    assert!(evidence.coverage > 0.8, "coverage {}", evidence.coverage);
+    assert!(evidence.sample_rate_hz.is_some_and(|rate| rate > 100.0));
+    assert!(!evidence.events.is_empty());
 }
 
 #[test]

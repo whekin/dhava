@@ -1,6 +1,6 @@
 //! On-device ride analysis: the first real analysis API exposed to Android.
 //!
-//! # Algorithm status: `gps-bounded-0.10`
+//! # Algorithm status: `gps-bounded-0.17`
 //!
 //! Everything in this module is a deliberately NAIVE, GPS-first v0 baseline,
 //! to be replaced by proper GPS+IMU+baro Kalman fusion. Every result is
@@ -28,7 +28,8 @@
 //!   airborne time (a true free fall reads ~0, riding reads ~9.8 plus
 //!   vibration). Windows closer than 100 ms are merged; windows shorter
 //!   than 150 ms are discarded. `landing_peak_g` is the max |accel|/9.81
-//!   within 300 ms after the window ends.
+//!   within 300 ms after the window ends. Missing IMU spans never form one
+//!   event, and an unfinished window without landing evidence is omitted.
 
 use std::path::Path;
 
@@ -37,7 +38,7 @@ use crate::recording::{ParsedRecording, parse_recording_file};
 use crate::{FusionError, GpsPoint, ImuSample};
 
 /// Version tag applied to every analysis result, product-wide.
-pub const ALGORITHM_VERSION: &str = "gps-bounded-0.15";
+pub const ALGORITHM_VERSION: &str = "gps-bounded-0.17";
 
 /// Standard gravity, m/s^2.
 const G: f64 = 9.81;
@@ -59,8 +60,13 @@ const AIRTIME_ACCEL_THRESHOLD: f64 = 4.0;
 const AIRTIME_MIN_MS: i64 = 150;
 /// Airtime windows closer than this are merged into one.
 const AIRTIME_MERGE_GAP_MS: i64 = 100;
+/// A gap larger than this cannot support a continuous free-fall observation.
+pub(crate) const AIRTIME_MAX_SAMPLE_GAP_MS: i64 = 60;
 /// Landing peak is searched within this span after the airtime window.
 const LANDING_SEARCH_MS: i64 = 300;
+/// The local phone-load summary immediately before the airborne interval.
+const TAKEOFF_SEARCH_MS: i64 = 300;
+const MIN_TAKEOFF_EVIDENCE_MS: i64 = 100;
 /// Track output is decimated to roughly this interval.
 const TRACK_DECIMATION_MS: i64 = 950;
 /// One detected airborne window (jump / drop).
@@ -72,6 +78,9 @@ pub struct AirtimeWindow {
     pub duration_ms: i64,
     /// Peak |accel| within 300 ms after landing, in g (9.81 m/s^2).
     pub landing_peak_g: f64,
+    /// Peak phone acceleration magnitude in the 300 ms before the interval,
+    /// including gravity. None if there is too little pre-air evidence.
+    pub takeoff_peak_g: Option<f64>,
 }
 
 /// One decimated track point for map display (~1 Hz).
@@ -396,7 +405,25 @@ fn ascent_descent(gps: &[GpsPoint]) -> (f64, f64) {
 /// window is below 4.0 m/s^2. Contiguous airborne runs closer than 100 ms
 /// are merged; merged runs shorter than 150 ms are dropped. The landing peak
 /// is the max |accel| within 300 ms after the run ends.
-fn detect_airtime(imu: &[ImuSample]) -> Vec<AirtimeWindow> {
+pub(crate) fn detect_airtime(imu: &[ImuSample]) -> Vec<AirtimeWindow> {
+    if imu.len() < 2 {
+        return Vec::new();
+    }
+    let mut windows = Vec::new();
+    let mut section_start = 0;
+    for index in 1..=imu.len() {
+        if index == imu.len()
+            || imu[index].timestamp_ms - imu[index - 1].timestamp_ms > AIRTIME_MAX_SAMPLE_GAP_MS
+            || imu[index].timestamp_ms <= imu[index - 1].timestamp_ms
+        {
+            windows.extend(detect_airtime_contiguous(&imu[section_start..index]));
+            section_start = index;
+        }
+    }
+    windows
+}
+
+fn detect_airtime_contiguous(imu: &[ImuSample]) -> Vec<AirtimeWindow> {
     if imu.len() < 2 {
         return Vec::new();
     }
@@ -431,7 +458,7 @@ fn detect_airtime(imu: &[ImuSample]) -> Vec<AirtimeWindow> {
     let mut run_start: Option<i64> = None;
     for (i, &a) in airborne.iter().enumerate() {
         if a && run_start.is_none() {
-            run_start = Some(imu[i].timestamp_ms - AIRTIME_MIN_MS / 2);
+            run_start = Some((imu[i].timestamp_ms - AIRTIME_MIN_MS / 2).max(imu[0].timestamp_ms));
         } else if !a && run_start.is_some() {
             let end = imu[i - 1].timestamp_ms - AIRTIME_MIN_MS / 2;
             runs.push((run_start.take().unwrap(), end));
@@ -455,18 +482,39 @@ fn detect_airtime(imu: &[ImuSample]) -> Vec<AirtimeWindow> {
     merged
         .into_iter()
         .filter(|(start, end)| end - start >= AIRTIME_MIN_MS)
-        .map(|(start, end)| {
-            let landing_peak = imu
+        .filter_map(|(start, end)| {
+            // The IMU section is timestamp-sorted. Binary search keeps a long
+            // ride with many events from rescanning its full sensor stream for
+            // every takeoff and landing window.
+            let before_start =
+                imu.partition_point(|s| s.timestamp_ms < start.saturating_sub(TAKEOFF_SEARCH_MS));
+            let before_end = imu.partition_point(|s| s.timestamp_ms < start);
+            let takeoff_peak_g = imu
+                .get(before_start)
+                .filter(|first| {
+                    before_start < before_end
+                        && first.timestamp_ms <= start.saturating_sub(MIN_TAKEOFF_EVIDENCE_MS)
+                })
+                .and_then(|_| {
+                    mag[before_start..before_end]
+                        .iter()
+                        .copied()
+                        .reduce(f64::max)
+                })
+                .map(|peak| peak / G);
+            let landing_start = imu.partition_point(|s| s.timestamp_ms <= end);
+            let landing_end =
+                imu.partition_point(|s| s.timestamp_ms <= end.saturating_add(LANDING_SEARCH_MS));
+            let landing_peak = mag[landing_start..landing_end]
                 .iter()
-                .zip(&mag)
-                .filter(|(s, _)| s.timestamp_ms > end && s.timestamp_ms <= end + LANDING_SEARCH_MS)
-                .map(|(_, &m)| m)
-                .fold(0.0f64, f64::max);
-            AirtimeWindow {
+                .copied()
+                .reduce(f64::max)?;
+            Some(AirtimeWindow {
                 start_ms: start,
                 duration_ms: end - start,
                 landing_peak_g: landing_peak / G,
-            }
+                takeoff_peak_g,
+            })
         })
         .collect()
 }
@@ -629,6 +677,66 @@ mod tests {
             w.duration_ms
         );
         assert!(w.landing_peak_g > 3.0, "peak {}", w.landing_peak_g);
+        assert!(w.takeoff_peak_g.is_some_and(|g| (0.9..1.1).contains(&g)));
+    }
+
+    #[test]
+    fn airtime_does_not_bridge_missing_imu_samples() {
+        let sample = |t, a| ImuSample {
+            timestamp_ms: t,
+            accel: [0.0, 0.0, a],
+            gyro: [0.0, 0.0, 0.0],
+            mag: None,
+        };
+        let mut imu: Vec<_> = (0..=100).step_by(5).map(|t| sample(t, 0.3)).collect();
+        imu.extend((180..=280).step_by(5).map(|t| sample(t, 0.3)));
+        imu.push(sample(285, 39.2));
+
+        assert!(detect_airtime(&imu).is_empty());
+    }
+
+    #[test]
+    fn unfinished_airtime_has_no_fabricated_zero_g_landing() {
+        let imu: Vec<_> = (0..=400)
+            .step_by(5)
+            .map(|t| ImuSample {
+                timestamp_ms: t,
+                accel: [0.0, 0.0, 0.3],
+                gyro: [0.0, 0.0, 0.0],
+                mag: None,
+            })
+            .collect();
+
+        assert!(detect_airtime(&imu).is_empty());
+    }
+
+    #[test]
+    fn takeoff_load_is_unavailable_without_pre_air_sensor_history() {
+        let mut imu: Vec<_> = (0..=400)
+            .step_by(5)
+            .map(|t| ImuSample {
+                timestamp_ms: t,
+                accel: [0.0, 0.0, 0.3],
+                gyro: [0.0, 0.0, 0.0],
+                mag: None,
+            })
+            .collect();
+        imu.push(ImuSample {
+            timestamp_ms: 405,
+            accel: [0.0, 0.0, 30.0],
+            gyro: [0.0, 0.0, 0.0],
+            mag: None,
+        });
+        imu.extend((410..=700).step_by(5).map(|t| ImuSample {
+            timestamp_ms: t,
+            accel: [0.0, 0.0, 9.8],
+            gyro: [0.0, 0.0, 0.0],
+            mag: None,
+        }));
+
+        let windows = detect_airtime(&imu);
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].takeoff_peak_g, None);
     }
 
     #[test]

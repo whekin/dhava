@@ -41,7 +41,7 @@ assert(
 );
 assert(
   (await read('index.html')).includes(
-    'https://github.com/whekin/dhava/releases',
+    'https://github.com/whekin/dhava/releases/download/v0.1.0-test2/nakvali.apk',
   ),
 );
-console.log('Static routes, release link and Android association verified.');
+console.log('Static routes, preview APK link and Android association verified.');

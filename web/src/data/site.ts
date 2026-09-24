@@ -9,7 +9,7 @@ export const site = {
   name: 'Nakvali',
   origin: 'https://nakvali.whekin.dev',
   repository: 'https://github.com/whekin/dhava',
-  releases: 'https://github.com/whekin/dhava/releases',
+  releases: 'https://github.com/whekin/dhava/releases/download/v0.1.0-test2/nakvali.apk',
   contactEmail,
-  updated: '21 September 2026',
+  updated: '25 September 2026',
 };

@@ -87,4 +87,32 @@ class BikeyardApiTest {
         } finally { file.delete() }
     }
 
+    @Test fun `metrics PUT sends frozen JSON and accepts an idempotent 200`() = runBlocking {
+        val rideId = "11111111-1111-1111-1111-111111111111"
+        val file = File.createTempFile("bikeyard-metrics", ".json").apply {
+            writeText("""{"schema":"bikeyard.sensor-metrics","events":[]}""")
+        }
+        try {
+            val api = api(200, """{"ride_id":"$rideId","revision":2}""") { request ->
+                assertEquals("https://open.yard.bike/v1/rides/$rideId/sensor-metrics", request.url.toString())
+                assertEquals("PUT", request.method)
+                assertEquals("Bearer access", request.header("Authorization"))
+                assertEquals("application/json", request.body!!.contentType().toString())
+                val body = okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+                assertEquals(file.readText(), body)
+            }
+            assertEquals(2, api.putMetrics(BikeyardEnvironment.LIVE, "access", rideId, file).revision)
+        } finally { file.delete() }
+    }
+
+    @Test fun `ride-level metrics denial does not revoke an otherwise valid connection`() = runBlocking {
+        val rideId = "11111111-1111-1111-1111-111111111111"
+        val file = File.createTempFile("bikeyard-metrics", ".json").apply { writeText("{}") }
+        try {
+            val api = api(403, """{"error":{"code":"forbidden","message":"not yours"}}""") {}
+            val result = runCatching { api.putMetrics(BikeyardEnvironment.LIVE, "access", rideId, file) }
+            assertEquals(BikeyardFailure.Kind.PERMANENT, (result.exceptionOrNull() as BikeyardFailure).kind)
+        } finally { file.delete() }
+    }
+
 }

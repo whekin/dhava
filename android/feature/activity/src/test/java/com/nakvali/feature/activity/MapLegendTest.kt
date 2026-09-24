@@ -7,6 +7,28 @@ import org.junit.Test
 class MapLegendTest {
 
     @Test
+    fun `possible airtime legend appears only with placed candidates on fusion map`() {
+        assertEquals(
+            listOf(MapLegendSection.Airtime),
+            mapLegendSections(
+                mode = TrackMode.Fusion,
+                hasActivityStates = false,
+                hasAccuracy = false,
+                hasAirtimeCandidates = true,
+            ),
+        )
+        assertEquals(
+            emptyList<MapLegendSection>(),
+            mapLegendSections(
+                mode = TrackMode.Gps,
+                hasActivityStates = false,
+                hasAccuracy = false,
+                hasAirtimeCandidates = true,
+            ),
+        )
+    }
+
+    @Test
     fun `GPS mode exposes only GPS accuracy`() {
         assertEquals(
             listOf(MapLegendSection.GpsAccuracy),

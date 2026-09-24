@@ -90,6 +90,17 @@ import { site } from '../data/site';
       go directly to BIKEYARD; original sensor files stay on the phone.
     </p>
     <p>
+      Experimental airtime sharing has a separate switch and starts off. When
+      you enable it for new private rides, or choose to send it for one private
+      ride, Nakvali sends candidate event times, measured sensor coverage and
+      sample rate, and the phone position you select. BIKEYARD associates those
+      times with its copy of your ride. The app does not send raw motion samples,
+      GPS coordinates in the metrics document, or phone G peaks. Turning off
+      automatic airtime sharing stops future and queued automatic submissions;
+      metrics already accepted by BIKEYARD remain with that ride until you
+      manage the ride there.
+    </p>
+    <p>
       Disconnecting removes local connection data and stops queued uploads. If
       the app cannot reach BIKEYARD to revoke access, it tells you to finish
       revocation in BIKEYARD’s connected apps. Already uploaded rides remain in

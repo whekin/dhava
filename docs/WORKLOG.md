@@ -4094,3 +4094,247 @@ persisted upload receipt recovery across a new engine instance without another
 POST. No real account upload was initiated. APK rebuilt locally; not installed,
 published, committed or pushed in this iteration. Sensor-metrics design is a
 proposal, not a guarantee that BIKEYARD already accepts those fields.
+
+## 2026-09-23 — Review BIKEYARD's sensor-metrics draft
+
+Pavel proposed an optional write-once JSON attachment at
+`PUT /v1/rides/{ride_id}/sensor-metrics`, available after asynchronous ride import.
+Nakvali computes/filter events; BIKEYARD maps them to its stored track, applies
+privacy rules and derives display totals. No raw IMU or GPS coordinates are sent.
+The published OpenAPI did not yet expose this endpoint on September 23. Updated
+`docs/bikeyard-sensor-metrics.md` from our open-ended proposal to a focused review,
+without implementing an unconfirmed API. Created `CONTEXT.md` to distinguish an
+airborne candidate from a validated bike jump and a phone landing peak from rider
+body force.
+
+The earlier `recording_id`, `external_id` and `track_sha256` were for client-side
+reconciliation and guarding a track revision, but the receiver's authenticated
+`ride_id` is sufficient for this v1 one-ride attachment; recommend removing them
+from the JSON. A raw-file byte hash is also unstable across semantically equivalent
+FIT/TCX exports. Two design decisions remain with BIKEYARD: identical retry after
+a lost 201 must be idempotent rather than an indistinguishable 409, and write-once
+candidate metrics cannot later be corrected or validated when Nakvali recomputes
+from the retained raw data. Also flagged the draft's conflicting 20 MB / 256 KB
+body limits and its placement heuristic, which could interpolate across a short
+recorded pause or shuttle break.
+
+Current Rust emits experimental airborne windows and a peak acceleration magnitude
+at the phone. It does not supply validated bike-jump classification, detector-
+specific version, sensor coverage/clipping quality, reliable landing-missing null,
+or filtering against the exact uploaded ride scope. No metrics were sent to Pavel
+or BIKEYARD. No code changed; documentation-only review needs no build rerun.
+
+## 2026-09-23 — Activity map clutter and provisional airtime markers
+
+The ordinary activity map now omits STILL samples from its individual fused-point
+layer (the canonical track and raw GPS/Compare diagnostics remain intact). Stop
+rings appear only for confirmed rider stops of at least one minute and zoom 15+.
+The existing semantic line already omitted still-to-still edges; this change
+removes the residual sample cloud and short-stop rings from the default map.
+
+The detail map projects Rust airborne windows onto the finalized fused track by
+timestamp. Both start and end must fall in the same uninterrupted riding section;
+manual pause, a GPS gap, stillness or motorized transport leaves the event
+unplaced rather than inventing a location. Placed events use a small takeoff
+chevron; tapping shows "Possible airtime" and duration. The map legend and local
+metric heading use candidate language, not validated jump claims. This is only
+local visualization; it does not alter recording, fusion, exports or BIKEYARD
+uploads. The algorithm still needs quality validation before external sharing.
+
+Pavel confirmed the proposed sensor-metrics body limit is 20 MB and suggested
+allowing replacement during testing. Updated the draft/roadmap accordingly.
+Client retries alone cannot resolve a lost 201 followed by write-once 409; the
+receiver still needs defined idempotency or a comparable GET response.
+
+Validation: activity unit tests and full debug APK assembly pass. ADB is
+available, but the existing emulator is foregrounding another app, so it was not
+disturbed; no visual review or physical-device installation was performed.
+Field-recording map legibility, candidate placement and interaction remain to be
+checked on a suitable device. No commit, push or deployment in this iteration.
+
+## 2026-09-23 — Zoom-aware airtime and IMU gap integrity
+
+After rider review, possible-airtime chevrons now appear only from map zoom 17;
+MapLibre collision placement still suppresses overlapping glyphs. Zooming back
+out closes an open candidate card. This preserves the ride overview when many
+events occupy the same part of the map.
+
+The Rust detector now divides the IMU stream at discontinuities over 60 ms or
+non-increasing timestamps before finding/merging airborne windows. The 60 ms
+threshold retains the existing 20 Hz vertical fixture while preventing a
+larger missing-sample hole from becoming one apparently continuous event.
+An open interval with no post-window sample is omitted, instead of reporting
+fabricated 0 G landing evidence. This is only a first integrity guard; it does
+not validate a bike jump or establish usable sample coverage/mounting quality.
+Product-wide `ALGORITHM_VERSION` advanced to `gps-bounded-0.16` so cached
+canonical artifacts can be recomputed from local raw data. Android arm64/x86_64
+native libraries and UniFFI bindings were regenerated; bindings did not change.
+
+Validation: full Rust workspace tests and Clippy passed, including new missing-
+sample and unfinished-window tests. Activity unit tests and debug APK assembly
+passed; the arm64 native library hash inside the APK matches the rebuilt file.
+`cargo fmt --check` for the whole workspace still reports pre-existing unrelated
+format differences; the changed `analysis.rs` was formatted directly. A fresh
+release APK was installed over the existing Nakvali installation on S25 with
+`adb install -r` (success, application data retained); no interactive screen
+inspection or end-to-end BIKEYARD metrics upload was performed. The published
+BIKEYARD OpenAPI could not be fetched in this sandbox, so the draft attachment
+endpoint remains unverified. No commit or push.
+
+## 2026-09-24 — Per-event airtime detail and linked map selection
+
+The map and activity sheet now share one selected airborne-candidate index.
+Tapping a chevron selects the event; previous/next controls in the sheet select
+an event and move the map to its approximate start when placement is reliable.
+The selected candidate receives a subtle map ring and a dashed start/end span
+at close zoom. The map bubble identifies the event, duration and phone peaks;
+the sheet shows exact start/end times, duration, a takeoff/landing timeline,
+pre-air and post-air phone acceleration peaks, and whether a map location is
+available. It continues to call these unverified candidates, not jumps.
+
+Rust now records optional `takeoff_peak_g`: maximum phone acceleration magnitude
+in the 300 ms before the candidate, only with at least 100 ms of preceding IMU
+history. Like `landing_peak_g`, it includes gravity and is not rider body force.
+The old local cache format decodes with no takeoff value; `ALGORITHM_VERSION`
+advanced to `gps-bounded-0.17` so artifacts are recomputed from retained raw
+data. The same Rust detector owns all sensor arithmetic. Candidate-window peak
+searches now use binary timestamp bounds rather than scanning the full IMU stream
+for each event. Takeoff angle and landing smoothness remain unmeasured pending
+bike-relative mounting alignment and field calibration; no placeholder numbers
+are shown or sent to BIKEYARD.
+
+Validation: 175 fusion-core unit tests and 2 integration tests, workspace Clippy,
+changed-file rustfmt, Android core-recording and activity unit tests, debug lint,
+debug and release APK builds passed. Native arm64/x86_64 libraries and UniFFI
+bindings were regenerated. The updated release APK installed over Nakvali on
+S25 successfully, preserving app data. The handset showed NotificationShade
+during the visual-check window, so the new card has not yet been inspected in
+the running app. No metrics API call, commit or push.
+
+## 2026-09-25 — Airtime overview groups and high-G investigation
+
+The zoom-17 cutoff hid every airtime marker at typical whole-ride overview
+scales. Added a separate overview source below zoom 17: candidates closer than
+36 dp in current screen projection become one small ring, labelled with their
+count when multiple events are present. The representative stays on an actual
+candidate location, rather than inventing a centroid away from the trail.
+Tapping a group zooms toward its area; tapping a single overview dot selects
+that event. The existing chevrons, selected span and per-event detail take over
+at close zoom. The overview source is rebuilt on camera idle and when event
+data changes, and is hidden in diagnostic GPS mode. Activity tests and debug/
+release APK builds pass. The updated release APK installed over Nakvali on S25.
+Visual inspection of this overview on the handset remains pending.
+
+The rider reported pre-air values around 6 g and one 17.3 g post-air reading.
+Checked acquisition: Android persists `TYPE_ACCELEROMETER` axes in m/s² with
+the sensor event timestamp; Rust computes Euclidean magnitude / 9.81 and
+takes the largest single sample in the 300 ms before/after candidate windows.
+This is raw phone impulse, not a smoothed rider load. The public 30-second forest
+fixture reproduces the same *kind* of high reading: 11.91 g after an event,
+with several 10–12 g samples nearby, so high values are not necessarily a unit
+conversion or isolated one-sample error. That fixture cannot explain the
+rider's exact 17.3 g; it may be mount shock, a nearby separate hit inside the
+window, or sensor behavior. Release app storage is not ADB-readable (`run-as`
+reports package not debuggable), so the specific IMU window was unavailable.
+No arbitrary clipping or smoothing was applied. UI copy now states clearly that
+these are maximum single phone samples, with possible mount/trail vibration.
+The debug `analyze` example prints exact event time and both phone peaks for
+future raw-recording diagnosis. Rust workspace tests/Clippy, activity tests,
+debug lint and release build pass. No commit or push.
+
+## 2026-09-25 — Diagnose reported 17.3 g from S25 export
+
+The rider saved a raw `.jsonl.gz` recording in S25 Downloads. Pulled only the
+freshest export into a temporary local file and ran the same Rust `analyze`
+example. Air 12 matches the UI exactly: 6.02 g in the 300 ms before the
+candidate and 17.28 g in the 300 ms after. The pre-air maximum was 258 ms
+before the detected start, so it cannot be called a measured takeoff force.
+The post-air maximum was 136 ms after the detected end. Adjacent IMU samples
+were 11.2, 17.28 and 13.87 g, then quickly decayed; it was not a lone corrupt
+sample or a units/conversion bug. A 40 ms average over the burst peaks at
+10.85 g, illustrating how a single-sample maximum differs from a sustained
+phone shock. The recorded peak vector components were approximately
+`[6.78, -14.66, -6.14] g`, below the sensor's nominal ±16 g per-axis full
+scale; no clear clipping evidence for this event. Another event reached
+18.1 g magnitude with one axis near -15.95 g, where saturation is plausible.
+STMicroelectronics lists ±2/±4/±8/±16 g selectable full-scale ranges for the
+LSM6DSV used by S25; the Android HAL's selected range was not independently
+read. This is phone/mount impulse evidence, not a rider-load measurement.
+
+Across 26 candidate events, post-air raw peak median was 10.64 g and 16 events
+exceeded 10 g, so high readings recur on this ride. This supports revisiting
+which statistic should be primary in the UI, but not silently clipping true
+sensor readings. Exact mount conditions remain unknown. No GPS coordinates
+were printed or stored in the report; the temporary local raw copy and analysis
+text were deleted. The original export remains on the phone. No code change
+from this diagnosis beyond the previously updated explanatory copy.
+
+## 2026-09-25 — Interpret G with a phone carried in a pocket
+
+The rider clarified the S25 is usually carried in a pocket and the bike is
+fully suspended. This substantially limits what the high-g peaks mean: Android
+reports the phone's own three-axis proper acceleration including gravity; the
+app displays vector magnitude / 9.81, so rest is about 1 g and free fall about
+0 g. A loose phone can move relative to the rider and strike the pocket/leg.
+The 17.28 g event remains a real short phone impulse in the raw recording, not
+evidence that the rider's centre of mass or spine experienced 17 g. Suspension,
+the rider's limbs and soft tissue change transmission at each location. Keep
+per-event G explicitly phone-specific and candidate airtime unvalidated until
+a secure mount/body reference and field comparison exist. No code change here.
+
+## 2026-09-25 — Published BIKEYARD metrics API and private pilot sender
+
+Fetched the live public OpenAPI from `yard.bike`: `PUT`/`GET
+/v1/rides/{ride_id}/sensor-metrics` now exist with `rides:write`. First PUT is
+201; the same document returns 200 without a new revision; changed content
+replaces the document and returns 200 with a higher revision. Body limit is
+20 MB, event cap 2000. A no-token GET reached the live route and returned
+401. This resolves the earlier lost-201/replacement blocker without asking
+Pavel to change the endpoint again.
+
+Implemented a manual, private-ride pilot. The rider selects mounting; the
+client sends only sorted `kind=airtime`, `status=candidate` event timestamps,
+real measured sensor coverage and observed sample rate. It omits GPS, raw IMU,
+phone G peaks, and any validated jump or summary. Rust derives coverage and
+event scope from the exact TCX riding sections frozen when the track was first
+prepared; incomplete/transport/pause-crossing events are not attached. Empty
+events require at least 0.8 coverage. Older uploaded jobs lack frozen scope
+and are deliberately ineligible for this pilot, rather than linking metrics
+to a possibly edited track.
+
+The JSON snapshot is stored before PUT in device-local no-backup storage and
+reused byte-for-byte across WorkManager retries. A separate metrics ledger,
+worker and UI status keep track-upload success intact when metrics fail. API
+responses retain `ride_id` and revision; a per-ride 403 does not revoke the
+whole connection. Disconnect/deletion cancel queued metrics and remove local
+snapshots. Manual ride-upload consent is separate from this experimental
+sensor submission. Tests cover schema shape, frozen scopes, idempotent 200,
+lost-response retry, account/visibility guards, restart recovery and the real
+forest fixture's sensor coverage. Rust tests/Clippy and Android unit tests,
+debug build/lint and release assembly passed; the release APK contains the
+regenerated arm64 Rust library and was installed over Nakvali on S25 with
+`adb install -r`. No live authenticated PUT was sent; first server field test
+and visual UI review remain. No commit or push.
+
+## 2026-09-25 — Prepare 0.1.0-test2 automatic sensor-sync release
+
+The owner authorized shipping the experimental BIKEYARD integration while they
+are its only field tester. Added a separate, default-off automatic airtime
+switch that requires private automatic ride uploads. Save-time consent and phone
+mounting are frozen with each new ride; turning the switch off cancels pending
+automatic metrics, while manual metrics and already accepted tracks stay put.
+The existing upload worker starts the metrics worker after an owned `ride_id`
+is confirmed, with restart recovery if the process dies between the two.
+Candidate timing and measured coverage still exclude GPS, raw IMU, phone G,
+validated jump claims and public rides. Older already-uploaded rides remain
+ineligible because their original TCX scope was not frozen.
+
+Bumped Android to versionCode 3 / `0.1.0-test2`. Updated the landing download
+CTA and privacy notice before publication. The signed owner APK was installed
+over Nakvali on S25; a separate signed APK was built with an explicitly empty
+alpha API access key for public GitHub Releases. Verified its package/version,
+release signing certificate, blank generated `BuildConfig.API_ACCESS_KEY` and
+absence of the locally configured alpha key bytes inside the public APK.
+Rust workspace tests/Clippy, Android core-recording and activity unit tests,
+debug lint, debug/release assembly and Astro checks/build passed. No live
+authenticated sensor PUT was performed in this preparation step.

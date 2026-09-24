@@ -9,6 +9,7 @@ import com.nakvali.core.recording.RecordingStatus
 import com.nakvali.core.recording.exportPoints
 import com.nakvali.core.recording.ridingRuns
 import com.nakvali.core.recording.TcxExporter
+import com.nakvali.fusion.sensorMetricsEvidence
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.encodeToString
 
 /** Device-only integration. It never uses Nakvali's API or Firebase identity. */
 class BikeyardRepository private constructor(private val context: Context) {
@@ -27,9 +31,14 @@ class BikeyardRepository private constructor(private val context: Context) {
     private val _state = MutableStateFlow(BikeyardUiState())
     val state = _state.asStateFlow()
     private val snapshots = File(context.noBackupFilesDir, "bikeyard/uploads")
+    private val metricsSnapshots = File(context.noBackupFilesDir, "bikeyard/metrics")
+    private val metricsPreparation = Mutex()
     private val engine = scope.async {
         BikeyardEngine(BikeyardEncryptedStore(context), BikeyardApi()).also { core ->
-            if (core.retiredSandbox) snapshots.deleteRecursively()
+            if (core.retiredSandbox) {
+                snapshots.deleteRecursively()
+                metricsSnapshots.deleteRecursively()
+            }
             scope.launch { core.state.collect { _state.value = it } }
         }
     }
@@ -45,6 +54,14 @@ class BikeyardRepository private constructor(private val context: Context) {
                 }
                 core.state.value.uploads.filter { it.status in BikeyardEngine.activeStatuses }
                     .forEach { BikeyardUploadWorker.enqueue(context, it.key) }
+                core.state.value.uploads.filter { it.metricsStatus in BikeyardEngine.activeMetricsStatuses }
+                    .forEach { BikeyardMetricsWorker.enqueue(context, it.key) }
+                if (core.state.value.automaticMetrics) {
+                    core.state.value.uploads.filter { it.metricsAutomatic &&
+                        it.status == BikeyardUploadStatus.UPLOADED &&
+                        it.metricsStatus == BikeyardMetricsStatus.NONE }
+                        .forEach { syncMetrics(it.recordingId, it.metricsMounting, automatic = true) }
+                }
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { _state.value = BikeyardUiState(loading = false, message = "Could not open secure BIKEYARD storage") }
         }
@@ -61,6 +78,9 @@ class BikeyardRepository private constructor(private val context: Context) {
     fun setSettings(automatic: Boolean, visibility: BikeyardVisibility): Job {
         automaticPaused = !automatic
         if (!automatic) state.value.uploads.filter { it.automatic }.forEach { BikeyardUploadWorker.cancel(context, it.key) }
+        if (!automatic || visibility != BikeyardVisibility.PRIVATE) {
+            state.value.uploads.filter { it.metricsAutomatic }.forEach { BikeyardMetricsWorker.cancel(context, it.key) }
+        }
         return action {
             settings(automatic, visibility)
             if (automatic) RecorderSettings.preferences(context).edit()
@@ -68,7 +88,16 @@ class BikeyardRepository private constructor(private val context: Context) {
             state.value.uploads.filter { it.status == BikeyardUploadStatus.CANCELLED }.forEach {
                 BikeyardUploadWorker.cancel(context, it.key)
             }
+            state.value.uploads.filter { it.metricsStatus == BikeyardMetricsStatus.CANCELLED }.forEach {
+                BikeyardMetricsWorker.cancel(context, it.key)
+            }
         }
+    }
+
+    fun setMetricsSettings(enabled: Boolean, mounting: BikeyardMounting): Job {
+        if (!enabled) state.value.uploads.filter { it.metricsAutomatic }
+            .forEach { BikeyardMetricsWorker.cancel(context, it.key) }
+        return action { metricsSettings(enabled, mounting) }
     }
 
     suspend fun automaticRequest(): BikeyardAutoRequest? = withContext(Dispatchers.IO) {
@@ -81,9 +110,11 @@ class BikeyardRepository private constructor(private val context: Context) {
     fun disconnect() {
         automaticPaused = true
         BikeyardUploadWorker.cancelAll(context)
+        BikeyardMetricsWorker.cancelAll(context)
         action {
             disconnect()
             snapshots.deleteRecursively()
+            metricsSnapshots.deleteRecursively()
         }
     }
 
@@ -104,8 +135,84 @@ class BikeyardRepository private constructor(private val context: Context) {
         catch (_: Exception) { return@withContext }
         val jobs = core.state.value.uploads.filter { it.recordingId == id }
         jobs.forEach { BikeyardUploadWorker.cancel(context, it.key) }
+        jobs.forEach { BikeyardMetricsWorker.cancel(context, it.key) }
         core.cancelRecording(id)
-        jobs.forEach { snapshot(it.key).delete() }
+        jobs.forEach { snapshot(it.key).delete(); metricsSnapshot(it.key).delete() }
+    }
+
+    /** Manual action or separately enabled automatic sensor-metrics consent. */
+    fun syncMetrics(recordingId: String, mounting: BikeyardMounting, automatic: Boolean = false): Job = scope.launch {
+        try {
+        if (automatic && (automaticPaused ||
+                RecorderSettings.preferences(context).getBoolean(RecorderSettings.OFFLINE_MODE, true))) return@launch
+        val core = engine.await()
+        val job = core.state.value.uploads.firstOrNull { it.recordingId == recordingId &&
+            it.accountKey == core.state.value.accountKey && it.status == BikeyardUploadStatus.UPLOADED }
+            ?: return@launch
+        metricsPreparation.withLock {
+            val latest = core.state.value.uploads.firstOrNull { it.key == job.key } ?: return@withLock
+            if (latest.metricsStatus in BikeyardEngine.activeMetricsStatuses) {
+                BikeyardMetricsWorker.enqueue(context, job.key)
+                return@withLock
+            }
+            val file = metricsSnapshot(job.key)
+            if (latest.metricsStatus == BikeyardMetricsStatus.FAILED && file.isFile) {
+                if (core.queueMetrics(job.key, manual = !automatic)) BikeyardMetricsWorker.enqueue(context, job.key, replace = true)
+                return@withLock
+            }
+            try {
+                val repository = RecordingRepository.getInstance(context)
+                val artifact = repository.canonicalActivity(recordingId)
+                    ?: error("Processed ride is unavailable")
+                val scopes = latest.sensorScopes.map { com.nakvali.fusion.SensorTimeScope(it.startedAtMs, it.endedAtMs) }
+                check(scopes.isNotEmpty()) {
+                    "This ride predates frozen sensor scope. Upload a new ride to test metrics safely"
+                }
+                val evidence = sensorMetricsEvidence(repository.recordingFile(recordingId).absolutePath, scopes)
+                val appVersion = runCatching {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                }.getOrNull()
+                val document = buildBikeyardMetricsDocument(evidence, mounting,
+                    artifact.analysis.algorithmVersion, appVersion, System.currentTimeMillis())
+                val payload = bikeyardMetricsJson.encodeToString(document).toByteArray(Charsets.UTF_8)
+                check(payload.size <= 20_000_000) { "Sensor metrics exceed BIKEYARD’s 20 MB limit" }
+                file.parentFile!!.mkdirs()
+                val temporary = File(file.parentFile, "${file.name}.tmp")
+                try {
+                    temporary.writeBytes(payload)
+                    check(temporary.renameTo(file)) { "Could not save the sensor metrics snapshot" }
+                } finally { temporary.delete() }
+                if (core.queueMetrics(job.key, manual = !automatic)) BikeyardMetricsWorker.enqueue(context, job.key, replace = true)
+                else file.delete()
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                core.failMetrics(job.key, if (error is IllegalArgumentException || error is IllegalStateException)
+                    error.message ?: "Unable to prepare sensor metrics" else "Unable to prepare sensor metrics")
+            }
+        }
+        } catch (error: CancellationException) { throw error }
+        catch (_: Exception) {
+            _state.value = _state.value.copy(message = "Unable to prepare BIKEYARD sensor metrics")
+        }
+    }
+
+    internal suspend fun processMetrics(key: String, attempt: Int): Boolean = withContext(Dispatchers.IO) {
+        val core = engine.await()
+        val job = core.state.value.uploads.firstOrNull { it.key == key } ?: return@withContext true
+        if (job.metricsStatus !in BikeyardEngine.activeMetricsStatuses) return@withContext true
+        if (attempt >= 10) {
+            core.failMetrics(key, "Sensor metrics paused after repeated attempts. Retry when ready")
+            return@withContext true
+        }
+        val file = metricsSnapshot(key)
+        if (!file.isFile) {
+            core.failMetrics(key, "Sensor metrics snapshot is missing. Retry when ready")
+            return@withContext true
+        }
+        val complete = core.processMetrics(key, file)
+        if (core.state.value.uploads.firstOrNull { it.key == key }
+                ?.metricsStatus == BikeyardMetricsStatus.UPLOADED) file.delete()
+        complete
     }
 
     internal suspend fun process(key: String, attempt: Int): Boolean = withContext(Dispatchers.IO) {
@@ -131,6 +238,9 @@ class BikeyardRepository private constructor(private val context: Context) {
                     ?: error("Processed track is unavailable")
                 val points = artifact.exportPoints(excludeTransport = true, runs = artifact.ridingRuns())
                 check(points.size >= 2) { "No riding track remains after excluding transport" }
+                val frozenScopes = points.sensorScopes().map {
+                    BikeyardSensorScope(it.startedAtMs, it.endedAtMs)
+                }
                 file.parentFile!!.mkdirs()
                 val temporary = File(file.parentFile, "${file.name}.tmp")
                 try {
@@ -141,12 +251,21 @@ class BikeyardRepository private constructor(private val context: Context) {
                     }
                     check(temporary.renameTo(file)) { "Could not save the upload snapshot" }
                 } finally { temporary.delete() }
-                if (!core.prepared(key)) { file.delete(); return@withContext true }
+                if (!core.prepared(key, frozenScopes)) { file.delete(); return@withContext true }
             }
             // Do not regenerate a file whose first request may already have succeeded.
             check(job.uploadId != null || file.isFile) { "Upload snapshot is missing. Reconnect before preparing another upload" }
             val complete = core.process(key, file)
-            if (core.state.value.uploads.firstOrNull { it.key == key }?.status == BikeyardUploadStatus.UPLOADED) file.delete()
+            core.state.value.uploads.firstOrNull { it.key == key }
+                ?.takeIf { it.status == BikeyardUploadStatus.UPLOADED }
+                ?.let { uploaded ->
+                    file.delete()
+                    if (complete && uploaded.metricsAutomatic &&
+                        core.state.value.automaticMetrics &&
+                        uploaded.metricsStatus == BikeyardMetricsStatus.NONE) {
+                        syncMetrics(uploaded.recordingId, uploaded.metricsMounting, automatic = true)
+                    }
+                }
             complete
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) {
@@ -159,6 +278,11 @@ class BikeyardRepository private constructor(private val context: Context) {
     private fun snapshot(key: String): File {
         require(key.matches(Regex("[A-Za-z0-9_-]{43}")))
         return File(snapshots, "$key.tcx")
+    }
+
+    private fun metricsSnapshot(key: String): File {
+        require(key.matches(Regex("[A-Za-z0-9_-]{43}")))
+        return File(metricsSnapshots, "$key.json")
     }
 
     private fun action(block: suspend BikeyardEngine.() -> Unit): Job =

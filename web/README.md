@@ -20,10 +20,9 @@ Override `NAKVALI_CONTACT_EMAIL` when changing it; the Docker build refuses an
 explicitly empty contact. The value is public
 build-time content, not a runtime secret. Never put credentials in it.
 
-The first public APK has not been released. The CTA deliberately links to the
-real public `whekin/dhava` releases page without inventing an available version or
-an asset URL. Once an actual signed `nakvali.apk` is released, update the CTA and
-availability text to that verified release. See `docs/release-build.md`.
+The CTA points to the signed, keyless `v0.1.0-test2` prerelease APK at GitHub
+Releases. Bump the version and verify the published asset before updating this
+link for a later release. See `docs/release-build.md`.
 
 Archivo's OFL license is included at `/licenses/archivo.txt` alongside the
 self-hosted font files. The source package and version are
@@ -55,6 +54,6 @@ behavior is checked with `npm run check:http -- http://127.0.0.1:4322` against
 the running Docker image (including JSON content
 type, 404s, callback no-store, and direct API routing through Coolify).
 
-The Privacy and Terms pages describe the current early-stage implementation;
-BIKEYARD is explicitly planned. Revisit them with the actual OAuth implementation,
-retention practices and support contact before expanding public distribution.
+The Privacy and Terms pages describe the current early-stage implementation,
+including optional BIKEYARD ride uploads and separately enabled sensor metrics.
+Revisit retention practices and support contact before expanding distribution.

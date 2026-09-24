@@ -21,6 +21,8 @@ class BikeyardEngineTest {
         var exchanges = 0
         var refreshes = 0
         var uploads = 0
+        var metrics = 0
+        var metricsFailure: BikeyardFailure? = null
         var uploadGate: CompletableDeferred<Unit>? = null
         val uploadEntered = CompletableDeferred<Unit>()
         var failRefresh = false
@@ -44,6 +46,12 @@ class BikeyardEngineTest {
             return receipt
         }
         override suspend fun receipt(environment: BikeyardEnvironment, token: String, id: String) = receipt
+        override suspend fun putMetrics(environment: BikeyardEnvironment, token: String, rideId: String,
+            file: File): BikeyardMetricsReceipt {
+            metrics++
+            metricsFailure?.let { throw it }
+            return BikeyardMetricsReceipt(rideId, metrics)
+        }
     }
     private fun connected(expired: Boolean = false) = BikeyardStoredState(tokens = BikeyardTokens(
         "access", "refresh", if (expired) 0 else clock + 1000000, "rider", "Test Rider",
@@ -127,6 +135,58 @@ class BikeyardEngineTest {
         assertEquals("existing", core.state.value.uploads.single().rideId)
     }
 
+    @Test fun `sensor metrics wait for a private confirmed ride and leave track status intact`() = runBlocking {
+        val remote = Remote(); val core = engine(MemoryStore(connected()), remote); val job = queue(core)
+        assertFalse(core.queueMetrics(job.key, manual = true))
+        core.prepared(job.key, listOf(BikeyardSensorScope(1_000, 2_000)))
+        core.process(job.key, file)
+        assertTrue(core.queueMetrics(job.key, manual = true))
+        assertTrue(core.processMetrics(job.key, file))
+        val uploaded = core.state.value.uploads.single()
+        assertEquals(BikeyardUploadStatus.UPLOADED, uploaded.status)
+        assertEquals(BikeyardMetricsStatus.UPLOADED, uploaded.metricsStatus)
+        assertEquals(1, uploaded.metricsRevision)
+        assertEquals(1, remote.metrics)
+    }
+
+    @Test fun `ambiguous metrics response retries the frozen document`() = runBlocking {
+        val remote = Remote(); val core = engine(MemoryStore(connected()), remote); val job = queue(core)
+        core.prepared(job.key, listOf(BikeyardSensorScope(1_000, 2_000)))
+        core.process(job.key, file); core.queueMetrics(job.key, manual = true)
+        remote.metricsFailure = BikeyardFailure(BikeyardFailure.Kind.RETRY, "Response lost")
+        assertFalse(core.processMetrics(job.key, file))
+        assertEquals(BikeyardMetricsStatus.QUEUED, core.state.value.uploads.single().metricsStatus)
+        remote.metricsFailure = null
+        assertTrue(core.processMetrics(job.key, file))
+        assertEquals(BikeyardMetricsStatus.UPLOADED, core.state.value.uploads.single().metricsStatus)
+        assertEquals(BikeyardUploadStatus.UPLOADED, core.state.value.uploads.single().status)
+        assertEquals(2, remote.metrics)
+    }
+
+    @Test fun `queued metrics survive engine restart without repeating the track upload`() = runBlocking {
+        val store = MemoryStore(connected()); val remote = Remote()
+        val first = engine(store, remote); val job = queue(first)
+        first.prepared(job.key, listOf(BikeyardSensorScope(1_000, 2_000)))
+        first.process(job.key, file)
+        first.queueMetrics(job.key, manual = true)
+
+        val restarted = engine(store, remote)
+        assertTrue(restarted.processMetrics(job.key, file))
+        assertEquals(1, remote.uploads)
+        assertEquals(1, remote.metrics)
+        assertEquals(BikeyardMetricsStatus.UPLOADED, store.value.uploads.single().metricsStatus)
+    }
+
+    @Test fun `public ride cannot queue experimental sensor metrics`() = runBlocking {
+        val remote = Remote(); val core = engine(MemoryStore(connected()), remote)
+        core.settings(false, BikeyardVisibility.PUBLIC)
+        val job = queue(core)
+        core.prepared(job.key, listOf(BikeyardSensorScope(1_000, 2_000)))
+        core.process(job.key, file)
+        assertFalse(core.queueMetrics(job.key, manual = true))
+        assertEquals(0, remote.metrics)
+    }
+
     @Test fun `queued visibility and metadata do not change with new defaults or retry`() = runBlocking {
         val core = engine(MemoryStore(connected()), Remote()); val first = queue(core)
         core.settings(false, BikeyardVisibility.PUBLIC)
@@ -143,6 +203,34 @@ class BikeyardEngineTest {
         core.settings(true, BikeyardVisibility.PRIVATE)
         assertNull(core.enqueue("two", "Ride", "", "mtb", consent))
         assertEquals(BikeyardUploadStatus.CANCELLED, core.state.value.uploads.single().status)
+    }
+
+    @Test fun `automatic airtime consent is separate and frozen with a private new ride`() = runBlocking {
+        val remote = Remote(); val core = engine(MemoryStore(connected()), remote)
+        core.settings(true, BikeyardVisibility.PRIVATE)
+        assertFalse(core.automaticRequest()!!.sensorMetrics)
+        core.metricsSettings(true, BikeyardMounting.POCKET)
+        val consent = core.automaticRequest()!!
+        assertTrue(consent.sensorMetrics)
+        val job = core.enqueue("new-ride", "Ride", "", "mtb", consent)!!
+        assertTrue(job.metricsAutomatic)
+        assertEquals(BikeyardMounting.POCKET, job.metricsMounting)
+        core.prepared(job.key, listOf(BikeyardSensorScope(1_000, 2_000)))
+        core.process(job.key, file)
+        assertTrue(core.queueMetrics(job.key))
+        core.metricsSettings(false, BikeyardMounting.POCKET)
+        assertEquals(BikeyardMetricsStatus.CANCELLED, core.state.value.uploads.single().metricsStatus)
+        assertTrue(core.processMetrics(job.key, file))
+        assertEquals(0, remote.metrics)
+    }
+
+    @Test fun `public visibility disables automatic sensor submission`() = runBlocking {
+        val core = engine(MemoryStore(connected()), Remote())
+        core.settings(true, BikeyardVisibility.PRIVATE)
+        core.metricsSettings(true, BikeyardMounting.POCKET)
+        core.settings(true, BikeyardVisibility.PUBLIC)
+        assertFalse(core.state.value.automaticMetrics)
+        assertFalse(core.automaticRequest()!!.sensorMetrics)
     }
 
     @Test fun `different account cannot consume an existing queue`() = runBlocking {

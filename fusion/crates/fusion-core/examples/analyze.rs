@@ -22,9 +22,11 @@ fn main() {
             println!("airtime total: {} ms", a.airtime_total_ms);
             for (i, w) in a.airtime_windows.iter().enumerate() {
                 println!(
-                    "  window {i}: t=+{:.1}s dur={} ms peak={:.2} g",
+                    "  window {i}: t=+{:.3}s dur={} ms before={} after={:.2} g (phone)",
                     (w.start_ms - a.started_at_ms) as f64 / 1000.0,
                     w.duration_ms,
+                    w.takeoff_peak_g
+                        .map_or_else(|| "—".to_owned(), |g| format!("{g:.2} g")),
                     w.landing_peak_g
                 );
             }

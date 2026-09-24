@@ -30,6 +30,7 @@ pub mod replay;
 pub mod ride_bounds;
 pub mod segment;
 pub mod segment_editor;
+pub mod sensor_metrics;
 pub mod transport;
 
 pub use live::{LiveFusion, LiveSnapshot, LiveTotals, live_totals_from_recording};
@@ -59,6 +60,7 @@ pub use segment_editor::{
     CandidateDescent, RideProfile, RideProfilePoint, SelectionOverlap, propose_descents,
     ride_profile, selection_overlap,
 };
+pub use sensor_metrics::{SensorMetricsEvidence, SensorTimeScope, sensor_metrics_evidence};
 
 /// Errors surfaced across the FFI boundary (Kotlin exceptions).
 #[derive(Debug, uniffi::Error)]

@@ -116,3 +116,43 @@ _Avoid_: Downhill run, lap, descent
 **Ride bounds**:
 The span the rider calls the ride, narrowing an activity from its front and back so the approach and the standing around stop counting. An annotation like a **Transport override**: absolute recording timestamps, applied in Rust, leaving the recording's own bounds and the track untouched, and leaving segment times standing.
 _Avoid_: Crop, cut, truncation, delete
+
+## Recordings and published ride metrics
+
+**Raw recording**:
+The immutable phone-held sequence of GPS, motion and pressure observations and
+recording events. It is the source for recomputation, even when a published track
+has already been generated.
+_Avoid_: uploaded track, published ride
+
+**Processed track**:
+A derived time-stamped path built from a raw recording using a known algorithm
+version. Its exported points may be sampled or compressed without changing the
+raw recording.
+_Avoid_: raw GPS
+
+**Uploaded ride**:
+A BIKEYARD ride owned by a rider after the track import completes, identified by
+its BIKEYARD `ride_id`. It may have a separate sensor metrics attachment.
+_Avoid_: raw recording
+
+**Airborne candidate**:
+A time interval whose phone accelerometer signal is consistent with free fall.
+It is not proof that the bike or rider jumped.
+_Avoid_: jump, drop, validated jump
+
+**Validated jump**:
+An airborne event whose classification as a bike jump has passed defined and
+field-tested evidence and quality rules. Nakvali does not currently produce it.
+_Avoid_: any accelerometer low-gravity window
+
+**Landing peak**:
+The peak magnitude of acceleration measured at the phone near the end of an
+airborne candidate, expressed relative to standard gravity and including gravity.
+It is not a measurement of the rider's body load.
+_Avoid_: rider G-force
+
+**Sensor metrics attachment**:
+An optional document of derived, versioned events associated with one uploaded
+ride. It contains no GPS coordinates or raw sensor samples.
+_Avoid_: raw upload, track file

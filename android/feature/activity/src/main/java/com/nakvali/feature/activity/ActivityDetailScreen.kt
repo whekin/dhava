@@ -287,6 +287,9 @@ private fun ActivityDetailContent(
     var inspectedProfilePosition by rememberSaveable(recording?.id) {
         mutableStateOf<Double?>(null)
     }
+    var selectedAirtimeIndex by rememberSaveable(recording?.id) {
+        mutableStateOf<Int?>(null)
+    }
     var showEdit by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val replay = (diagnostics as? DiagnosticTrackState.Loaded)?.replay
@@ -333,6 +336,9 @@ private fun ActivityDetailContent(
         }
         .orEmpty()
     }
+    val airtimeCandidates = remember(analysis, fusedPoints) {
+        fusedPoints.placeAirtimeCandidates(analysis?.airtimeWindows.orEmpty())
+    }
     // The attempt indices address the finalized track the matcher was given,
     // which is exactly the list behind fusedPoints on this path. On the replay
     // fallback that correspondence is not guaranteed, so nothing is drawn
@@ -366,6 +372,7 @@ private fun ActivityDetailContent(
         mode = effectiveTrackMode,
         hasActivityStates = hasActivityStates,
         hasAccuracy = hasAccuracy,
+        hasAirtimeCandidates = airtimeCandidates.isNotEmpty(),
     )
     val processedExportAvailable = replay?.finalizedTrack?.isNotEmpty() == true && loading.phase != ActivityLoadPhase.FAILED
     val sheetState = rememberBottomSheetState(
@@ -390,6 +397,9 @@ private fun ActivityDetailContent(
                 ride = ride,
                 rideInsights = rideInsights,
                 segmentRuns = segmentRuns,
+                airtimeCandidates = airtimeCandidates,
+                selectedAirtimeIndex = selectedAirtimeIndex,
+                onAirtimeSelected = { selectedAirtimeIndex = it },
                 inspectedProfilePoint = inspectedProfilePoint,
                 inspectedMapPoint = inspectedMapPoint,
                 onProfilePointSelected = { point ->
@@ -431,6 +441,9 @@ private fun ActivityDetailContent(
                 TrackMap(
                     rawPoints = rawPoints, fusedPoints = fusedPoints, segmentRuns = segmentRunLines,
                     segmentColor = segmentHighlightColor, mode = effectiveTrackMode,
+                    airtimeCandidates = airtimeCandidates,
+                    selectedAirtimeIndex = selectedAirtimeIndex,
+                    onAirtimeSelected = { selectedAirtimeIndex = it },
                     rawColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     fusedColor = MaterialTheme.colorScheme.primary,
                     inspectedPoint = inspectedMapPoint, respectUserCamera = true,
@@ -531,6 +544,9 @@ private fun ActivityDetailsSheet(
     ride: CanonicalRideTotals?,
     rideInsights: ActivityRideInsights?,
     segmentRuns: List<RideSegmentRun>?,
+    airtimeCandidates: List<MapAirtimeCandidate>,
+    selectedAirtimeIndex: Int?,
+    onAirtimeSelected: (Int?) -> Unit,
     inspectedProfilePoint: RideProfilePoint?,
     inspectedMapPoint: MapTrackPoint?,
     onProfilePointSelected: (RideProfilePoint) -> Unit,
@@ -655,8 +671,11 @@ private fun ActivityDetailsSheet(
                 analysis
                     ?.takeIf { it.airtimeWindows.isNotEmpty() }
                     ?.let { rideAnalysis ->
-                        AirtimeMetrics(
+                        AirtimeAnalysisSection(
                             analysis = rideAnalysis,
+                            selectedIndex = selectedAirtimeIndex,
+                            placedEventIndices = airtimeCandidates.map { it.eventIndex }.toSet(),
+                            onSelected = { onAirtimeSelected(it) },
                             modifier = Modifier.padding(top = NakvaliSpacing.xLarge),
                         )
                     }
@@ -779,18 +798,23 @@ private fun ActivityOverflowMenu(
 internal enum class MapLegendSection {
     ActivityState,
     GpsAccuracy,
+    Airtime,
 }
 
 internal fun mapLegendSections(
     mode: TrackMode,
     hasActivityStates: Boolean,
     hasAccuracy: Boolean,
+    hasAirtimeCandidates: Boolean = false,
 ): List<MapLegendSection> = buildList {
     if (mode != TrackMode.Gps && hasActivityStates) {
         add(MapLegendSection.ActivityState)
     }
     if (mode != TrackMode.Fusion && hasAccuracy) {
         add(MapLegendSection.GpsAccuracy)
+    }
+    if (mode != TrackMode.Gps && hasAirtimeCandidates) {
+        add(MapLegendSection.Airtime)
     }
 }
 
@@ -858,6 +882,11 @@ private fun MapLegendControl(
                     MapLegendSection.GpsAccuracy -> GpsAccuracyLegendContent(
                         colors = accuracyColors,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                    MapLegendSection.Airtime -> Text(
+                        "↑  Possible airtime · zoom in to see",
+                        modifier = Modifier.padding(NakvaliSpacing.medium),
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
@@ -1100,37 +1129,6 @@ private fun ActivityMetrics(
     }
 }
 
-@Composable
-private fun AirtimeMetrics(analysis: RideAnalysis, modifier: Modifier = Modifier) {
-    val longestMs = analysis.airtimeWindows.maxOfOrNull { it.durationMs } ?: 0L
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-    ) {
-        NakvaliSectionLabel("Jumps")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-        ) {
-            NakvaliMetric(
-                value = analysis.airtimeWindows.size.toString(),
-                label = "Detected",
-                modifier = Modifier.weight(1f),
-            )
-            NakvaliMetric(
-                value = formatAirDuration(analysis.airtimeTotalMs),
-                label = "Total air",
-                modifier = Modifier.weight(1f),
-            )
-            NakvaliMetric(
-                value = formatAirDuration(longestMs),
-                label = "Longest",
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
 private const val Placeholder = "—"
 
 private val startTimeFormatter =
@@ -1163,9 +1161,6 @@ private fun formatDistance(meters: Double): String = when {
 private fun formatSpeed(mps: Double): String = String.format(Locale.US, "%.1f km/h", mps * 3.6)
 
 private fun formatAltitude(meters: Double): String = String.format(Locale.US, "%.0f m", meters)
-
-private fun formatAirDuration(milliseconds: Long): String =
-    String.format(Locale.US, "%.1f s", milliseconds.coerceAtLeast(0L) / 1_000.0)
 
 @Preview(name = "Activity detail · no track", widthDp = 412, heightDp = 760)
 @Composable
