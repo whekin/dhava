@@ -29,15 +29,43 @@ class BikeyardEngineTest {
         var failUpload = false
         var receipt = BikeyardReceipt("upload", "complete", rideId = "ride")
         val submitted = mutableListOf<BikeyardUpload>()
+        var exchangeRider = "rider"
+        var exchangeScope = BikeyardPkce.SCOPES
+        var failExchange = false
+        val revoked = mutableListOf<String>()
+        var rides = 0
+        var rideFailure: BikeyardFailure? = null
+        var rideResponse = BikeyardRideResponse("00000000-0000-0000-0000-000000000001")
         private fun response() = BikeyardTokenResponse("access-new", "refresh-new", 21600, "Bearer", "rider", BikeyardPkce.SCOPES)
-        override suspend fun exchange(environment: BikeyardEnvironment, code: String, verifier: String): BikeyardTokenResponse { exchanges++; return response() }
+        override suspend fun exchange(environment: BikeyardEnvironment, code: String, verifier: String): BikeyardTokenResponse {
+            exchanges++
+            if (failExchange) throw BikeyardFailure(BikeyardFailure.Kind.RETRY, "Network")
+            return BikeyardTokenResponse("access-$exchanges", "refresh-$exchanges", 21600, "Bearer", exchangeRider, exchangeScope)
+        }
         override suspend fun refresh(environment: BikeyardEnvironment, token: String): BikeyardTokenResponse {
             refreshes++
             if (failRefresh) throw BikeyardFailure(BikeyardFailure.Kind.RETRY, "Ambiguous network failure")
             return response()
         }
-        override suspend fun rider(environment: BikeyardEnvironment, token: String) = BikeyardRider("rider", "rider", "Test", "Rider")
-        override suspend fun revoke(environment: BikeyardEnvironment, token: String) = Unit
+        override suspend fun rider(environment: BikeyardEnvironment, token: String) = BikeyardRider(
+            exchangeRider, "rider", "Test", "Rider", profileUrl = "https://yard.bike/riders/rider",
+            stats = BikeyardRiderStats(rideCount = 4, distanceMeters = 12_000.0),
+        )
+        override suspend fun revoke(environment: BikeyardEnvironment, token: String) { revoked += token }
+        val ridePages = mutableListOf(
+            BikeyardRidePage(listOf(BikeyardRideSummaryResponse(900.0, BikeyardAchievementCountsResponse(kom = 1))), true, "next"),
+            BikeyardRidePage(listOf(BikeyardRideSummaryResponse(350.5, BikeyardAchievementCountsResponse(medals = 2))), false),
+        )
+        val cursors = mutableListOf<String?>()
+        override suspend fun rides(environment: BikeyardEnvironment, token: String, cursor: String?): BikeyardRidePage {
+            cursors += cursor
+            return ridePages.removeAt(0)
+        }
+        override suspend fun ride(environment: BikeyardEnvironment, token: String, rideId: String): BikeyardRideResponse {
+            rides++
+            rideFailure?.let { throw it }
+            return rideResponse
+        }
         override suspend fun upload(environment: BikeyardEnvironment, token: String, job: BikeyardUpload, file: File): BikeyardReceipt {
             uploads++; submitted += job
             uploadEntered.complete(Unit)
@@ -66,7 +94,8 @@ class BikeyardEngineTest {
     @Test fun `authorization requests write scope and distinct cryptographic values`() = runBlocking {
         val store = MemoryStore(BikeyardStoredState()); val core = engine(store, Remote())
         val url = core.beginConnect().toHttpUrl(); val first = store.value.pending!!
-        assertEquals(BikeyardPkce.SCOPES, url.queryParameter("scope"))
+        assertEquals(BikeyardPkce.REQUESTED_SCOPES, url.queryParameter("scope"))
+        assertTrue(url.queryParameter("scope")!!.split(' ').containsAll(BikeyardPkce.SCOPES.split(' ')))
         assertEquals(BikeyardEnvironment.LIVE.clientId, url.queryParameter("client_id"))
         assertEquals(BikeyardPkce.challenge(first.verifier), url.queryParameter("code_challenge"))
         assertNotEquals(first.verifier, first.state)
@@ -330,4 +359,132 @@ class BikeyardEngineTest {
         assertEquals("finished", restarted.state.value.uploads.single().rideId)
     }
 
+
+    private val rideId = "00000000-0000-0000-0000-000000000001"
+    private fun uploaded(scope: String = "profile:read rides:write rides:read_all") = connected().let { state ->
+        state.copy(
+            tokens = state.tokens!!.copy(scope = scope),
+            autoConsentId = "consent",
+            uploads = listOf(BikeyardUpload(
+                key = "k".repeat(43), recordingId = "recording", accountKey = "LIVE:rider",
+                visibility = BikeyardVisibility.PRIVATE, automatic = true,
+                status = BikeyardUploadStatus.UPLOADED, externalId = "nakvali-recording",
+                name = "Ride", description = "", bikeType = "mtb", rideId = rideId,
+            )),
+        )
+    }
+
+    @Test fun `older tokens without read scope still upload but never read rides`() = runBlocking {
+        val store = MemoryStore(uploaded(scope = "")); val remote = Remote(); val core = engine(store, remote)
+        assertEquals(BikeyardRideAccess.NONE, core.state.value.rideAccess)
+        assertFalse(core.refreshRideResult("recording"))
+        assertEquals(0, remote.rides)
+    }
+
+    @Test fun `upgrade by the same rider widens scope and keeps consent and uploads`() = runBlocking {
+        val store = MemoryStore(uploaded(scope = BikeyardPkce.SCOPES))
+        val remote = Remote().apply { exchangeScope = BikeyardPkce.REQUESTED_SCOPES }
+        val core = engine(store, remote)
+        core.beginConnect(upgrade = true)
+        assertTrue(core.state.value.upgrading); assertTrue(core.state.value.connected)
+        core.finishConnect("${BikeyardPkce.REDIRECT_URI}?state=${store.value.pending!!.state}&code=widen")
+        assertEquals("refresh-1", store.value.tokens!!.refresh)
+        assertEquals(BikeyardRideAccess.ALL, core.state.value.rideAccess)
+        assertEquals("consent", store.value.autoConsentId)
+        assertEquals(1, store.value.uploads.size)
+        assertTrue(remote.revoked.isEmpty())
+        assertEquals(4, core.state.value.profile!!.stats!!.rideCount)
+        assertTrue(core.state.value.profile!!.includesPrivate)
+        assertFalse(core.state.value.upgrading)
+    }
+
+    @Test fun `upgrade by another rider keeps the original connection`() = runBlocking {
+        val store = MemoryStore(uploaded(scope = BikeyardPkce.SCOPES))
+        val remote = Remote().apply { exchangeRider = "someone-else"; exchangeScope = BikeyardPkce.REQUESTED_SCOPES }
+        val core = engine(store, remote)
+        core.beginConnect(upgrade = true)
+        core.finishConnect("${BikeyardPkce.REDIRECT_URI}?state=${store.value.pending!!.state}&code=other")
+        assertEquals("refresh", store.value.tokens!!.refresh)
+        assertEquals("rider", store.value.tokens!!.riderId)
+        assertEquals(listOf("refresh-1"), remote.revoked)
+        assertEquals(BikeyardRideAccess.NONE, core.state.value.rideAccess)
+        assertEquals("consent", store.value.autoConsentId)
+    }
+
+    @Test fun `declined or failed upgrade keeps the original connection`() = runBlocking {
+        val store = MemoryStore(uploaded(scope = BikeyardPkce.SCOPES)); val remote = Remote(); val core = engine(store, remote)
+        core.beginConnect(upgrade = true)
+        core.finishConnect("${BikeyardPkce.REDIRECT_URI}?state=${store.value.pending!!.state}&error=access_denied")
+        assertTrue(core.state.value.connected); assertEquals("refresh", store.value.tokens!!.refresh)
+        remote.failExchange = true
+        core.beginConnect(upgrade = true)
+        core.finishConnect("${BikeyardPkce.REDIRECT_URI}?state=${store.value.pending!!.state}&code=x")
+        assertTrue(core.state.value.connected); assertEquals("refresh", store.value.tokens!!.refresh)
+        assertNull(store.value.pending)
+    }
+
+    @Test fun `a fresh connection cannot start while connected`() = runBlocking {
+        val core = engine(MemoryStore(connected()), Remote())
+        assertThrows(IllegalStateException::class.java) { runBlocking { core.beginConnect() } }
+        Unit
+    }
+
+    @Test fun `ride results keep only BIKEYARD pages and are throttled`() = runBlocking {
+        val store = MemoryStore(uploaded())
+        val remote = Remote().apply {
+            rideResponse = BikeyardRideResponse(rideId, url = "https://yard.bike/rides/$rideId",
+                trailsStatus = "ready", achievements = BikeyardAchievementCountsResponse(kom = 1, medals = 2),
+                trails = listOf(BikeyardTrailEffortResponse("Upper", 95, true, BikeyardAchievementResponse("kom", 1))))
+        }
+        val core = engine(store, remote)
+        assertTrue(core.refreshRideResult("recording"))
+        val result = core.state.value.uploads.single().result!!
+        assertEquals("https://yard.bike/rides/$rideId", result.url)
+        assertEquals(3, result.achievementCount)
+        assertEquals(BikeyardAchievementKind.KOM, result.trails.single().achievement)
+        assertFalse(core.refreshRideResult("recording"))
+        assertEquals(1, remote.rides)
+
+        assertNull(bikeyardWebUrl("https://evil.example/rides/1"))
+        assertNull(bikeyardWebUrl("http://yard.bike/rides/1"))
+        assertNull(bikeyardWebUrl("https://yard.bike.evil.example/"))
+        assertNull(bikeyardWebUrl("intent://yard.bike#Intent;end"))
+        assertEquals("https://www.yard.bike/r", bikeyardWebUrl("https://www.yard.bike/r"))
+    }
+
+    @Test fun `refused ride reads never disconnect`() = runBlocking {
+        val store = MemoryStore(uploaded())
+        val remote = Remote().apply { rideFailure = BikeyardFailure(BikeyardFailure.Kind.AUTH, "no", httpCode = 401) }
+        val core = engine(store, remote)
+        core.refreshRideResult("recording")
+        assertTrue(core.state.value.connected)
+        assertEquals("consent", store.value.autoConsentId)
+        assertTrue(core.state.value.uploads.single().resultUnavailable)
+        assertNull(core.state.value.message)
+
+        remote.rideFailure = BikeyardFailure(BikeyardFailure.Kind.RETRY, "offline")
+        val retry = MemoryStore(uploaded()); val second = engine(retry, remote)
+        second.refreshRideResult("recording")
+        assertFalse(second.state.value.uploads.single().resultUnavailable)
+        assertTrue(second.state.value.connected)
+    }
+
+    @Test fun `profile refresh sums descent and honours across ride pages`() = runBlocking {
+        val store = MemoryStore(uploaded()); val remote = Remote(); val core = engine(store, remote)
+        core.refreshProfile()
+        val profile = core.state.value.profile!!
+        assertEquals(1250.5, profile.descentM!!, 0.001)
+        assertEquals(1, profile.kom); assertEquals(2, profile.medals)
+        assertFalse(profile.totalsPartial)
+        assertEquals(listOf(null, "next"), remote.cursors)
+        core.refreshProfile()
+        assertEquals(2, remote.cursors.size) // throttled once sums exist
+    }
+
+    @Test fun `profile refresh without read access never lists rides`() = runBlocking {
+        val store = MemoryStore(uploaded(scope = BikeyardPkce.SCOPES)); val remote = Remote(); val core = engine(store, remote)
+        core.refreshProfile()
+        assertNull(core.state.value.profile!!.descentM)
+        assertTrue(remote.cursors.isEmpty())
+    }
 }

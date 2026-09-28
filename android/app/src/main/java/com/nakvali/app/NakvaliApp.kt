@@ -2,6 +2,7 @@ package com.nakvali.app
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -36,6 +37,7 @@ import com.nakvali.feature.activity.ActivityDetailScreen
 import com.nakvali.feature.profile.ProfileScreen
 import com.nakvali.feature.profile.ProfileUiState
 import com.nakvali.feature.record.RecordScreen
+import com.nakvali.feature.record.RecordingReturnBar
 import com.nakvali.feature.record.ActivitiesScreen
 import com.nakvali.feature.record.SaveRecordingScreen
 import com.nakvali.feature.segments.SegmentDetailScreen
@@ -87,8 +89,23 @@ fun NakvaliApp(
         }
     }
 
+    val onRecordTab = currentDestination?.hierarchy?.any { it.route == NakvaliDestination.Record.route } == true
+    fun openRecorder() {
+        navController.navigate(NakvaliDestination.Record.route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     Scaffold(
         bottomBar = {
+          Column {
+            // A running ride follows the rider around the app; the recorder
+            // itself shows it full screen instead.
+            if (!onRecordTab) {
+                RecordingReturnBar(onReturn = ::openRecorder, edgeToEdge = !showBottomBar)
+            }
           if (showBottomBar) {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -128,6 +145,7 @@ fun NakvaliApp(
                 }
             }
           }
+          }
         },
     ) { innerPadding ->
         NavHost(
@@ -147,6 +165,13 @@ fun NakvaliApp(
                 RecordScreen(
                     onImmersiveChanged = { recordImmersive = it },
                     onSaveRecovered = { id -> navController.navigate("save/$id") },
+                    onLeave = {
+                        navController.navigate(NakvaliDestination.Activities.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(NakvaliDestination.Activities.route) {

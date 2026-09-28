@@ -1115,3 +1115,69 @@ the server does not expose its original track for a trustworthy comparison.
 Automatic metrics sync defaults off and requires a separate explicit choice;
 automatic *ride* upload consent is not inherited. Turning it off cancels queued
 automatic metrics while leaving confirmed track uploads intact.
+
+## 2026-09-25 — Read BIKEYARD results back; list previews are cached derivatives
+
+New BIKEYARD connections request `rides:read_all` in addition to the required
+`profile:read rides:write`, so an uploaded (private by default) ride can show
+its BIKEYARD page, matched trails and honours inside Nakvali. Read access is
+optional: tokens without it keep uploading, and an existing connection widens
+its grant through re-authorization of the same rider, never by switching
+accounts. Reads never disconnect; only uploads decide a connection is broken.
+BIKEYARD trail results are presented as BIKEYARD's matching, beside — never
+instead of — Nakvali's canonical segment timing.
+
+The activity list shows a per-ride summary copied from the corrected canonical
+artifact (Rust totals, Rust runs, Rust transport labels) plus a Douglas–Peucker
+thinned polyline for display only. Summaries live in `noBackupFilesDir`, keyed
+by algorithm version, raw fingerprint and correction state, and are rebuilt
+from raw data rather than restored. Map thumbnails are MapLibre snapshotter
+bitmaps from a purpose-built label-free style over the same OpenFreeMap vector
+source (shared ambient cache); a canvas drawing of the same projection stands
+in offline, and snapshots taken without a validated network are never persisted.
+
+## 2026-09-26 — Airtime of 250 ms or more counts as a jump
+
+The owner chose to count jumps "for fun", accepting error in the same spirit
+as GPS speed or BIKEYARD KOMs, instead of listing every phone-sensor window
+as an unverified candidate. Rust owns the rule (`is_likely_jump`,
+`JUMP_MIN_AIRTIME_MS = 250`); Kotlin never re-derives it.
+
+Reasoning: every ballistic body reads near zero specific force, so a loose
+phone in a pocket sees a real jump for its whole length — leg movement can
+shorten or split it, not invent it. What a pocket does invent is brief dips
+(the phone bouncing, unweighting over rollers). On the pocket-carried S25
+shuttle day, windows under 200 ms landed softly (median 5.9 g against about
+11 g above), every non-descent candidate was under 250 ms, and all 47 windows
+of 250 ms or more were on descents. 250 ms is roughly an 8 cm hop or a 30 cm
+drop.
+
+Consequences: the activity list and screen count jumps and their airtime and
+keep shorter windows visible but uncounted; the map sizes discs by jump
+airtime. BIKEYARD receives jumps as `kind=jump, status=validated` so its stats
+count them, shorter windows as `airtime`/`candidate` as before, and the
+generator version carries `+jump250`. "Validated" there means Nakvali's
+duration rule, not field verification. Phone G peaks are still never sent.
+
+## 2026-09-28 — Personal segments in Nakvali; public trails and competition in BIKEYARD
+
+Nakvali keeps rider-authored, device-local segments for private gate timing,
+attempt history, personal records and eventual live comparison with the rider's
+own PR. This remains useful with one rider and does not require a Nakvali
+leaderboard network. BIKEYARD owns public trail identity, discovery, community
+competition, leaderboards and social features. Nakvali may show its attributed
+matched-trail results beside local timing, never as the same result.
+
+A local segment is a timing definition, not a copy of a BIKEYARD trail: one
+trail can contain several personal sections, and a personal segment can span
+multiple trails. Its geometry and gates stay local; an optional BIKEYARD link
+is context only. Exporting the enclosing ride still sends the processed ride
+track to BIKEYARD under the chosen visibility. The public BIKEYARD API currently
+offers read-only trail/leaderboard endpoints without trail geometry or a trail
+creation endpoint, so it cannot serve as Nakvali's offline gate source.
+
+Remove shared Nakvali segment publishing, KOM verification and a parallel
+public leaderboard or trail/social catalogue from the product path. Keep
+historical designs as context, but do not build them as the next phase. If
+BIKEYARD later offers private trails, Nakvali's personal timing definition
+still has a separate purpose.

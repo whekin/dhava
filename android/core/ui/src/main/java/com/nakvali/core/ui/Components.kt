@@ -1,6 +1,8 @@
 package com.nakvali.core.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,14 +29,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun NakvaliScreenHeader(
@@ -170,6 +179,51 @@ fun NakvaliMetric(
             text = label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * A metric that must fit its column at any font scale.
+ *
+ * On a phone with a larger system font a fixed-size row clipped "1:14:42" to
+ * "1:14:4" and "DISTANCE" to "DISTANC" — a wrong number is worse than a small
+ * one. This shrinks instead. The unit travels in the same text at a fixed
+ * ratio, so the pair shrinks together and keeps one baseline.
+ */
+@Composable
+fun NakvaliFitMetric(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    unit: String? = null,
+    valueStyle: TextStyle = MaterialTheme.typography.titleLarge,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    val unitColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val text = remember(value, unit, unitColor) {
+        buildAnnotatedString {
+            append(value)
+            if (unit != null) {
+                withStyle(SpanStyle(fontSize = 0.62.em, color = unitColor)) { append("\u2009$unit") }
+            }
+        }
+    }
+    val labelStyle = MaterialTheme.typography.labelSmall
+    Column(modifier = modifier) {
+        BasicText(
+            text = text,
+            style = valueStyle.copy(color = valueColor),
+            maxLines = 1,
+            softWrap = false,
+            autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = valueStyle.fontSize),
+        )
+        BasicText(
+            text = label.uppercase(),
+            style = labelStyle.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
+            maxLines = 1,
+            softWrap = false,
+            autoSize = TextAutoSize.StepBased(minFontSize = 7.sp, maxFontSize = labelStyle.fontSize),
         )
     }
 }

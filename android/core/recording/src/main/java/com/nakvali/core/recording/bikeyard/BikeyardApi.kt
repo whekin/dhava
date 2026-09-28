@@ -16,6 +16,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -36,17 +37,121 @@ internal data class BikeyardTokenResponse(
             tokenType != "Bearer" || accessToken.isBlank() || refreshToken.isBlank() ||
             riderId.isBlank() || expiresIn !in 1..604800
         ) throw BikeyardFailure(BikeyardFailure.Kind.AUTH, "Allow profile access and ride uploads, then connect again")
-        return BikeyardTokens(accessToken, refreshToken, now + expiresIn * 1000, riderId)
+        return BikeyardTokens(accessToken, refreshToken, now + expiresIn * 1000, riderId, scope = scope)
     }
 }
+
+@Serializable
+internal data class BikeyardRiderStats(
+    @SerialName("ride_count") val rideCount: Int = 0,
+    @SerialName("distance_meters") val distanceMeters: Double = 0.0,
+    @SerialName("moving_seconds") val movingSeconds: Long = 0,
+    @SerialName("elevation_gain_meters") val elevationGainMeters: Double = 0.0,
+)
+
+@Serializable
+internal data class BikeyardReputation(val score: Int = 0, val level: Int = 0)
 
 @Serializable
 internal data class BikeyardRider(
     val id: String, val username: String,
     @SerialName("first_name") val firstName: String = "",
     @SerialName("last_name") val lastName: String = "",
+    @SerialName("profile_url") val profileUrl: String? = null,
+    val location: String = "",
+    val reputation: BikeyardReputation? = null,
+    val stats: BikeyardRiderStats? = null,
 ) {
     val name: String get() = "$firstName $lastName".trim().ifBlank { username }
+
+    fun profile(access: BikeyardRideAccess, now: Long) = BikeyardProfile(
+        username = username,
+        profileUrl = bikeyardWebUrl(profileUrl),
+        location = location.take(120),
+        repLevel = reputation?.level,
+        repScore = reputation?.score,
+        stats = stats?.let {
+            BikeyardStats(it.rideCount, it.distanceMeters, it.movingSeconds, it.elevationGainMeters)
+        },
+        includesPrivate = access == BikeyardRideAccess.ALL,
+        fetchedAtMs = now,
+    )
+}
+
+@Serializable
+internal data class BikeyardAchievementCountsResponse(
+    val kom: Int = 0,
+    val medals: Int = 0,
+    @SerialName("local_legend") val localLegend: Int = 0,
+)
+
+@Serializable
+internal data class BikeyardAchievementResponse(val kind: String, val rank: Int? = null)
+
+@Serializable
+internal data class BikeyardTrailEffortResponse(
+    @SerialName("trail_name") val trailName: String = "",
+    @SerialName("duration_seconds") val durationSeconds: Int = 0,
+    val complete: Boolean = false,
+    val achievement: BikeyardAchievementResponse? = null,
+)
+
+@Serializable
+internal data class BikeyardRideResponse(
+    val id: String,
+    val url: String? = null,
+    @SerialName("trails_status") val trailsStatus: String = "pending",
+    val achievements: BikeyardAchievementCountsResponse = BikeyardAchievementCountsResponse(),
+    val trails: List<BikeyardTrailEffortResponse> = emptyList(),
+    @SerialName("like_count") val likeCount: Int = 0,
+    @SerialName("comment_count") val commentCount: Int = 0,
+) {
+    fun result() = BikeyardRideResult(
+        url = bikeyardWebUrl(url),
+        ready = trailsStatus == "ready",
+        kom = achievements.kom.coerceAtLeast(0),
+        medals = achievements.medals.coerceAtLeast(0),
+        localLegend = achievements.localLegend.coerceAtLeast(0),
+        trails = trails.take(50).map { effort ->
+            BikeyardTrailResult(
+                name = effort.trailName.take(120),
+                durationS = effort.durationSeconds.coerceAtLeast(0),
+                complete = effort.complete,
+                achievement = when (effort.achievement?.kind) {
+                    "kom" -> BikeyardAchievementKind.KOM
+                    "personal_best" -> BikeyardAchievementKind.PERSONAL_BEST
+                    "local_legend" -> BikeyardAchievementKind.LOCAL_LEGEND
+                    else -> null
+                },
+                rank = effort.achievement?.rank,
+            )
+        },
+        likeCount = likeCount.coerceAtLeast(0),
+        commentCount = commentCount.coerceAtLeast(0),
+    )
+}
+
+@Serializable
+internal data class BikeyardRideSummaryResponse(
+    @SerialName("elevation_loss_meters") val elevationLossMeters: Double = 0.0,
+    val achievements: BikeyardAchievementCountsResponse = BikeyardAchievementCountsResponse(),
+)
+
+@Serializable
+internal data class BikeyardRidePage(
+    val data: List<BikeyardRideSummaryResponse> = emptyList(),
+    @SerialName("has_more") val hasMore: Boolean = false,
+    @SerialName("next_cursor") val nextCursor: String? = null,
+)
+
+/**
+ * Only BIKEYARD's own https pages are ever opened from API data, so a
+ * malformed or hostile response cannot turn a tap into an arbitrary intent.
+ */
+internal fun bikeyardWebUrl(value: String?): String? {
+    val url = value?.toHttpUrlOrNull() ?: return null
+    if (url.scheme != "https" || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
+    return url.toString().takeIf { url.host == "yard.bike" || url.host.endsWith(".yard.bike") }
 }
 
 @Serializable
@@ -74,6 +179,8 @@ internal interface BikeyardRemote {
     suspend fun upload(environment: BikeyardEnvironment, token: String, job: BikeyardUpload, file: File): BikeyardReceipt
     suspend fun receipt(environment: BikeyardEnvironment, token: String, id: String): BikeyardReceipt
     suspend fun putMetrics(environment: BikeyardEnvironment, token: String, rideId: String, file: File): BikeyardMetricsReceipt
+    suspend fun ride(environment: BikeyardEnvironment, token: String, rideId: String): BikeyardRideResponse
+    suspend fun rides(environment: BikeyardEnvironment, token: String, cursor: String?): BikeyardRidePage
 }
 
 internal class BikeyardApi(
@@ -145,6 +252,21 @@ internal class BikeyardApi(
         ) { json.decodeFromString(it) }
     }
 
+    override suspend fun ride(environment: BikeyardEnvironment, token: String, rideId: String): BikeyardRideResponse {
+        require(rideId.matches(Regex("[0-9a-fA-F-]{36}")))
+        return request(authorized(environment, token, "/v1/rides/$rideId").build()) { json.decodeFromString(it) }
+    }
+
+    override suspend fun rides(environment: BikeyardEnvironment, token: String, cursor: String?): BikeyardRidePage {
+        val url = "${environment.apiOrigin}/v1/me/rides".toHttpUrl().newBuilder()
+            .addQueryParameter("limit", "100")
+            .apply { cursor?.let { addQueryParameter("cursor", it) } }
+            .build()
+        return request(Request.Builder().url(url).header("Authorization", "Bearer $token").build()) {
+            json.decodeFromString(it)
+        }
+    }
+
     private fun authorized(environment: BikeyardEnvironment, token: String, path: String) =
         Request.Builder().url(environment.apiOrigin + path).header("Authorization", "Bearer $token")
 
@@ -156,18 +278,19 @@ internal class BikeyardApi(
                 if (duplicate && response.code == 409) return json.decodeFromString<BikeyardDuplicate>(body).upload as T
                 if (!response.isSuccessful) {
                     val retryAt = retryAt(response.header("Retry-After"), System.currentTimeMillis())
-                    throw when (response.code) {
-                        401 -> BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads")
+                    val code = response.code
+                    throw when (code) {
+                        401 -> BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads", httpCode = code)
                         403 -> if (metrics) BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
-                            "This BIKEYARD ride cannot receive sensor metrics") else
-                            BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads")
+                            "This BIKEYARD ride cannot receive sensor metrics", httpCode = code) else
+                            BikeyardFailure(BikeyardFailure.Kind.AUTH, "Connect BIKEYARD again and allow ride uploads", httpCode = code)
                         408, 429 -> BikeyardFailure(BikeyardFailure.Kind.RETRY, "BIKEYARD is busy. Upload will retry", retryAt)
                         in 500..599 -> BikeyardFailure(BikeyardFailure.Kind.RETRY, "BIKEYARD is unavailable. Upload will retry", retryAt)
                         413 -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, if (metrics)
                             "Sensor metrics exceed BIKEYARD’s limit" else "The processed file exceeds BIKEYARD’s 20 MB limit")
                         422 -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT,
                             if (metrics) "BIKEYARD rejected sensor metrics for this ride" else "BIKEYARD rejected the upload")
-                        else -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, "BIKEYARD rejected the request (HTTP ${response.code})")
+                        else -> BikeyardFailure(BikeyardFailure.Kind.PERMANENT, "BIKEYARD rejected the request (HTTP $code)", httpCode = code)
                     }
                 }
                 return decode(body)
@@ -196,7 +319,7 @@ internal class BikeyardApi(
         fun authorizeUrl(environment: BikeyardEnvironment, pending: BikeyardPending): String =
             "https://yard.bike/oauth/authorize".toHttpUrl().newBuilder()
                 .addQueryParameter("response_type", "code").addQueryParameter("client_id", environment.clientId)
-                .addQueryParameter("redirect_uri", BikeyardPkce.REDIRECT_URI).addQueryParameter("scope", BikeyardPkce.SCOPES)
+                .addQueryParameter("redirect_uri", BikeyardPkce.REDIRECT_URI).addQueryParameter("scope", BikeyardPkce.REQUESTED_SCOPES)
                 .addQueryParameter("state", pending.state).addQueryParameter("code_challenge", BikeyardPkce.challenge(pending.verifier))
                 .addQueryParameter("code_challenge_method", "S256").build().toString()
 

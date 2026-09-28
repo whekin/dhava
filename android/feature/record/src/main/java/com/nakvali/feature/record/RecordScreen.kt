@@ -16,11 +16,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -100,6 +102,8 @@ fun RecordScreen(
     modifier: Modifier = Modifier,
     onImmersiveChanged: (Boolean) -> Unit = {},
     onSaveRecovered: (String) -> Unit = {},
+    /** Leave the recorder for the rest of the app; the ride keeps recording. */
+    onLeave: () -> Unit = {},
     viewModel: RecordViewModel = viewModel(),
 ) {
     val context = LocalContext.current
@@ -347,6 +351,19 @@ fun RecordScreen(
                     interruptedRecording?.id?.let(onSaveRecovered)
                 },
                 onStart = { startWithPermissions() },
+            )
+        }
+
+        // The recorder hides the app's navigation so nothing else competes
+        // for the rider's thumb, which also left no way out of it mid-ride.
+        // Top-left keeps the exit away from the ride controls at the bottom.
+        if (state is RecordingState.Recording || state is RecordingState.Preparing) {
+            HideRecorderControl(
+                onClick = onLeave,
+                // The NavHost is already inset below the status bar.
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(NakvaliSpacing.large),
             )
         }
     }
@@ -831,7 +848,7 @@ private fun RecordingContent(
  * the run just finished with the rest of this ride's runs behind a tap.
  *
  * Every time here is provisional — live matching is causal, and the canonical
- * result after Finish is the one that lands in the segment's leaderboard. The
+ * result after Finish is the one that updates the personal attempt history. The
  * label says so once, next to the newest run, instead of on every row.
  */
 @Composable
@@ -1006,6 +1023,36 @@ private fun SegmentRunsSection(
 private fun DismissedRunsHint(count: Int, onShow: () -> Unit) {
     TextButton(onClick = onShow) {
         Text("$count ${if (count == 1) "run" else "runs"} this ride")
+    }
+}
+
+/**
+ * The "minimise" chevron from music players: the ride collapses into a bar
+ * above the app's navigation and keeps recording. Labelled, because a bare
+ * arrow on a recorder could read as "stop".
+ */
+@Composable
+private fun HideRecorderControl(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = NakvaliSizes.compactControl),
+        shape = CircleShape,
+        // Raised and outlined: plain `surface` vanished into the dark basemap.
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .heightIn(min = NakvaliSizes.compactControl)
+                .padding(start = NakvaliSpacing.medium, end = NakvaliSpacing.large),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.xSmall),
+        ) {
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null)
+            Text("Hide", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 

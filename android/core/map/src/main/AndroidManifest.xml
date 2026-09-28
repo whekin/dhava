@@ -9,4 +9,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!--
+        Activity map previews check for a validated network before caching a
+        snapshot. MapLibre and WorkManager already merge this in; declaring it
+        here keeps the module honest about its own requirement.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

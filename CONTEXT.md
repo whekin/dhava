@@ -1,13 +1,13 @@
 # Nakvali
 
-Nakvali is a downhill-first ride tracker organized around timed trail sections rather
-than complete routes.
+Nakvali is an offline-first downhill ride tracker with private, rider-authored
+timing sections. BIKEYARD owns public trail identity and community results.
 
 ## Language
 
 **Segment**:
-A directed, timed trail section bounded by start and finish gates and represented by reference geometry.
-_Avoid_: Route, activity
+A directed personal timing section bounded by start and finish gates and represented by reference geometry. It may cover all, part or several BIKEYARD trails without becoming a trail identity.
+_Avoid_: Route, activity, BIKEYARD trail
 
 **Draft segment**:
 A segment whose reference geometry comes from one Nakvali ride or an imported GPX seed and is not yet trusted for correcting rider positions.
@@ -22,7 +22,7 @@ The rider-authored geographic anchor at the middle of a segment's start or finis
 _Avoid_: Track endpoint, GPS point, handle position
 
 **Imported GPX trace**:
-A preserved external GPX file used as seed evidence for a draft segment's reference centerline. Importing it does not create an activity, segment attempt, PR or KOM.
+A preserved external GPX file used as seed evidence for a draft segment's reference centerline. Importing it does not create an activity, segment attempt or PR.
 _Avoid_: Raw recording, imported ride, canonical track
 
 **Candidate descent**:
@@ -34,15 +34,11 @@ One continuous traversal evaluated independently against one segment from its di
 _Avoid_: Ride, recording, segment
 
 **Local segment**:
-A segment authored and stored on the rider's device that is not published or discoverable by other riders.
-_Avoid_: Public segment, nearby segment
-
-**Published segment**:
-A segment accepted for shared use, so that other riders can discover it and be timed on it.
-_Avoid_: Draft segment, local segment, trusted segment
+A segment authored and stored on the rider's device, available for personal timing and not discoverable by other riders.
+_Avoid_: Public trail, shared segment
 
 **Segment overlap**:
-The relationship between two segment definitions covering substantially the same trail in the same direction. It warns a rider who is about to author a duplicate and constrains whether a segment can be published; it never merges definitions and never affects how attempts are timed.
+The relationship between two personal segment definitions covering substantially the same ground in the same direction. It warns about accidental duplicates but never merges definitions or changes attempt timing.
 _Avoid_: Duplicate segment, same segment
 
 **Difficulty grade**:
@@ -53,28 +49,28 @@ _Avoid_: Segment colour, rating, quality
 An attributed provider and web link from a segment to a separate trail catalog or community resource. It adds context but is never authoritative segment geometry or timing evidence.
 _Avoid_: Imported trail, segment source, canonical trail page
 
+**BIKEYARD trail**:
+A community trail identity and shared result venue owned by BIKEYARD. It can overlap any number of Nakvali segments but does not define their timing gates.
+_Avoid_: Local segment, reference centerline
+
 **Segment library**:
-The rider-facing collection of locally authored and downloaded segments currently available for offline browsing and timing.
+The rider-facing collection of personal segments available for offline browsing and timing.
 _Avoid_: Segment feed, global catalog
 
 **On-device segment catalog**:
-The segment definitions currently available without network access, including locally authored and previously downloaded segments.
+The personal segment definitions available without network access, including those authored from a ride or imported GPX seed.
 _Avoid_: Global segment catalog, server catalog
 
 **Active segment set**:
 The geographic subset of the on-device segment catalog relevant to the rider's current area and eligible for on-ride detection.
 _Avoid_: All segments, global segments
 
-**Riding area**:
-A named place whose segment catalog and leaderboard snapshots can be downloaded and updated together for offline riding.
-_Avoid_: Map tile, city filter
-
 **On-ride segment result**:
 A locally computed segment result available shortly after the finish gate is confirmed, while the enclosing ride recording continues.
 _Avoid_: Live delta, provisional time, post-upload result
 
 **Countable attempt**:
-A segment attempt measured well enough to stand as a result, so it may set a personal record or enter a leaderboard.
+A segment attempt measured well enough to stand as a personal result and potentially set a PR.
 _Avoid_: Valid attempt, successful attempt
 
 **Uncertain attempt**:
@@ -82,24 +78,8 @@ A segment attempt that completed the segment but is not countable, always presen
 _Avoid_: Failed attempt, invalid attempt, rejected attempt
 
 **Personal record (PR)**:
-The rider's fastest countable attempt known on the device for the current segment definition, including results not yet synchronized.
+The rider's fastest countable attempt known on the device for the current segment definition.
 _Avoid_: KOM, latest result
-
-**Leaderboard snapshot**:
-A versioned, time-stamped copy of a segment leaderboard available on the device for offline comparison.
-_Avoid_: Live leaderboard, final leaderboard
-
-**Active leaderboard**:
-The explicitly identified category leaderboard used for the rider's immediate segment comparison.
-_Avoid_: Overall leaderboard, unnamed KOM
-
-**Potential KOM**:
-An unverified attempt faster than the KOM in the device's latest leaderboard snapshot.
-_Avoid_: KOM, confirmed KOM
-
-**KOM**:
-The fastest eligible segment attempt confirmed by the server for a particular leaderboard.
-_Avoid_: Potential KOM, local best
 
 **Transport episode**:
 One continuous journey in a vehicle, from boarding/departure to unloading, including intermediate road descents, flat sections and brief stops.

@@ -134,6 +134,31 @@ pub struct RideAnalysis {
     pub algorithm_version: String,
 }
 
+/// Airtime at least this long counts as a jump; shorter windows stay candidates.
+///
+/// Free fall reads near zero on every ballistic body, so a phone in a pocket
+/// sees a real jump for its whole length (leg movement can only shorten it).
+/// What it also sees are brief false dips: the phone bouncing in the pocket,
+/// unweighting over a roller. Those do not last. On the owner's pocket-carried
+/// S25 shuttle day (75 candidates) the windows under 200 ms landed softly
+/// (median 5.9 g, versus about 11 g above), and every candidate that was not
+/// on a descent was under 250 ms; from 250 ms up all 47 were on descents.
+/// Physically 250 ms is roughly an 8 cm hop or a 30 cm drop — small, but air.
+/// This is a classification rule, not a measurement: it can still be wrong.
+pub const JUMP_MIN_AIRTIME_MS: i64 = 250;
+
+/// Whether an airtime window of this duration is counted as a jump.
+#[uniffi::export]
+pub fn is_likely_jump(duration_ms: i64) -> bool {
+    duration_ms >= JUMP_MIN_AIRTIME_MS
+}
+
+/// [`JUMP_MIN_AIRTIME_MS`], for copy that states the rule.
+#[uniffi::export]
+pub fn jump_min_airtime_ms() -> i64 {
+    JUMP_MIN_AIRTIME_MS
+}
+
 /// Returns the analysis algorithm version tag; results product-wide are
 /// tagged with this value.
 #[uniffi::export]
@@ -541,6 +566,13 @@ fn decimate_track(gps: &[GpsPoint]) -> Vec<TrackPoint> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn jump_rule_starts_at_the_published_threshold() {
+        assert!(!super::is_likely_jump(super::JUMP_MIN_AIRTIME_MS - 1));
+        assert!(super::is_likely_jump(super::JUMP_MIN_AIRTIME_MS));
+        assert_eq!(super::jump_min_airtime_ms(), 250);
+    }
+
     use super::*;
 
     fn gps_at(timestamp_ms: i64, east_m: f64, accuracy_m: f32, speed_mps: Option<f32>) -> GpsPoint {

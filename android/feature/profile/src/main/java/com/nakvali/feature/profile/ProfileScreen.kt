@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,13 +21,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import com.nakvali.core.ui.NakvaliDivider
 import com.nakvali.core.ui.NakvaliLoading
 import com.nakvali.core.ui.NakvaliPanel
 import com.nakvali.core.ui.NakvaliPrimaryButton
@@ -38,8 +41,11 @@ import com.nakvali.core.ui.NakvaliStatusPill
 import com.nakvali.core.ui.NakvaliStatusTone
 import com.nakvali.core.ui.NakvaliTextField
 import com.nakvali.core.ui.NakvaliTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,6 +78,8 @@ sealed interface ProfileServerState {
     data object Syncing : ProfileServerState
     data object Synced : ProfileServerState
     data class Unavailable(val message: String) : ProfileServerState
+    /** This build has no Nakvali server access; the account is identity only. */
+    data object LocalOnly : ProfileServerState
 }
 
 sealed interface ProfileUiState {
@@ -79,6 +87,8 @@ sealed interface ProfileUiState {
     data class SignedOut(
         val signingIn: Boolean = false,
         val error: String? = null,
+        /** False in public builds, which cannot reach the Nakvali server. */
+        val cloudAvailable: Boolean = true,
     ) : ProfileUiState
 
     data class SignedIn(
@@ -111,7 +121,7 @@ fun ProfileScreen(
         onAddBike = viewModel::addBike,
         onSelectBike = viewModel::selectBike,
         modifier = modifier,
-        connections = { BikeyardSettings(viewModel) },
+        bikeyard = { BikeyardSection(viewModel) },
     )
 }
 
@@ -127,7 +137,7 @@ private fun ProfileContent(
     onAddBike: (String, BikeType) -> Unit,
     onSelectBike: (String) -> Unit,
     modifier: Modifier = Modifier,
-    connections: @Composable () -> Unit = {},
+    bikeyard: @Composable () -> Unit = {},
 ) {
     var showAddBike by remember { mutableStateOf(false) }
 
@@ -137,21 +147,22 @@ private fun ProfileContent(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = NakvaliSpacing.screen, vertical = NakvaliSpacing.xLarge),
     ) {
-        NakvaliScreenHeader(
-            eyebrow = "Rider",
-            title = "Profile",
-            description = "Your bikes, identity and app setup.",
-        )
+        NakvaliScreenHeader(eyebrow = "Rider", title = "Profile")
 
-        ProfileSection(title = "Account") {
+        // Local-only public builds have nothing to sign in to; the card would
+        // only advertise a server the app cannot reach.
+        if (!(state is ProfileUiState.SignedOut && !state.cloudAvailable)) {
+            Spacer(Modifier.height(NakvaliSpacing.xLarge))
             when (state) {
                 ProfileUiState.Loading -> LoadingAccount()
                 is ProfileUiState.SignedOut -> SignedOutAccount(state, onSignIn)
-                is ProfileUiState.SignedIn -> SignedInAccount(state, onRetrySync)
+                is ProfileUiState.SignedIn -> SignedInAccount(state, onRetrySync, onSignOut)
             }
         }
 
-        connections()
+        ProfileSection(title = "Connections") {
+            bikeyard()
+        }
 
         ProfileSection(
             title = "Bikes",
@@ -177,23 +188,14 @@ private fun ProfileContent(
             SettingsCard(onOpenSettings)
         }
 
-        if (state is ProfileUiState.SignedIn) {
-            Spacer(Modifier.height(NakvaliSpacing.large))
-            TextButton(
-                onClick = onSignOut,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) {
-                Text("Sign out")
-            }
-            Text(
-                text = "Your rides and bikes stay on this phone.",
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-        }
-
+        Spacer(Modifier.height(NakvaliSpacing.large))
+        Text(
+            text = "Rides, bikes and raw sensor data stay on this phone.",
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.outline,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(NakvaliSpacing.xLarge))
     }
 
@@ -214,9 +216,11 @@ private fun ProfileSection(
     action: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
-    Spacer(Modifier.height(NakvaliSpacing.xxLarge))
+    Spacer(Modifier.height(NakvaliSpacing.xLarge))
+    // The label belongs to the card below it, so it sits close to it; the
+    // row only grows when it carries an action.
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -310,11 +314,13 @@ private fun SignedOutAccount(state: ProfileUiState.SignedOut, onSignIn: () -> Un
 private fun SignedInAccount(
     state: ProfileUiState.SignedIn,
     onRetrySync: () -> Unit,
+    onSignOut: () -> Unit,
 ) {
     val account = state.account
     val title = account.displayName.ifBlank {
         account.email.substringBefore('@').ifBlank { "Rider" }
     }
+    var menu by remember { mutableStateOf(false) }
 
     NakvaliPanel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(NakvaliSpacing.xLarge)) {
@@ -334,80 +340,79 @@ private fun SignedInAccount(
                         Spacer(Modifier.height(NakvaliSpacing.xSmall))
                         Text(
                             text = account.email,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.height(NakvaliSpacing.xSmall))
-                    Text(
-                        text = if (account.emailVerified) "Google account · Verified" else "Google account",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (account.emailVerified) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
+                }
+                Box {
+                    IconButton(onClick = { menu = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Account options")
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        if (state.server is ProfileServerState.Unavailable) {
+                            DropdownMenuItem(
+                                text = { Text("Try sync again") },
+                                leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                                onClick = {
+                                    menu = false
+                                    onRetrySync()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Sign out") },
+                            leadingIcon = {
+                                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
+                            },
+                            onClick = {
+                                menu = false
+                                onSignOut()
+                            },
+                        )
+                    }
                 }
             }
-
-            Spacer(Modifier.height(NakvaliSpacing.large))
-            NakvaliDivider()
             Spacer(Modifier.height(NakvaliSpacing.large))
             ServerStatus(state.server, onRetrySync)
         }
     }
 }
 
+/** One quiet line: the account is a convenience, never the app's headline. */
 @Composable
 private fun ServerStatus(server: ProfileServerState, onRetrySync: () -> Unit) {
-    when (server) {
-        ProfileServerState.Syncing -> Row(
-            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NakvaliLoading(Modifier.size(20.dp))
-            Column {
-                Text("Connecting to Nakvali", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "Your local data stays available.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.small),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when (server) {
+            ProfileServerState.Syncing -> NakvaliLoading(Modifier.size(18.dp))
+            else -> Surface(
+                modifier = Modifier.size(8.dp),
+                shape = CircleShape,
+                color = when (server) {
+                    ProfileServerState.Synced -> MaterialTheme.colorScheme.primary
+                    is ProfileServerState.Unavailable -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.outline
+                },
+            ) {}
         }
-
-        ProfileServerState.Synced -> Row(
-            horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NakvaliStatusPill(text = "Synced", tone = NakvaliStatusTone.Live)
-            Text(
-                "Ready for shared segment results.",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        is ProfileServerState.Unavailable -> Column {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NakvaliStatusPill("Local only")
-                Text(
-                    server.message,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onRetrySync, modifier = Modifier.align(Alignment.End)) {
-                Text("Try sync again")
-            }
+        Text(
+            text = when (server) {
+                ProfileServerState.Syncing -> "Connecting to Nakvali…"
+                ProfileServerState.Synced -> "Google account · synced with Nakvali"
+                ProfileServerState.LocalOnly -> "Google account · this build stays local"
+                is ProfileServerState.Unavailable -> server.message
+            },
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (server is ProfileServerState.Unavailable) {
+            TextButton(onClick = onRetrySync) { Text("Retry") }
         }
     }
 }
@@ -656,7 +661,7 @@ private fun SignedOutPreview() {
     }
 }
 
-@Preview(name = "Rider garage", showBackground = true, backgroundColor = 0xFF11100F)
+@Preview(name = "Rider garage", showBackground = true, backgroundColor = 0xFF11100F, heightDp = 1400)
 @Composable
 private fun SignedInPreview() {
     NakvaliTheme(darkTheme = true) {
@@ -681,6 +686,17 @@ private fun SignedInPreview() {
             onOpenSettings = {},
             onAddBike = { _, _ -> },
             onSelectBike = {},
+            bikeyard = {
+                BikeyardCard(
+                    state = com.nakvali.core.recording.bikeyard.BikeyardUiState(
+                        loading = false,
+                        connected = true,
+                        riderName = "Stanislav K.",
+                        profile = previewBikeyardProfile(),
+                    ),
+                    actions = BikeyardActions({}, {}, {}, {}, {}, {}, {}, {}, {}),
+                )
+            },
         )
     }
 }

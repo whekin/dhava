@@ -120,12 +120,24 @@ class TrackMapTest {
             point(2_000, ActivityState.DOWNHILL, offset = 0.001),
             point(3_000, ActivityState.DOWNHILL, offset = 0.002),
         )
-        val candidates = points.placeAirtimeCandidates(listOf(AirtimeWindow(1_250, 500, 3.0, null)))
+        val candidates = points.placeAirtimeCandidates(listOf(AirtimeWindow(1_250, 500, 3.0, null)), isJump = { true })
 
         assertEquals(1, candidates.size)
         assertEquals(0, candidates.single().eventIndex)
         assertEquals(points[0].lat + 0.00025, candidates.single().start.lat, 0.0000001)
         assertEquals(500L, candidates.single().durationMs)
+        assertEquals(listOf(1_250L, 1_750L), candidates.single().path.map { it.timestampMs })
+    }
+
+    @Test
+    fun `a flight crossing a fix is drawn through it`() {
+        val points = listOf(
+            point(1_000, ActivityState.DOWNHILL),
+            point(2_000, ActivityState.DOWNHILL, offset = 0.001),
+            point(3_000, ActivityState.DOWNHILL, offset = 0.002),
+        )
+        val path = points.placeAirtimeCandidates(listOf(AirtimeWindow(1_250, 1_500, 3.0, null)), isJump = { true }).single().path
+        assertEquals(listOf(1_250L, 2_000L, 2_750L), path.map { it.timestampMs })
     }
 
     @Test
@@ -138,7 +150,7 @@ class TrackMapTest {
         val candidates = points.placeAirtimeCandidates(listOf(
             AirtimeWindow(100, 250, 2.0, null),
             AirtimeWindow(1_250, 500, 3.0, 1.8),
-        ))
+        ), isJump = { true })
 
         assertEquals(1, candidates.size)
         assertEquals(1, candidates.single().eventIndex)
@@ -159,6 +171,20 @@ class TrackMapTest {
         assertEquals(listOf(3, 1), markers.map { it.count })
         assertEquals(listOf(0, 3), markers.map { it.candidate.eventIndex })
         assertEquals(80.0, markers[1].candidate.start.lat, 0.0)
+        // Disc size follows seconds in the air, so a group carries its sum.
+        assertEquals(listOf(900L, 300L), markers.map { it.totalMs })
+    }
+
+    @Test
+    fun `short candidates join a cluster without counting as jumps`() {
+        val point = MapTrackPoint(0.0, 0.0, sectionId = 0)
+        val candidates = listOf(
+            MapAirtimeCandidate(0, point, point, 0, 400, null, 9.0, jump = true),
+            MapAirtimeCandidate(1, point, point, 1_000, 180, null, 3.0, jump = false),
+        )
+        val marker = clusterAirtimeOverview(candidates, minSpacingPx = 36f) { 0f to 0f }.single()
+        assertEquals(1, marker.count)
+        assertEquals(400L, marker.totalMs)
     }
 
     @Test

@@ -28,9 +28,12 @@ import androidx.compose.ui.unit.dp
 import com.nakvali.core.ui.NakvaliMetric
 import com.nakvali.core.ui.NakvaliSectionLabel
 import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.air
 import com.nakvali.core.ui.NakvaliTheme
 import com.nakvali.fusion.AirtimeWindow
 import com.nakvali.fusion.RideAnalysis
+import com.nakvali.fusion.isLikelyJump
+import com.nakvali.fusion.jumpMinAirtimeMs
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -50,15 +53,18 @@ internal fun AirtimeAnalysisSection(
     val index = selectedIndex?.takeIf { it in windows.indices } ?: 0
     val event = windows[index]
     val longestMs = windows.maxOf { it.durationMs }
+    val jumps = windows.filter { isLikelyJump(it.durationMs) }
+    val shorter = windows.size - jumps.size
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.xSmall)) {
-            NakvaliSectionLabel("Possible airtime")
+            NakvaliSectionLabel("Airtime")
             Text(
-                "Phone-sensor candidates · not verified jumps",
+                "Phone sensor · air of ${formatAirSeconds(jumpMinAirtimeMs())} or more counts as a jump" +
+                    if (shorter > 0) " · $shorter shorter candidates" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -67,8 +73,8 @@ internal fun AirtimeAnalysisSection(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.large),
         ) {
-            NakvaliMetric(windows.size.toString(), "Events", Modifier.weight(1f))
-            NakvaliMetric(formatAirSeconds(analysis.airtimeTotalMs), "Total air", Modifier.weight(1f))
+            NakvaliMetric(jumps.size.toString(), "Jumps", Modifier.weight(1f), valueColor = MaterialTheme.colorScheme.air)
+            NakvaliMetric(formatAirSeconds(jumps.sumOf { it.durationMs }), "Total air", Modifier.weight(1f))
             NakvaliMetric(formatAirSeconds(longestMs), "Longest", Modifier.weight(1f))
         }
         Surface(
@@ -83,7 +89,7 @@ internal fun AirtimeAnalysisSection(
                     Text(
                         "AIR ${index + 1} / ${windows.size}",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.air,
                     )
                     Spacer(Modifier.weight(1f))
                     IconButton(
@@ -103,7 +109,7 @@ internal fun AirtimeAnalysisSection(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        "airborne candidate",
+                        if (isLikelyJump(event.durationMs)) "jump" else "short candidate · not counted",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

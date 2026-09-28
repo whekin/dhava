@@ -54,6 +54,76 @@ data class BikeyardAutoRequest(
 @Serializable
 data class BikeyardSensorScope(val startedAtMs: Long, val endedAtMs: Long)
 
+/**
+ * What the token lets Nakvali read back. Uploading never needs it; ride pages,
+ * trail matches and achievements do, and private rides need [ALL].
+ */
+enum class BikeyardRideAccess { NONE, PUBLIC, ALL }
+
+/** Lifetime totals from `GET /v1/me`. Private rides count only with [BikeyardRideAccess.ALL]. */
+@Serializable
+data class BikeyardStats(
+    val rideCount: Int = 0,
+    val distanceM: Double = 0.0,
+    val movingS: Long = 0,
+    val elevationGainM: Double = 0.0,
+)
+
+/** The connected rider as BIKEYARD shows them; refreshed opportunistically. */
+@Serializable
+data class BikeyardProfile(
+    val username: String = "",
+    val profileUrl: String? = null,
+    val location: String = "",
+    val repLevel: Int? = null,
+    val repScore: Int? = null,
+    val stats: BikeyardStats? = null,
+    val includesPrivate: Boolean = false,
+    val fetchedAtMs: Long = 0,
+    /**
+     * Summed from the rider's ride list, since `/v1/me` totals only climb.
+     * Null until read; needs ride read access.
+     */
+    val descentM: Double? = null,
+    val kom: Int = 0,
+    val medals: Int = 0,
+    val localLegend: Int = 0,
+    /** More rides than one refresh reads; the sums cover the newest only. */
+    val totalsPartial: Boolean = false,
+)
+
+@Serializable
+enum class BikeyardAchievementKind { KOM, PERSONAL_BEST, LOCAL_LEGEND }
+
+/** One trail BIKEYARD matched in an uploaded ride. */
+@Serializable
+data class BikeyardTrailResult(
+    val name: String,
+    val durationS: Int,
+    val complete: Boolean,
+    val achievement: BikeyardAchievementKind? = null,
+    val rank: Int? = null,
+)
+
+/**
+ * BIKEYARD's own processing of an uploaded ride. It is their trail matching,
+ * not Nakvali's canonical timing, and is shown as such.
+ */
+@Serializable
+data class BikeyardRideResult(
+    val url: String? = null,
+    /** False while BIKEYARD is still matching trails; counts may be zero. */
+    val ready: Boolean = false,
+    val kom: Int = 0,
+    val medals: Int = 0,
+    val localLegend: Int = 0,
+    val trails: List<BikeyardTrailResult> = emptyList(),
+    val likeCount: Int = 0,
+    val commentCount: Int = 0,
+) {
+    val achievementCount: Int get() = kom + medals + localLegend
+}
+
 @Serializable
 data class BikeyardUpload(
     val key: String,
@@ -78,13 +148,21 @@ data class BikeyardUpload(
     val metricsError: String? = null,
     val metricsRetryAtMs: Long = 0,
     val metricsRevision: Int? = null,
+    val result: BikeyardRideResult? = null,
+    val resultCheckedAtMs: Long = 0,
+    /** The last read was refused: the ride is private without read access, or gone. */
+    val resultUnavailable: Boolean = false,
 )
 
 data class BikeyardUiState(
     val loading: Boolean = true,
     val connected: Boolean = false,
     val connecting: Boolean = false,
+    /** A connected rider is widening permissions in the browser. */
+    val upgrading: Boolean = false,
     val riderName: String? = null,
+    val profile: BikeyardProfile? = null,
+    val rideAccess: BikeyardRideAccess = BikeyardRideAccess.NONE,
     val accountKey: String? = null,
     val automatic: Boolean = false,
     val automaticMetrics: Boolean = false,
@@ -106,10 +184,27 @@ internal data class BikeyardTokens(
     val riderId: String,
     val riderName: String = "BIKEYARD rider",
     val refreshInFlight: Boolean = false,
-)
+    /** Granted scopes as BIKEYARD reported them. Blank for tokens stored before this was kept. */
+    val scope: String = "",
+) {
+    val rideAccess: BikeyardRideAccess get() {
+        val granted = scope.split(' ')
+        return when {
+            "rides:read_all" in granted -> BikeyardRideAccess.ALL
+            "rides:read" in granted -> BikeyardRideAccess.PUBLIC
+            else -> BikeyardRideAccess.NONE
+        }
+    }
+}
 
 @Serializable
-internal data class BikeyardPending(val state: String, val verifier: String, val createdAtMs: Long)
+internal data class BikeyardPending(
+    val state: String,
+    val verifier: String,
+    val createdAtMs: Long,
+    /** Re-authorizing the connected rider to widen scopes; must return the same rider. */
+    val upgrade: Boolean = false,
+)
 
 @Serializable
 internal data class BikeyardStoredState(
@@ -122,11 +217,14 @@ internal data class BikeyardStoredState(
     val visibility: BikeyardVisibility = BikeyardVisibility.PRIVATE,
     val uploads: List<BikeyardUpload> = emptyList(),
     val message: String? = null,
+    val profile: BikeyardProfile? = null,
 ) {
     val accountKey: String? get() = tokens?.let { "${environment.name}:${it.riderId}" }
     fun ui() = BikeyardUiState(
         loading = false, connected = tokens != null,
-        connecting = pending != null, riderName = tokens?.riderName,
+        connecting = pending != null, upgrading = pending?.upgrade == true && tokens != null,
+        riderName = tokens?.riderName, profile = profile.takeIf { tokens != null },
+        rideAccess = tokens?.rideAccess ?: BikeyardRideAccess.NONE,
         accountKey = accountKey, automatic = autoConsentId != null,
         automaticMetrics = autoConsentId != null && autoMetrics,
         metricsMounting = metricsMounting,
@@ -136,7 +234,14 @@ internal data class BikeyardStoredState(
 
 internal object BikeyardPkce {
     const val REDIRECT_URI = "https://nakvali.whekin.dev/oauth/bikeyard/callback"
+    /** What a connection cannot work without. Tokens missing either are refused. */
     const val SCOPES = "profile:read rides:write"
+    /**
+     * What a connection asks for. Reading rides back (including private ones,
+     * the upload default) is optional: an older or narrower grant still
+     * uploads, and BIKEYARD widens an existing grant on re-authorization.
+     */
+    const val REQUESTED_SCOPES = "profile:read rides:write rides:read_all"
     fun random(): String = Base64.getUrlEncoder().withoutPadding()
         .encodeToString(ByteArray(32).also { SecureRandom().nextBytes(it) })
     fun challenge(verifier: String): String = Base64.getUrlEncoder().withoutPadding()
@@ -147,6 +252,7 @@ internal class BikeyardFailure(
     val kind: Kind,
     message: String,
     val retryAtMs: Long = 0,
+    val httpCode: Int? = null,
 ) : Exception(message) {
     enum class Kind { RETRY, AUTH, PERMANENT }
 }

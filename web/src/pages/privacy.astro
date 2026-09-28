@@ -83,17 +83,23 @@ import { site } from '../data/site';
     </p>
     <p>
       If you connect BIKEYARD in a compatible Nakvali build, the app asks for
-      profile access and permission to upload rides. Connection tokens and your
-      connected profile are encrypted on your phone outside the ride backup.
+      profile access, permission to upload rides and permission to read your
+      rides back, including private ones. Nakvali reads only your profile totals
+      and BIKEYARD’s results for rides Nakvali uploaded: the ride page link,
+      matched trails and honours. An earlier connection keeps uploading without
+      read access until you allow it. Connection tokens, your connected profile
+      and those results are encrypted on your phone outside the ride backup.
       You choose individual uploads or opt into automatic uploads of newly saved
       rides, with your selected visibility. Processed tracks and ride metadata
       go directly to BIKEYARD; original sensor files stay on the phone.
     </p>
     <p>
-      Experimental airtime sharing has a separate switch and starts off. When
-      you enable it for new private rides, or choose to send it for one private
-      ride, Nakvali sends candidate event times, measured sensor coverage and
-      sample rate, and the phone position you select. BIKEYARD associates those
+      Jump sharing has a separate switch and starts off. When you enable it for
+      new private rides, or choose to send it for one private ride, Nakvali
+      sends airtime event times — air of 0.25 s or more marked as jumps, which
+      BIKEYARD counts, and shorter air as uncounted candidates — with measured
+      sensor coverage and sample rate, and the phone position you select. Jumps
+      are a phone-sensor estimate, not a verified measurement. BIKEYARD associates those
       times with its copy of your ride. The app does not send raw motion samples,
       GPS coordinates in the metrics document, or phone G peaks. Turning off
       automatic airtime sharing stops future and queued automatic submissions;

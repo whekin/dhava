@@ -401,13 +401,13 @@ fun List<StoredAttempt>.latestAttempt(): StoredAttempt? = maxByOrNull { it.start
 /**
  * Why a segment name is not acceptable, or null when it is.
  *
- * Trail names are read on leaderboards, in notifications and through a jacket
+ * Personal segment names are read on the map, in notifications and through a jacket
  * pocket, so they are held to a shape rather than accepted as free text. The
  * rules are deliberately few and each has a reason:
  *
  *  * at least one letter — "101" names nothing;
- *  * digits stand apart from words — "Trail 2" is a variant of a trail, while
- *    "Trail2" reads as a typo and sorts unpredictably;
+ *  * digits stand apart from words — "Ridge 2" is a distinct timing line, while
+ *    "Ridge2" reads as a typo and sorts unpredictably;
  *  * one alphabet per name — a Latin "a" inside a Cyrillic word is invisible
  *    to the eye and fatal to search;
  *  * letters, digits, spaces and hyphens only.
@@ -418,7 +418,7 @@ fun List<StoredAttempt>.latestAttempt(): StoredAttempt? = maxByOrNull { it.start
 fun segmentNameProblem(name: String): String? {
     val trimmed = name.trim()
     if (trimmed.isEmpty()) return null
-    if (trimmed.none(Char::isLetter)) return "Give the trail a name, not just numbers"
+    if (trimmed.none(Char::isLetter)) return "Give this segment a name, not just numbers"
     if (trimmed.any { !it.isLetterOrDigit() && it != ' ' && it != '-' }) {
         return "Letters, digits, spaces and hyphens only"
     }

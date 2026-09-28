@@ -3,11 +3,17 @@ package com.nakvali.core.recording.bikeyard
 import com.nakvali.core.recording.TrackExportPoint
 import com.nakvali.fusion.SensorMetricsEvidence
 import com.nakvali.fusion.SensorTimeScope
+import com.nakvali.fusion.isLikelyJump
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** The manually reviewed pilot sends candidate timing only, never phone G or raw samples. */
+/**
+ * Event timing and sensor availability only — never phone G or raw samples.
+ * Airtime long enough for Rust's `is_likely_jump` goes as a validated jump so
+ * BIKEYARD counts it; shorter windows stay candidates, which it lists but does
+ * not count. "Validated" here is Nakvali's duration rule, not a field check.
+ */
 @Serializable
 internal data class BikeyardSensorMetricsDocument(
     val schema: String = "bikeyard.sensor-metrics",
@@ -51,6 +57,9 @@ internal fun buildBikeyardMetricsDocument(
     algorithmVersion: String,
     appVersion: String?,
     generatedAtMs: Long,
+    // Rust's rule and its threshold; parameters only so JVM tests need no native library.
+    isJump: (Long) -> Boolean = ::isLikelyJump,
+    jumpMinAirtimeMs: Long = com.nakvali.fusion.jumpMinAirtimeMs(),
 ): BikeyardSensorMetricsDocument {
     val sampleRate = evidence.sampleRateHz
     require(evidence.coverage.isFinite() && evidence.coverage in 0.0..1.0)
@@ -61,8 +70,11 @@ internal fun buildBikeyardMetricsDocument(
     }
     val events = evidence.events.mapIndexed { index, window ->
         require(window.durationMs in 50..10_000 && window.startMs > 0)
+        val jump = isJump(window.durationMs)
         BikeyardSensorMetricsDocument.Event(
             id = "a${index + 1}",
+            kind = if (jump) "jump" else "airtime",
+            status = if (jump) "validated" else "candidate",
             startMs = window.startMs,
             endMs = Math.addExact(window.startMs, window.durationMs),
         )
@@ -70,7 +82,8 @@ internal fun buildBikeyardMetricsDocument(
     return BikeyardSensorMetricsDocument(
         generator = BikeyardSensorMetricsDocument.Generator(
             appVersion = appVersion?.take(64),
-            algorithmVersion = algorithmVersion.take(64),
+            // The classification rule is part of what produced the document.
+            algorithmVersion = "$algorithmVersion+jump$jumpMinAirtimeMs".take(64),
         ),
         generatedAt = generatedAtMs,
         sensor = BikeyardSensorMetricsDocument.Sensor(

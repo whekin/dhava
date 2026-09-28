@@ -131,8 +131,8 @@ fun SegmentsScreen(
                 modifier = modifier.fillMaxSize(),
             ) {
                 NakvaliScreenHeader(
-                    eyebrow = "Trail library",
-                    title = "Segments",
+                    eyebrow = "Personal timing",
+                    title = "My segments",
                     modifier = Modifier.padding(
                         start = NakvaliSpacing.screen,
                         end = NakvaliSpacing.screen,
@@ -146,8 +146,8 @@ fun SegmentsScreen(
                 // showing in the navigation bar. An empty screen is the empty
                 // state; it just needs to be centred in it.
                 NakvaliEmptyState(
-                    title = "No segments yet",
-                    description = "Find downhill candidates across your saved rides or import a GPX trail.",
+                    title = "No personal segments yet",
+                    description = "Mark a section of a saved ride or import a GPX seed. Your timing stays on this phone.",
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
@@ -402,7 +402,7 @@ private fun LibrarySheetHeader(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             if (selected == null) {
-                NakvaliSectionLabel("Local segments")
+                NakvaliSectionLabel("My segments")
                 Spacer(Modifier.height(NakvaliSpacing.xSmall))
                 Text(
                     text = "${state.summaries.size} on the map",

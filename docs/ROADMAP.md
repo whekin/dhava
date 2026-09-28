@@ -1,8 +1,8 @@
 # Roadmap — recorder first
 
-Nakvali is currently a high-quality, offline-first MTB recorder that will export
-activities to BIKEYARD. Segments, leaderboards and social features are frozen until
-the recorder is trustworthy enough to replace a dedicated bike computer.
+Nakvali is an offline-first MTB recorder and personal timing tool that exports
+rides to BIKEYARD. Local segments and personal records are part of the product;
+public trail discovery, leaderboards and social features belong to BIKEYARD.
 
 ## Phase 0 — Foundation ✅
 
@@ -123,9 +123,9 @@ skeleton and deployment scaffolding.
 
 ## Future hypothesis — Alternate line variants
 
-- Explore grouping mutually exclusive lines under one rider-facing trail/segment family:
+- Explore grouping mutually exclusive lines under one personal segment family:
   for example a main gap line and its chicken line share an entry and exit but remain
-  separately timed variants with separate leaderboards
+  separately timed variants with separate personal histories
 - Keep line variants distinct from combo segments: a combo joins sequential trails,
   while a rider chooses exactly one variant through a branched section
 - Classify the ridden variant from trusted geometry only when the recorded evidence can
@@ -168,8 +168,11 @@ skeleton and deployment scaffolding.
 - Field validation of gate/corridor thresholds against repeated real runs of the
   same trail
 
-## Frozen future work
+## Product boundary
 
-Shared/server-side segments, leaderboards, KOM verification, uncertainty and
-anti-cheat evidence upload, live deltas and social features remain part of the
-long-term vision but are deliberately out of the current product path.
+Keep local segment timing, personal records, attempt history and eventually
+personal live deltas. Do not build shared Nakvali segment publishing, public
+leaderboards, KOM verification or a second trail/social catalogue. BIKEYARD
+owns community competition; its trail matches can appear beside local results
+with attribution and a link. Their geometry and our timing gates remain
+independent.

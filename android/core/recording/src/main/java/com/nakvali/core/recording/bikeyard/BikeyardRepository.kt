@@ -33,6 +33,7 @@ class BikeyardRepository private constructor(private val context: Context) {
     private val snapshots = File(context.noBackupFilesDir, "bikeyard/uploads")
     private val metricsSnapshots = File(context.noBackupFilesDir, "bikeyard/metrics")
     private val metricsPreparation = Mutex()
+    private val resultsPass = Mutex()
     private val engine = scope.async {
         BikeyardEngine(BikeyardEncryptedStore(context), BikeyardApi()).also { core ->
             if (core.retiredSandbox) {
@@ -67,7 +68,38 @@ class BikeyardRepository private constructor(private val context: Context) {
         }
     }
 
-    suspend fun beginConnect(): String = withContext(Dispatchers.IO) { engine.await().beginConnect() }
+    suspend fun beginConnect(upgrade: Boolean = false): String =
+        withContext(Dispatchers.IO) { engine.await().beginConnect(upgrade) }
+
+    /** Opportunistic, throttled in the engine; failures leave the last copy in place. */
+    fun refreshProfile() {
+        scope.launch {
+            try { engine.await().refreshProfile() }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Reads BIKEYARD's results for uploaded rides, newest first, one request at
+     * a time. Repeated calls while a pass is running are dropped; the engine
+     * throttles each ride on its own.
+     */
+    fun refreshRideResults(recordingIds: List<String>, force: Boolean = false) {
+        if (recordingIds.isEmpty() || !resultsPass.tryLock()) return
+        scope.launch {
+            try {
+                val core = engine.await()
+                var requests = 0
+                for (id in recordingIds) {
+                    if (requests >= MAX_RESULT_READS_PER_PASS) break
+                    if (core.refreshRideResult(id, force)) requests++
+                }
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { }
+            finally { resultsPass.unlock() }
+        }
+    }
     fun finishConnect(callback: String) {
         connectionJob = action { finishConnect(callback) }
     }
@@ -293,6 +325,7 @@ class BikeyardRepository private constructor(private val context: Context) {
         }
 
     companion object {
+        private const val MAX_RESULT_READS_PER_PASS = 12
         @Volatile private var instance: BikeyardRepository? = null
         fun getInstance(context: Context): BikeyardRepository = instance ?: synchronized(this) {
             instance ?: BikeyardRepository(context.applicationContext).also { instance = it }

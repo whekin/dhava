@@ -43,8 +43,8 @@ pub use canonical::{
 };
 
 pub use analysis::{
-    ALGORITHM_VERSION, AirtimeWindow, RideAnalysis, TrackPoint, algorithm_version,
-    analyze_recording,
+    ALGORITHM_VERSION, AirtimeWindow, JUMP_MIN_AIRTIME_MS, RideAnalysis, TrackPoint,
+    algorithm_version, analyze_recording, is_likely_jump, jump_min_airtime_ms,
 };
 pub use recording::{ParsedRecording, RecordingMeta, parse_recording, parse_recording_file};
 

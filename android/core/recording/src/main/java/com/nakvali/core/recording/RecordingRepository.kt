@@ -15,6 +15,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -64,6 +65,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
         private const val BIKES_FILE = "bikes.json"
         private const val RECORDINGS_DIR = "recordings"
         private const val ARTIFACTS_DIR = "activity-artifacts"
+        private const val SUMMARIES_DIR = "activity-summaries"
         private const val SEGMENTS_DIR = "segments"
         private const val SEGMENT_RESULTS_DIR = "segment-results"
         private const val IMPORTED_TRACES_DIR = "imported-traces"
@@ -91,6 +93,9 @@ class RecordingRepository private constructor(private val appContext: Context) {
         currentAlgorithmVersion = { FusionCore.algorithmVersion },
         produce = ::finalizeReported,
     )
+    private val summaryStore = ActivitySummaryStore(File(appContext.noBackupFilesDir, SUMMARIES_DIR))
+    private val summaryFailures = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private var summaryJob: Job? = null
     private val segmentStore = SegmentStore(
         segmentsDir = File(appContext.filesDir, SEGMENTS_DIR),
         resultsDir = File(appContext.filesDir, SEGMENT_RESULTS_DIR),
@@ -121,6 +126,11 @@ class RecordingRepository private constructor(private val appContext: Context) {
     private val _uploads = MutableStateFlow<Map<String, UploadState>>(emptyMap())
     val uploads: StateFlow<Map<String, UploadState>> = _uploads.asStateFlow()
 
+    private val _summaries = MutableStateFlow<Map<String, ActivitySummary>>(emptyMap())
+
+    /** List-sized totals and track per ride; missing until the ride has been processed once. */
+    val summaries: StateFlow<Map<String, ActivitySummary>> = _summaries.asStateFlow()
+
     private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
     val bikes: StateFlow<List<Bike>> = _bikes.asStateFlow()
 
@@ -147,6 +157,7 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 // UI never observe pre-recovery state.
                 recoverInterruptedRecordings()
                 settleUploadsWhileDisabled()
+                loadSummaries()
             }
             _segments.value = segmentStore.loadSegments()
             loaded.complete(Unit)
@@ -466,17 +477,75 @@ class RecordingRepository private constructor(private val appContext: Context) {
                 val entry = _recordings.value.find { it.id == id }
                 val episodes = entry?.transportEpisodes
                 val bounds = entry?.rideBounds
-                if (episodes == null && bounds == null) return@withLock automatic
+                if (episodes == null && bounds == null) return@withLock automatic to entry
                 val key = CorrectionCacheKey(id, automatic.sourceSizeBytes,
                     automatic.sourceLastModifiedMs, automatic.algorithmVersion, episodes, bounds)
-                correctedActivity?.takeIf { it.first == key }?.second ?: automatic
+                (correctedActivity?.takeIf { it.first == key }?.second ?: automatic
                     .applyCorrections(episodes, bounds)
-                    .also { correctedActivity = key to it }
+                    .also { correctedActivity = key to it }) to entry
             }
         }.onFailure { error ->
             Log.w(LOG_TAG, "canonical finalization failed for $id", error)
+            summaryFailures += id
         }
             .getOrNull()
+            // The entry is the snapshot the corrections came from, so the
+            // summary key can never describe edits this artifact lacks.
+            ?.also { (artifact, entry) -> rememberSummary(id, artifact, entry) }
+            ?.first
+    }
+
+    private fun loadSummaries() {
+        val stored = summaryStore.loadAll()
+        val known = _recordings.value.mapTo(HashSet()) { it.id }
+        // A ride deleted while its summary was being written leaves an orphan.
+        stored.keys.filterNot { it in known }.forEach { summaryStore.delete(it) }
+        _summaries.value = stored.filterKeys { it in known }
+    }
+
+    private fun rememberSummary(id: String, artifact: CanonicalActivityArtifact, entry: LocalRecording?) {
+        if (entry == null || entry.status == RecordingStatus.RECORDING) return
+        val key = summaryKey(artifact, entry)
+        if (_summaries.value[id]?.key == key) return
+        runCatching {
+            val summary = artifact.toActivitySummary(key)
+            summaryStore.write(id, summary)
+            if (_recordings.value.any { it.id == id }) {
+                _summaries.update { it + (id to summary) }
+            } else {
+                summaryStore.delete(id)
+            }
+        }.onFailure { Log.w(LOG_TAG, "activity summary failed for $id", it) }
+    }
+
+    /**
+     * Processes rides that have never been summarised, newest first, so the
+     * list can show their map and totals. One ride at a time, and never while
+     * a recording is preparing or running — the live ride always wins the CPU.
+     * Call while the list is visible; [stopPreparingSummaries] when it is not.
+     */
+    fun prepareSummaries() {
+        if (summaryJob?.isActive == true) return
+        summaryJob = scope.launch {
+            loaded.await()
+            val pending = _recordings.value
+                .filter { entry ->
+                    entry.status != RecordingStatus.RECORDING && !entry.recoveryFailed &&
+                        _summaries.value[entry.id]?.isOutdated() != false && entry.id !in summaryFailures
+                }
+                .sortedByDescending { it.startedAtMs }
+            for (entry in pending) {
+                val live = _state.value
+                if (live is RecordingState.Recording || live is RecordingState.Preparing) break
+                if (!recordingFile(entry.id).isFile) continue
+                canonicalActivity(entry.id)
+            }
+        }
+    }
+
+    fun stopPreparingSummaries() {
+        summaryJob?.cancel()
+        summaryJob = null
     }
 
     /** Persist explicit intervals in the backed-up recording index, never raw. */
@@ -1079,6 +1148,8 @@ class RecordingRepository private constructor(private val appContext: Context) {
             _recordings.update { list -> list.filterNot { it.id == id } }
             saveIndex()
         }
+        _summaries.update { it - id }
+        summaryStore.delete(id)
         recordingFile(id).delete()
         recordingHealthFile(id).delete()
         // Serializes on the store mutex against an in-flight artifact

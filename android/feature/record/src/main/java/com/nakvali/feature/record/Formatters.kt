@@ -81,12 +81,15 @@ internal fun measuredDistance(meters: Double): Measured = when {
     else -> Measured(String.format(Locale.US, "%.0f", meters), "m")
 }
 
-/** Accumulated descent as a signed drop, e.g. `−182 m`. */
+/**
+ * Accumulated descent, e.g. `182 m`. Unsigned: the label already says it is a
+ * drop, and `−0 m` at the start of a ride read like a typo.
+ */
 internal fun formatDescent(meters: Double): String =
     measuredDescent(meters).let { "${it.value} ${it.unit}" }
 
 internal fun measuredDescent(meters: Double): Measured =
-    Measured(String.format(Locale.US, "−%.0f", meters.coerceAtLeast(0.0)), "m")
+    Measured(String.format(Locale.US, "%,.0f", meters.coerceAtLeast(0.0)), "m")
 
 /** Live speed in km/h, or an em dash while the fix is still settling. */
 internal fun measuredSpeed(metersPerSecond: Float?): Measured = Measured(

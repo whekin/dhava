@@ -3,6 +3,7 @@ package com.nakvali.core.ui
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 /**
  * Nakvali palette, derived from a vivid fern-green seed (#2E8B57).
@@ -168,3 +169,16 @@ val NakvaliLightColorScheme = lightColorScheme(
     surfaceContainerHigh = LightSurfaceContainerHigh,
     surfaceContainerHighest = LightSurfaceContainerHighest,
 )
+
+/**
+ * Airtime ink, outside the Material roles on purpose. Flights first borrowed
+ * tertiary and disappeared: ochre already marks trails on the basemap and
+ * climbing on the elevation profile, and a flight drawn beside a dashed ochre
+ * path read as more path. Lavender appears nowhere else on a Nakvali map.
+ */
+val DarkAir = Color(0xFFC6AEFF)
+val LightAir = Color(0xFF6A48D6)
+
+/** [DarkAir] or [LightAir], following the scheme the colours belong to. */
+val androidx.compose.material3.ColorScheme.air: Color
+    get() = if (background.luminance() < 0.5f) DarkAir else LightAir

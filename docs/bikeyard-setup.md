@@ -130,8 +130,10 @@ after an HTTPS service domain is saved and deployed.
 ## Registered clients and Android implementation (2026-09-21)
 
 Production client: `yb_live_3dnewziryr55f5hvrgd2`. This identifier is public,
-not a credential. Android requests only `profile:read rides:write`; a sample with
-`rides:read` cannot authorize uploads. The callback stays exactly
+not a credential. Android originally requested only `profile:read rides:write`
+(a sample with `rides:read` cannot authorize uploads). Since 2026-09-25 new
+connections request `profile:read rides:write rides:read_all`; see the update
+at the end of this section. The callback stays exactly
 `https://nakvali.whekin.dev/oauth/bikeyard/callback`.
 
 Profile → BIKEYARD connects directly to the live account. Sandbox selection was
@@ -176,8 +178,22 @@ another rider. Disabling Offline mode alone does not enable automatic uploads.
 
 The upload response does not contain a browser URL, and obtaining ride details
 would need additional read scopes. For now the success action opens BIKEYARD,
-not an invented per-ride URL. No `rides:read_all`, email, social or trail permissions
-are requested. BIKEYARD's TCX accounting and trail processing are independent of
+not an invented per-ride URL. Email, social and trail permissions are not requested.
+
+**Update 2026-09-25 — reading results back.** Connections now also request
+`rides:read_all` (it implies `rides:read`; uploads default to private, which
+plain `rides:read` cannot see). Only `profile:read rides:write` stay required:
+older grants keep uploading, and Profile → BIKEYARD offers *Allow*, which runs
+authorization again for the connected rider. BIKEYARD widens an existing grant
+on re-authorization rather than replacing it, so the previous refresh token is
+dropped, not revoked (revoking would end the widened grant too). A different
+rider returning from that consent is refused and their new grant revoked; the
+original connection is untouched. With read access the app calls only
+`GET /v1/rides/{ride_id}` for rides it uploaded (page URL, trail efforts,
+achievement counts, likes/comments) and `GET /v1/me` for lifetime totals.
+Reads are throttled per ride and never disconnect on 401/403/404 — uploads stay
+the only path that decides a connection is broken. Web links from API data are
+opened only for `https` `yard.bike` hosts. BIKEYARD's TCX accounting and trail processing are independent of
 Nakvali's canonical Rust figures and still need comparison using a representative
 shuttle-containing recording before promising equal totals.
 

@@ -1,5 +1,7 @@
 package com.nakvali.feature.activity
 
+import com.nakvali.core.ui.air
+import java.util.Locale
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -39,6 +41,7 @@ import com.nakvali.core.map.rememberNakvaliMapView
 import com.nakvali.core.map.setNakvaliMapStyle
 import com.nakvali.fusion.ActivityState
 import com.nakvali.fusion.AirtimeWindow
+import com.nakvali.fusion.isLikelyJump
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
@@ -91,7 +94,6 @@ private const val STOP_SOURCE_ID = "track-stops-source"
 private const val STOP_LAYER_ID = "track-stops-layer"
 private const val AIRTIME_SOURCE_ID = "track-airtime-source"
 private const val AIRTIME_LAYER_ID = "track-airtime-layer"
-private const val AIRTIME_IMAGE_ID = "track-airtime-image"
 private const val AIRTIME_INDEX_PROPERTY = "airtime_index"
 private const val AIRTIME_SELECTED_SOURCE_ID = "track-airtime-selected-source"
 private const val AIRTIME_SELECTED_LAYER_ID = "track-airtime-selected-layer"
@@ -102,6 +104,13 @@ private const val AIRTIME_OVERVIEW_DOT_LAYER_ID = "track-airtime-overview-dot-la
 private const val AIRTIME_OVERVIEW_COUNT_LAYER_ID = "track-airtime-overview-count-layer"
 private const val AIRTIME_COUNT_PROPERTY = "airtime_count"
 private const val AIRTIME_LABEL_PROPERTY = "airtime_label"
+private const val AIRTIME_DURATION_PROPERTY = "airtime_duration_ms"
+private const val AIRTIME_TOTAL_PROPERTY = "airtime_total_ms"
+private const val AIRTIME_FLIGHT_SOURCE_ID = "track-airtime-flight-source"
+private const val AIRTIME_FLIGHT_CASING_LAYER_ID = "track-airtime-flight-casing-layer"
+private const val AIRTIME_FLIGHT_LAYER_ID = "track-airtime-flight-layer"
+private const val AIRTIME_LABEL_LAYER_ID = "track-airtime-label-layer"
+private const val AIRTIME_OVERVIEW_LABEL_MIN_MS = 300.0
 private const val START_SOURCE_ID = "track-start-source"
 private const val START_LAYER_ID = "track-start-layer"
 private const val START_IMAGE_ID = "track-start-image"
@@ -178,11 +187,18 @@ internal data class MapAirtimeCandidate(
     val durationMs: Long,
     val takeoffPeakG: Double?,
     val landingPeakG: Double,
+    /** Takeoff to landing along the fused track, for drawing the flight itself. */
+    val path: List<MapTrackPoint> = listOf(start, end),
+    /** Long enough to count as a jump (Rust's `is_likely_jump`). */
+    val jump: Boolean = true,
 )
 
 internal data class AirtimeOverviewMarker(
     val candidate: MapAirtimeCandidate,
+    /** Jumps in this screen-space group; short candidates are not counted. */
     val count: Int,
+    /** Summed airtime of those jumps. */
+    val totalMs: Long = if (candidate.jump) candidate.durationMs else 0,
 )
 
 /** Raw and replayed live tracks on one map; all computation remains in Rust. */
@@ -298,7 +314,7 @@ internal fun TrackMap(
                     Text(
                         "POSSIBLE AIR · ${candidate.eventIndex + 1}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.air,
                     )
                     Text(formatAirSeconds(candidate.durationMs), style = MaterialTheme.typography.titleLarge)
                     Text(
@@ -366,6 +382,8 @@ internal fun TrackMap(
                     currentStyle.getSourceAs<GeoJsonSource>(AIRTIME_SOURCE_ID)?.setGeoJson(
                         airtimeCandidates.toAirtimeFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION,
                     )
+                    currentStyle.getSourceAs<GeoJsonSource>(AIRTIME_FLIGHT_SOURCE_ID)
+                        ?.setGeoJson(airtimeCandidates.toAirtimeFlightFeatureCollection())
                     updateAirtimeOverviewSource(map, airtimeCandidates, overviewSpacingPx)
                     applyMode(currentStyle, currentMode.value, rawPoints, fusedPoints)
                     if (!respectUserCamera || !rendering.userMoved) fitCamera(map, cameraBoundsPoints(currentMode.value, rawPoints, fusedPoints), if (respectUserCamera) 250 else 1_000)
@@ -516,7 +534,9 @@ internal fun TrackMap(
                 style.addSource(GeoJsonSource(STOP_SOURCE_ID).also { source ->
                     fusedPoints.toStopFeatureCollectionOrNull()?.let(source::setGeoJson)
                 })
-                style.addImage(AIRTIME_IMAGE_ID, createAirtimeMarker(palette))
+                style.addSource(GeoJsonSource(AIRTIME_FLIGHT_SOURCE_ID).also { source ->
+                    source.setGeoJson(airtimeCandidates.toAirtimeFlightFeatureCollection())
+                })
                 style.addSource(GeoJsonSource(AIRTIME_SOURCE_ID).also { source ->
                     airtimeCandidates.toAirtimeFeatureCollectionOrNull()?.let(source::setGeoJson)
                 })
@@ -550,15 +570,41 @@ internal fun TrackMap(
                         PropertyFactory.circleStrokeOpacity(0.75f),
                     ),
                 )
+                // Airtime has its own ink (the list's jump band uses the same)
+                // so it never reads as more green track. Once zoomed in, the
+                // flight itself is drawn over the stretch the bike was in the
+                // air, as thick as it was long.
+                style.addLayer(
+                    LineLayer(AIRTIME_FLIGHT_CASING_LAYER_ID, AIRTIME_FLIGHT_SOURCE_ID)
+                        .also { it.setMinZoom(15f) }
+                        .withProperties(
+                            PropertyFactory.lineColor(palette.background),
+                            PropertyFactory.lineOpacity(0.85f),
+                            PropertyFactory.lineWidth(airtimeFlightWidthExpression(extra = 3.0)),
+                            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                        ),
+                )
+                style.addLayer(
+                    LineLayer(AIRTIME_FLIGHT_LAYER_ID, AIRTIME_FLIGHT_SOURCE_ID)
+                        .also { it.setMinZoom(15f) }
+                        .withProperties(
+                            PropertyFactory.lineColor(palette.air),
+                            PropertyFactory.lineOpacity(airtimeOpacityExpression(AIRTIME_DURATION_PROPERTY)),
+                            PropertyFactory.lineWidth(airtimeFlightWidthExpression()),
+                            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                        ),
+                )
                 style.addLayer(
                     CircleLayer(AIRTIME_OVERVIEW_DOT_LAYER_ID, AIRTIME_OVERVIEW_SOURCE_ID)
                         .also { it.setMaxZoom(AIRTIME_MARKERS_MIN_ZOOM) }
                         .withProperties(
-                            PropertyFactory.circleColor(palette.background),
-                            PropertyFactory.circleOpacity(0.82f),
-                            PropertyFactory.circleRadius(overviewAirtimeRadiusExpression()),
-                            PropertyFactory.circleStrokeColor(palette.primary),
-                            PropertyFactory.circleStrokeWidth(2f),
+                            PropertyFactory.circleColor(palette.air),
+                            PropertyFactory.circleOpacity(airtimeOpacityExpression(AIRTIME_TOTAL_PROPERTY)),
+                            PropertyFactory.circleRadius(airtimeRadiusExpression(AIRTIME_TOTAL_PROPERTY)),
+                            PropertyFactory.circleStrokeColor(palette.background),
+                            PropertyFactory.circleStrokeWidth(1.5f),
                         ),
                 )
                 style.addLayer(
@@ -567,20 +613,25 @@ internal fun TrackMap(
                         .withProperties(
                             PropertyFactory.textField(Expression.get(AIRTIME_LABEL_PROPERTY)),
                             PropertyFactory.textFont(SEGMENT_LABEL_FONT),
-                            PropertyFactory.textSize(10f),
+                            PropertyFactory.textSize(11f),
                             PropertyFactory.textColor(palette.label),
-                            PropertyFactory.textAllowOverlap(true),
-                            PropertyFactory.textIgnorePlacement(true),
+                            PropertyFactory.textHaloColor(palette.labelHalo),
+                            PropertyFactory.textHaloWidth(1.6f),
+                            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_LEFT),
+                            PropertyFactory.textOffset(arrayOf(1.2f, 0f)),
+                            // Labels give way when crowded; the discs never do.
+                            PropertyFactory.textAllowOverlap(false),
+                            PropertyFactory.textOptional(true),
                         ),
                 )
                 style.addLayer(
                     LineLayer(AIRTIME_SPAN_LAYER_ID, AIRTIME_SPAN_SOURCE_ID)
-                        .also { it.setMinZoom(18f) }
+                        .also { it.setMinZoom(15f) }
                         .withProperties(
-                            PropertyFactory.lineColor(palette.primary),
-                            PropertyFactory.lineWidth(5f),
-                            PropertyFactory.lineOpacity(0.72f),
-                            PropertyFactory.lineDasharray(arrayOf(1f, 1f)),
+                            PropertyFactory.lineColor(palette.label),
+                            PropertyFactory.lineWidth(2f),
+                            PropertyFactory.lineOpacity(0.9f),
+                            PropertyFactory.lineDasharray(arrayOf(1.5f, 1.5f)),
                             PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                         ),
                 )
@@ -588,22 +639,39 @@ internal fun TrackMap(
                     CircleLayer(AIRTIME_SELECTED_LAYER_ID, AIRTIME_SELECTED_SOURCE_ID)
                         .also { it.setMinZoom(AIRTIME_MARKERS_MIN_ZOOM) }
                         .withProperties(
-                            PropertyFactory.circleColor(palette.primary),
-                            PropertyFactory.circleOpacity(0.14f),
+                            PropertyFactory.circleColor(palette.air),
+                            PropertyFactory.circleOpacity(0.16f),
                             PropertyFactory.circleRadius(19f),
-                            PropertyFactory.circleStrokeColor(palette.primary),
+                            PropertyFactory.circleStrokeColor(palette.air),
                             PropertyFactory.circleStrokeWidth(2f),
                         ),
                 )
                 style.addLayer(
-                    SymbolLayer(AIRTIME_LAYER_ID, AIRTIME_SOURCE_ID)
+                    CircleLayer(AIRTIME_LAYER_ID, AIRTIME_SOURCE_ID)
                         .also { it.setMinZoom(AIRTIME_MARKERS_MIN_ZOOM) }
                         .withProperties(
-                        PropertyFactory.iconImage(AIRTIME_IMAGE_ID),
-                        PropertyFactory.iconSize(0.65f),
-                        PropertyFactory.iconAllowOverlap(false),
-                        PropertyFactory.iconIgnorePlacement(false),
-                    ),
+                            PropertyFactory.circleColor(palette.air),
+                            PropertyFactory.circleOpacity(airtimeOpacityExpression(AIRTIME_DURATION_PROPERTY)),
+                            PropertyFactory.circleRadius(airtimeRadiusExpression(AIRTIME_DURATION_PROPERTY)),
+                            PropertyFactory.circleStrokeColor(palette.background),
+                            PropertyFactory.circleStrokeWidth(1.5f),
+                        ),
+                )
+                style.addLayer(
+                    SymbolLayer(AIRTIME_LABEL_LAYER_ID, AIRTIME_SOURCE_ID)
+                        .also { it.setMinZoom(AIRTIME_MARKERS_MIN_ZOOM) }
+                        .withProperties(
+                            PropertyFactory.textField(Expression.get(AIRTIME_LABEL_PROPERTY)),
+                            PropertyFactory.textFont(SEGMENT_LABEL_FONT),
+                            PropertyFactory.textSize(11f),
+                            PropertyFactory.textColor(palette.label),
+                            PropertyFactory.textHaloColor(palette.labelHalo),
+                            PropertyFactory.textHaloWidth(1.6f),
+                            PropertyFactory.textAnchor(Property.TEXT_ANCHOR_LEFT),
+                            PropertyFactory.textOffset(arrayOf(1.3f, 0f)),
+                            PropertyFactory.textAllowOverlap(false),
+                            PropertyFactory.textOptional(true),
+                        ),
                 )
                 style.addSource(GeoJsonSource(INSPECT_SOURCE_ID).also { source ->
                     source.setPointOrEmpty(currentInspectedPoint.value)
@@ -683,6 +751,8 @@ internal fun TrackMap(
                 style.getSourceAs<GeoJsonSource>(AIRTIME_SOURCE_ID)?.setGeoJson(
                     currentAirtime.value.toAirtimeFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION,
                 )
+                style.getSourceAs<GeoJsonSource>(AIRTIME_FLIGHT_SOURCE_ID)
+                    ?.setGeoJson(currentAirtime.value.toAirtimeFlightFeatureCollection())
                 updateAirtimeOverviewSource(map, currentAirtime.value, overviewSpacingPx)
                 val selectedCandidate = currentAirtime.value.firstOrNull {
                     it.eventIndex == currentSelectedAirtimeIndex.value
@@ -998,7 +1068,11 @@ internal fun List<MapTrackPoint>.toVisibleFusionPointFeatureCollectionOrNull(): 
     filter { it.activityState != ActivityState.STILL }.toPointFeatureCollectionOrNull()
 
 /** Only place an airborne candidate if both ends belong to one uninterrupted moving section. */
-internal fun List<MapTrackPoint>.placeAirtimeCandidates(windows: List<AirtimeWindow>): List<MapAirtimeCandidate> =
+/** [isJump] is Rust's rule; it is a parameter only so JVM tests need no native library. */
+internal fun List<MapTrackPoint>.placeAirtimeCandidates(
+    windows: List<AirtimeWindow>,
+    isJump: (Long) -> Boolean = ::isLikelyJump,
+): List<MapAirtimeCandidate> =
     windows.mapIndexedNotNull { eventIndex, window ->
         if (window.durationMs <= 0 || window.startMs < 0 || window.startMs > Long.MAX_VALUE - window.durationMs) {
             return@mapIndexedNotNull null
@@ -1025,7 +1099,12 @@ internal fun List<MapTrackPoint>.placeAirtimeCandidates(windows: List<AirtimeWin
             durationMs = window.durationMs,
             takeoffPeakG = window.takeoffPeakG,
             landingPeakG = window.landingPeakG,
-        )
+        ).let { candidate ->
+            candidate.copy(
+                path = listOf(candidate.start) + subList(firstEdge + 1, lastEdge + 1) + candidate.end,
+                jump = isJump(window.durationMs),
+            )
+        }
     }
 
 private fun List<MapTrackPoint>.timestampBrackets(index: Int, timestampMs: Long): Boolean {
@@ -1050,9 +1129,27 @@ internal fun List<MapAirtimeCandidate>.toAirtimeFeatureCollectionOrNull(): Featu
         FeatureCollection.fromFeatures(candidates.map { candidate ->
             Feature.fromGeometry(Point.fromLngLat(candidate.start.lon, candidate.start.lat)).apply {
                 addNumberProperty(AIRTIME_INDEX_PROPERTY, candidate.eventIndex)
+                // Short candidates keep a speck on the map but none of the size,
+                // brightness or label that a counted jump earns.
+                addNumberProperty(AIRTIME_DURATION_PROPERTY, if (candidate.jump) candidate.durationMs else 0)
+                addStringProperty(AIRTIME_LABEL_PROPERTY, if (candidate.jump) formatAirLabel(candidate.durationMs) else "")
             }
         })
     }
+
+/** Every flight as the stretch of track the bike was in the air over. */
+private fun List<MapAirtimeCandidate>.toAirtimeFlightFeatureCollection(): String =
+    FeatureCollection.fromFeatures(mapNotNull { candidate ->
+        candidate.path.takeIf { it.size >= 2 }?.let { path ->
+            Feature.fromGeometry(LineString.fromLngLats(path.map { Point.fromLngLat(it.lon, it.lat) })).apply {
+                addNumberProperty(AIRTIME_INDEX_PROPERTY, candidate.eventIndex)
+                addNumberProperty(AIRTIME_DURATION_PROPERTY, if (candidate.jump) candidate.durationMs else 0)
+            }
+        }
+    }).toJson()
+
+private fun formatAirLabel(milliseconds: Long): String =
+    String.format(Locale.US, "%.1f s", milliseconds / 1_000.0)
 
 /** One small map hint per screen-space group, independent of GPS point density. */
 internal fun clusterAirtimeOverview(
@@ -1071,10 +1168,15 @@ internal fun clusterAirtimeOverview(
             val dy = position.second - anchor.second
             dx * dx + dy * dy < minDistanceSquared
         }
+        val jumps = if (candidate.jump) 1 else 0
+        val airMs = if (candidate.jump) candidate.durationMs else 0
         if (nearby >= 0) {
-            markers[nearby] = markers[nearby].copy(count = markers[nearby].count + 1)
+            markers[nearby] = markers[nearby].copy(
+                count = markers[nearby].count + jumps,
+                totalMs = markers[nearby].totalMs + airMs,
+            )
         } else {
-            markers += AirtimeOverviewMarker(candidate, 1)
+            markers += AirtimeOverviewMarker(candidate, jumps, airMs)
             screenPositions += position
         }
     }
@@ -1089,9 +1191,16 @@ private fun List<AirtimeOverviewMarker>.toAirtimeOverviewFeatureCollectionOrNull
             ).apply {
                 addNumberProperty(AIRTIME_INDEX_PROPERTY, marker.candidate.eventIndex)
                 addNumberProperty(AIRTIME_COUNT_PROPERTY, marker.count)
+                addNumberProperty(AIRTIME_TOTAL_PROPERTY, marker.totalMs)
+                // Seconds in the air, not a count: a cluster of bunny hops and
+                // one big step-down should not look alike.
                 addStringProperty(
                     AIRTIME_LABEL_PROPERTY,
-                    if (marker.count == 1) "" else if (marker.count > 99) "99+" else marker.count.toString(),
+                    when {
+                        marker.count == 0 || marker.totalMs < AIRTIME_OVERVIEW_LABEL_MIN_MS -> ""
+                        marker.count == 1 -> formatAirLabel(marker.totalMs)
+                        else -> "${formatAirLabel(marker.totalMs)} ×${if (marker.count > 99) "99+" else marker.count}"
+                    },
                 )
             }
         })
@@ -1114,12 +1223,8 @@ private fun updateAirtimeOverviewSource(
     source.setGeoJson(markers.toAirtimeOverviewFeatureCollectionOrNull()?.toJson() ?: EMPTY_FEATURE_COLLECTION)
 }
 
-private fun MapAirtimeCandidate.toSpanLine(): LineString = LineString.fromLngLats(
-    listOf(
-        Point.fromLngLat(start.lon, start.lat),
-        Point.fromLngLat(end.lon, end.lat),
-    ),
-)
+private fun MapAirtimeCandidate.toSpanLine(): LineString =
+    LineString.fromLngLats(path.map { Point.fromLngLat(it.lon, it.lat) })
 
 private fun accuracyColorExpression(colors: GpsAccuracyColors): Expression =
     Expression.interpolate(
@@ -1175,13 +1280,46 @@ private fun stopRadiusExpression(): Expression =
         Expression.stop(300_000.0, 5.5),
     )
 
-private fun overviewAirtimeRadiusExpression(): Expression =
+/**
+ * Disc size follows time in the air, roughly by area: a 0.1 s hop over a root
+ * is a speck, a second-long step-down or a run of doubles is unmissable.
+ */
+private fun airtimeRadiusExpression(property: String): Expression =
     Expression.interpolate(
         Expression.linear(),
-        Expression.get(AIRTIME_COUNT_PROPERTY),
-        Expression.stop(1.0, 4.5),
-        Expression.stop(2.0, 9.0),
-        Expression.stop(99.0, 11.0),
+        Expression.get(property),
+        Expression.stop(0.0, 2.5),
+        Expression.stop(150.0, 3.0),
+        Expression.stop(400.0, 5.0),
+        Expression.stop(1_000.0, 7.0),
+        Expression.stop(3_000.0, 10.0),
+        Expression.stop(8_000.0, 13.5),
+        Expression.stop(15_000.0, 17.0),
+    )
+
+/** Short hops sit back; long flights come forward. */
+private fun airtimeOpacityExpression(property: String): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.get(property),
+        Expression.stop(0.0, 0.55),
+        Expression.stop(500.0, 0.85),
+        Expression.stop(1_000.0, 1.0),
+    )
+
+/** Flight line width by duration, growing with zoom like the track does. */
+private fun airtimeFlightWidthExpression(extra: Double = 0.0): Expression =
+    Expression.interpolate(
+        Expression.linear(),
+        Expression.zoom(),
+        Expression.stop(15.0, Expression.interpolate(
+            Expression.linear(), Expression.get(AIRTIME_DURATION_PROPERTY),
+            Expression.stop(0.0, 2.5 + extra), Expression.stop(1_000.0, 6.0 + extra),
+        )),
+        Expression.stop(19.0, Expression.interpolate(
+            Expression.linear(), Expression.get(AIRTIME_DURATION_PROPERTY),
+            Expression.stop(0.0, 4.0 + extra), Expression.stop(1_000.0, 12.0 + extra),
+        )),
     )
 
 private fun fusionPointRadiusExpression(): Expression =
@@ -1364,21 +1502,6 @@ private fun createFinishMarker(palette: NakvaliMapPalette): Bitmap =
     }
 
 /** A small upward chevron distinguishes possible airtime from stops and segment gates. */
-private fun createAirtimeMarker(palette: NakvaliMapPalette): Bitmap =
-    markerBitmap(palette.roadCasing, palette.primary) { canvas, paint, size ->
-        paint.color = palette.onPrimary
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = size * 0.085f
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeJoin = Paint.Join.ROUND
-        val path = Path().apply {
-            moveTo(size * 0.32f, size * 0.57f)
-            lineTo(size * 0.50f, size * 0.38f)
-            lineTo(size * 0.68f, size * 0.57f)
-        }
-        canvas.drawPath(path, paint)
-    }
-
 private inline fun markerBitmap(
     outerColor: Int,
     innerColor: Int,

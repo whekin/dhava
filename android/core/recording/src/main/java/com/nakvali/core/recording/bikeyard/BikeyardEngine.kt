@@ -42,9 +42,16 @@ internal class BikeyardEngine(
         _state.value = next.ui()
     }
 
-    suspend fun beginConnect(): String = mutex.withLock {
-        check(data.tokens == null) { "Disconnect the current BIKEYARD account first" }
-        val pending = BikeyardPending(BikeyardPkce.random(), BikeyardPkce.random(), now())
+    /**
+     * Starts authorization. [upgrade] re-authorizes the connected rider so
+     * BIKEYARD can widen the grant (reading ride results) without a disconnect;
+     * the current tokens keep working until the new ones are proven to belong
+     * to the same rider.
+     */
+    suspend fun beginConnect(upgrade: Boolean = false): String = mutex.withLock {
+        if (upgrade) check(data.tokens != null) { "Connect BIKEYARD first" }
+        else check(data.tokens == null) { "Disconnect the current BIKEYARD account first" }
+        val pending = BikeyardPending(BikeyardPkce.random(), BikeyardPkce.random(), now(), upgrade = upgrade)
         save(data.copy(pending = pending, message = null))
         BikeyardApi.authorizeUrl(data.environment, pending)
     }
@@ -69,11 +76,17 @@ internal class BikeyardEngine(
             save(data.copy(message = "Connection expired. Try again")); return@withLock
         }
         if (url.queryParameter("error") != null) {
-            save(data.copy(message = "BIKEYARD connection was not approved")); return@withLock
+            save(data.copy(message = if (pending.upgrade) "BIKEYARD kept the previous permissions"
+                else "BIKEYARD connection was not approved"))
+            return@withLock
         }
         val codes = url.queryParameterValues("code")
         if (codes.size != 1 || codes.single().isNullOrBlank()) {
             save(data.copy(message = "BIKEYARD did not return a connection code")); return@withLock
+        }
+        if (pending.upgrade) {
+            finishUpgrade(codes.single()!!, pending)
+            return@withLock
         }
         _state.value = data.ui().copy(connecting = true)
         try {
@@ -82,7 +95,8 @@ internal class BikeyardEngine(
             save(data.copy(tokens = tokens, autoConsentId = null))
             val rider = remote.rider(data.environment, tokens.access)
             if (rider.id != tokens.riderId) throw BikeyardFailure(BikeyardFailure.Kind.AUTH, "BIKEYARD account mismatch. Reconnect")
-            save(data.copy(tokens = tokens.copy(riderName = rider.name)))
+            save(data.copy(tokens = tokens.copy(riderName = rider.name),
+                profile = rider.profile(tokens.rideAccess, now())))
         } catch (error: CancellationException) { throw error }
         catch (error: BikeyardFailure) {
             if (error.kind == BikeyardFailure.Kind.AUTH) save(data.copy(tokens = null, autoConsentId = null, message = error.message))
@@ -90,6 +104,152 @@ internal class BikeyardEngine(
         } finally {
             _state.value = data.ui()
         }
+    }
+
+    /** Caller holds [mutex]. Never replaces the connected rider, and never drops working tokens. */
+    private suspend fun finishUpgrade(code: String, pending: BikeyardPending) {
+        val current = data.tokens ?: return
+        _state.value = data.ui().copy(connecting = true, upgrading = true)
+        try {
+            val tokens = try {
+                remote.exchange(data.environment, code, pending.verifier).tokens(now())
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) {
+                save(data.copy(message = "Could not update BIKEYARD permissions. Try again")); return
+            }
+            if (tokens.riderId != current.riderId) {
+                // Someone else signed in on the consent page. Their fresh grant
+                // is not ours to keep; the original connection stays as it was.
+                try { remote.revoke(data.environment, tokens.refresh) }
+                catch (error: CancellationException) { throw error }
+                catch (_: Exception) { }
+                save(data.copy(message = "That was a different BIKEYARD account. Disconnect first to switch riders"))
+                return
+            }
+            // The old refresh token belongs to the same, now widened grant.
+            // Revoking it would end the new tokens too, so it is only dropped.
+            save(data.copy(
+                tokens = tokens.copy(riderName = current.riderName),
+                message = null,
+                uploads = data.uploads.map { it.copy(resultCheckedAtMs = 0, resultUnavailable = false) },
+            ))
+            try {
+                val rider = remote.rider(data.environment, tokens.access)
+                if (rider.id == tokens.riderId) save(data.copy(
+                    tokens = data.tokens?.copy(riderName = rider.name),
+                    profile = rider.profile(tokens.rideAccess, now()),
+                ))
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { }
+        } finally {
+            _state.value = data.ui()
+        }
+    }
+
+    /**
+     * Re-reads the rider's BIKEYARD profile and lifetime totals when the copy
+     * is older than [maxAgeMs]. A failed read is silent and never disconnects:
+     * uploads are the path that decides a connection is broken.
+     */
+    suspend fun refreshProfile(maxAgeMs: Long = PROFILE_MAX_AGE_MS) {
+        val (access, riderId, rideAccess) = mutex.withLock {
+            val tokens = data.tokens ?: return
+            val profile = data.profile
+            // A profile read at connect time has no ride sums yet; fill them now.
+            val missingSums = tokens.rideAccess != BikeyardRideAccess.NONE && profile?.descentM == null
+            if (!missingSums && now() - (profile?.fetchedAtMs ?: 0) in 0 until maxAgeMs) return
+            try { Triple(token(), tokens.riderId, tokens.rideAccess) } catch (_: BikeyardFailure) { return }
+        }
+        val rider = try { remote.rider(data.environment, access) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { return }
+        val sums = if (rideAccess == BikeyardRideAccess.NONE) null else rideSums(access)
+        mutex.withLock {
+            val tokens = data.tokens ?: return
+            if (rider.id != riderId || tokens.riderId != riderId) return
+            val previous = data.profile
+            val profile = rider.profile(tokens.rideAccess, now()).let { fresh ->
+                when {
+                    sums != null -> fresh.copy(descentM = sums.descentM, kom = sums.kom, medals = sums.medals,
+                        localLegend = sums.localLegend, totalsPartial = sums.partial)
+                    // A failed list read keeps the last sums rather than blanking them.
+                    previous != null -> fresh.copy(descentM = previous.descentM, kom = previous.kom,
+                        medals = previous.medals, localLegend = previous.localLegend,
+                        totalsPartial = previous.totalsPartial)
+                    else -> fresh
+                }
+            }
+            save(data.copy(tokens = tokens.copy(riderName = rider.name), profile = profile))
+        }
+    }
+
+    private class RideSums(val descentM: Double, val kom: Int, val medals: Int, val localLegend: Int, val partial: Boolean)
+
+    /** Walks the rider's ride list, newest first, up to [MAX_RIDE_PAGES]. Null on any failure. */
+    private suspend fun rideSums(access: String): RideSums? {
+        var descent = 0.0
+        var kom = 0
+        var medals = 0
+        var legend = 0
+        var cursor: String? = null
+        repeat(MAX_RIDE_PAGES) {
+            val page = try { remote.rides(data.environment, access, cursor) }
+                catch (error: CancellationException) { throw error }
+                catch (_: Exception) { return null }
+            page.data.forEach { ride ->
+                descent += ride.elevationLossMeters.coerceAtLeast(0.0)
+                kom += ride.achievements.kom.coerceAtLeast(0)
+                medals += ride.achievements.medals.coerceAtLeast(0)
+                legend += ride.achievements.localLegend.coerceAtLeast(0)
+            }
+            cursor = page.nextCursor
+            if (!page.hasMore || cursor == null) return RideSums(descent, kom, medals, legend, partial = false)
+        }
+        return RideSums(descent, kom, medals, legend, partial = true)
+    }
+
+    /**
+     * Reads BIKEYARD's processing of one uploaded ride: its page, matched trails
+     * and achievements. Throttled per ride, faster while BIKEYARD is still
+     * matching. Returns false when nothing was attempted.
+     */
+    suspend fun refreshRideResult(recordingId: String, force: Boolean = false): Boolean {
+        val (access, job) = mutex.withLock {
+            val tokens = data.tokens ?: return false
+            if (tokens.rideAccess == BikeyardRideAccess.NONE) return false
+            val job = data.uploads.firstOrNull {
+                it.recordingId == recordingId && it.accountKey == data.accountKey &&
+                    it.status == BikeyardUploadStatus.UPLOADED && it.rideId != null
+            } ?: return false
+            val age = now() - job.resultCheckedAtMs
+            val maxAge = when {
+                force -> FORCED_RESULT_MAX_AGE_MS
+                job.resultUnavailable -> UNAVAILABLE_RESULT_MAX_AGE_MS
+                job.result?.ready == true -> READY_RESULT_MAX_AGE_MS
+                else -> PENDING_RESULT_MAX_AGE_MS
+            }
+            if (job.resultCheckedAtMs > 0 && age in 0 until maxAge) return false
+            try { token() to job } catch (_: BikeyardFailure) { return false }
+        }
+        val rideId = job.rideId!!
+        val outcome = try { Result.success(remote.ride(data.environment, access, rideId)) }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) { Result.failure(error) }
+        mutex.withLock {
+            val latest = data.uploads.firstOrNull { it.key == job.key } ?: return true
+            if (latest.accountKey != data.accountKey || latest.rideId != rideId) return true
+            val ride = outcome.getOrNull()
+            val refused = (outcome.exceptionOrNull() as? BikeyardFailure)?.let {
+                it.kind == BikeyardFailure.Kind.AUTH || it.httpCode == 404
+            } == true
+            update(when {
+                ride != null && ride.id.equals(rideId, ignoreCase = true) -> latest.copy(
+                    result = ride.result(), resultCheckedAtMs = now(), resultUnavailable = false)
+                refused -> latest.copy(resultCheckedAtMs = now(), resultUnavailable = true)
+                else -> latest.copy(resultCheckedAtMs = now())
+            })
+        }
+        return true
     }
 
     suspend fun settings(automatic: Boolean, visibility: BikeyardVisibility) = mutex.withLock {
@@ -307,6 +467,12 @@ internal class BikeyardEngine(
     private fun update(job: BikeyardUpload) = save(data.copy(uploads = data.uploads.map { if (it.key == job.key) job else it }))
 
     companion object {
+        const val PROFILE_MAX_AGE_MS = 15 * 60_000L
+        const val MAX_RIDE_PAGES = 20
+        const val PENDING_RESULT_MAX_AGE_MS = 20_000L
+        const val FORCED_RESULT_MAX_AGE_MS = 60_000L
+        const val READY_RESULT_MAX_AGE_MS = 6 * 60 * 60_000L
+        const val UNAVAILABLE_RESULT_MAX_AGE_MS = 60 * 60_000L
         val activeStatuses = setOf(BikeyardUploadStatus.QUEUED, BikeyardUploadStatus.UPLOADING)
         val activeMetricsStatuses = setOf(BikeyardMetricsStatus.QUEUED, BikeyardMetricsStatus.UPLOADING)
     }

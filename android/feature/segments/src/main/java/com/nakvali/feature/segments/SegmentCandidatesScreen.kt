@@ -447,7 +447,7 @@ private fun CandidatePageHeader(onBack: () -> Unit) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
         }
         NakvaliScreenHeader(
-            eyebrow = "Trail library",
+            eyebrow = "Personal timing",
             title = "Find descents",
             modifier = Modifier.padding(start = NakvaliSpacing.small),
         )

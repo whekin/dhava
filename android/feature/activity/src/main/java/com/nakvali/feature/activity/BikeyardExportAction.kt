@@ -16,7 +16,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nakvali.core.recording.LocalRecording
 import com.nakvali.core.recording.bikeyard.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.ui.Alignment
 import com.nakvali.core.ui.NakvaliSecondaryButton
+import com.nakvali.core.ui.NakvaliSectionLabel
+import com.nakvali.core.ui.NakvaliSpacing
+import com.nakvali.core.ui.NakvaliStatusPill
+import com.nakvali.core.ui.NakvaliStatusTone
 import kotlinx.coroutines.launch
 
 internal class BikeyardExportViewModel(application: Application) : AndroidViewModel(application) {
@@ -28,6 +35,7 @@ internal class BikeyardExportViewModel(application: Application) : AndroidViewMo
         viewModelScope.launch { onResult(runCatching { repository.beginConnect() }) }
     }
     fun cancelConnect() = repository.cancelConnect()
+    fun refreshResult(recordingId: String) = repository.refreshRideResults(listOf(recordingId), force = true)
 }
 
 @Composable
@@ -82,29 +90,32 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
                 val metricsWaiting = upload.metricsStatus == BikeyardMetricsStatus.QUEUED ||
                     upload.metricsStatus == BikeyardMetricsStatus.UPLOADING
                 val metricsLabel = when (upload.metricsStatus) {
-                    BikeyardMetricsStatus.NONE -> "Send experimental airtime"
-                    BikeyardMetricsStatus.QUEUED, BikeyardMetricsStatus.UPLOADING -> "Syncing airtime…"
-                    BikeyardMetricsStatus.UPLOADED -> "Update experimental airtime"
-                    BikeyardMetricsStatus.FAILED -> "Retry airtime sync"
-                    BikeyardMetricsStatus.NEEDS_AUTH -> "Reconnect to sync airtime"
-                    BikeyardMetricsStatus.CANCELLED -> "Send airtime manually"
+                    BikeyardMetricsStatus.NONE -> "Send jumps"
+                    BikeyardMetricsStatus.QUEUED, BikeyardMetricsStatus.UPLOADING -> "Sending jumps…"
+                    BikeyardMetricsStatus.UPLOADED -> "Resend jumps"
+                    BikeyardMetricsStatus.FAILED -> "Retry jump sync"
+                    BikeyardMetricsStatus.NEEDS_AUTH -> "Reconnect to sync jumps"
+                    BikeyardMetricsStatus.CANCELLED -> "Send jumps manually"
                 }
                 TextButton(onClick = { confirmMetrics = true }, enabled = state.connected && !metricsWaiting) {
                     Text(metricsLabel)
                 }
                 if (upload.metricsStatus == BikeyardMetricsStatus.UPLOADED) {
-                    Text("Sensor metrics revision ${upload.metricsRevision ?: 1} in BIKEYARD",
+                    Text("Jumps sent to BIKEYARD · revision ${upload.metricsRevision ?: 1}",
                         style = MaterialTheme.typography.bodySmall)
                 }
                 upload.metricsError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant) }
             } else {
-                Text("Experimental airtime sync is available for private rides only.",
+                Text("Jump sync is available for private rides only.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (terminal) TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://yard.bike"))) }) { Text("Open BIKEYARD") }
+        if (terminal) TextButton(onClick = {
+            val url = upload?.result?.url ?: state.profile?.profileUrl ?: "https://yard.bike"
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        }) { Text(if (upload?.result?.url != null) "Open ride in BIKEYARD" else "Open BIKEYARD") }
         if (recording?.savedAtMs == null) Text("Save this ride before uploading.", style = MaterialTheme.typography.bodySmall)
     }
     if (confirmUpload && recording != null) AlertDialog(
@@ -115,11 +126,12 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
     )
     if (confirmMetrics && recording != null) AlertDialog(
         onDismissRequest = { confirmMetrics = false },
-        title = { Text("Send possible airtime?") },
+        title = { Text("Send jumps to BIKEYARD?") },
         text = {
             Column {
-                Text("Send candidate event times and measured sensor coverage for this private ride. " +
-                    "No GPS coordinates, raw sensors or phone G peaks are included.")
+                Text("Send jump and airtime event times and measured sensor coverage for this private " +
+                    "ride. Air of 0.25 s or more counts as a jump. No GPS coordinates, raw sensors or " +
+                    "phone G peaks are included.")
                 Box {
                     TextButton(onClick = { mountingMenu = true }) {
                         Text("Phone position: ${selectedMounting.label}")
@@ -138,7 +150,105 @@ internal fun BikeyardExportAction(recording: LocalRecording?, available: Boolean
         confirmButton = { TextButton(onClick = {
             viewModel.syncMetrics(recording.id, selectedMounting)
             confirmMetrics = false
-        }) { Text("Send candidates") } },
+        }) { Text("Send jumps") } },
         dismissButton = { TextButton(onClick = { confirmMetrics = false }) { Text("Cancel") } },
     )
 }
+
+/**
+ * BIKEYARD's processing of this ride, once uploaded: its page, the trails it
+ * matched and any honours. Their matching, not Nakvali's segment timing — the
+ * section says so, and it never replaces the ride's own segment runs.
+ */
+@Composable
+internal fun BikeyardRideResults(recording: LocalRecording?, modifier: Modifier = Modifier) {
+    if (LocalInspectionMode.current || recording == null) return
+    val viewModel: BikeyardExportViewModel = viewModel()
+    val state by viewModel.state.collectAsState()
+    val upload = state.uploadFor(recording.id)?.takeIf { it.status == BikeyardUploadStatus.UPLOADED } ?: return
+    val context = LocalContext.current
+    LaunchedEffect(recording.id, state.rideAccess, upload.result?.ready) {
+        viewModel.refreshResult(recording.id)
+    }
+    val result = upload.result
+    val url = result?.url ?: state.profile?.profileUrl
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(NakvaliSpacing.small)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                NakvaliSectionLabel("On BIKEYARD")
+                Spacer(Modifier.height(NakvaliSpacing.xSmall))
+                Text(
+                    text = when {
+                        result == null && state.rideAccess == BikeyardRideAccess.NONE ->
+                            "Uploaded · allow ride results in Profile to see trails here"
+                        result == null -> "Uploaded · reading results…"
+                        !result.ready -> "BIKEYARD is matching trails…"
+                        result.trails.isEmpty() -> "No BIKEYARD trails matched"
+                        else -> honours(result) ?: "${result.trails.size} " +
+                            if (result.trails.size == 1) "trail matched" else "trails matched"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            url?.let {
+                TextButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+                }) {
+                    Text("Open")
+                    Spacer(Modifier.width(NakvaliSpacing.xSmall))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+        result?.trails?.take(12)?.forEach { trail -> TrailRow(trail) }
+        if (!result?.trails.isNullOrEmpty()) {
+            Text(
+                "Trail matching and honours by BIKEYARD",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrailRow(trail: BikeyardTrailResult) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(NakvaliSpacing.medium),
+    ) {
+        Text(
+            trail.name.ifBlank { "Trail" },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        trail.achievement?.let { kind ->
+            NakvaliStatusPill(
+                text = when (kind) {
+                    BikeyardAchievementKind.KOM -> "KOM"
+                    BikeyardAchievementKind.PERSONAL_BEST -> trail.rank?.let { "PR #$it" } ?: "PR"
+                    BikeyardAchievementKind.LOCAL_LEGEND -> "Local legend"
+                },
+                tone = if (kind == BikeyardAchievementKind.KOM) NakvaliStatusTone.Held else NakvaliStatusTone.Live,
+            )
+        }
+        Text(
+            text = if (trail.complete) formatTrailTime(trail.durationS) else "partial",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun honours(result: BikeyardRideResult): String? = listOfNotNull(
+    result.kom.takeIf { it > 0 }?.let { "$it KOM" },
+    result.medals.takeIf { it > 0 }?.let { "$it ${if (it == 1) "medal" else "medals"}" },
+    result.localLegend.takeIf { it > 0 }?.let { "Local legend on $it" },
+).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
+private fun formatTrailTime(seconds: Int): String =
+    String.format(java.util.Locale.US, "%d:%02d", seconds / 60, seconds % 60)

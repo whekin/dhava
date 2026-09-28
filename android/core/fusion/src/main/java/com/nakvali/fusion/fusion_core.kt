@@ -806,6 +806,10 @@ internal open class UniffiVTableCallbackInterfaceCanonicalObserver(
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is
 // rather `InterfaceTooLargeException`, caused by too many methods
@@ -836,6 +840,10 @@ fun uniffi_fusion_core_checksum_func_correct_transport(
 fun uniffi_fusion_core_checksum_func_finalize_recording(
 ): Short
 fun uniffi_fusion_core_checksum_func_finalize_recording_with_progress(
+): Short
+fun uniffi_fusion_core_checksum_func_is_likely_jump(
+): Short
+fun uniffi_fusion_core_checksum_func_jump_min_airtime_ms(
 ): Short
 fun uniffi_fusion_core_checksum_func_live_totals_from_recording(
 ): Short
@@ -991,6 +999,10 @@ fun uniffi_fusion_core_fn_func_finalize_recording(`path`: RustBuffer.ByValue,uni
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_finalize_recording_with_progress(`path`: RustBuffer.ByValue,`observer`: Pointer,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+fun uniffi_fusion_core_fn_func_is_likely_jump(`durationMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+): Byte
+fun uniffi_fusion_core_fn_func_jump_min_airtime_ms(uniffi_out_err: UniffiRustCallStatus,
+): Long
 fun uniffi_fusion_core_fn_func_live_totals_from_recording(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 fun uniffi_fusion_core_fn_func_match_segment(`definition`: RustBuffer.ByValue,`recordingId`: RustBuffer.ByValue,`track`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1165,6 +1177,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_finalize_recording_with_progress() != 21643.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_is_likely_jump() != 32005.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_fusion_core_checksum_func_jump_min_airtime_ms() != 63770.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_fusion_core_checksum_func_live_totals_from_recording() != 42207.toShort()) {
@@ -6242,6 +6260,30 @@ public object FfiConverterSequenceTypeLiveSegmentEvent: FfiConverterRustBuffer<L
     uniffiRustCallWithError(FusionException) { _status ->
     UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_finalize_recording_with_progress(
         FfiConverterString.lower(`path`),FfiConverterTypeCanonicalObserver.lower(`observer`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Whether an airtime window of this duration is counted as a jump.
+         */ fun `isLikelyJump`(`durationMs`: kotlin.Long): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_is_likely_jump(
+        FfiConverterLong.lower(`durationMs`),_status)
+}
+    )
+    }
+
+
+        /**
+         * [`JUMP_MIN_AIRTIME_MS`], for copy that states the rule.
+         */ fun `jumpMinAirtimeMs`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_fusion_core_fn_func_jump_min_airtime_ms(
+        _status)
 }
     )
     }

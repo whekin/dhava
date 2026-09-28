@@ -1,6 +1,7 @@
 package com.nakvali.core.map
 
 import androidx.compose.material3.MaterialTheme
+import com.nakvali.core.ui.air
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
@@ -40,6 +41,8 @@ data class NakvaliMapPalette(
     val primary: Int,
     val primaryContainer: Int,
     val onPrimary: Int,
+    /** Airtime ink, shared with the activity list's jump band. */
+    val air: Int,
 )
 
 @Composable
@@ -78,6 +81,7 @@ fun rememberNakvaliMapPalette(): NakvaliMapPalette {
             primary = colors.primary.toArgb(),
             primaryContainer = colors.primaryContainer.toArgb(),
             onPrimary = colors.onPrimary.toArgb(),
+            air = colors.air.toArgb(),
         )
     }
 }

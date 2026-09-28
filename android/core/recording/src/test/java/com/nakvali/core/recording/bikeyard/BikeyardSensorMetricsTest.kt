@@ -16,7 +16,7 @@ class BikeyardSensorMetricsTest {
             events = listOf(AirtimeWindow(1_000, 420, 17.28, 6.02)),
         )
         val document = buildBikeyardMetricsDocument(evidence, BikeyardMounting.POCKET,
-            "gps-bounded-0.17", "1.4.0", 2_000)
+            "gps-bounded-0.17", "1.4.0", 2_000, isJump = { false }, jumpMinAirtimeMs = 250)
         val encoded = bikeyardMetricsJson.encodeToString(BikeyardSensorMetricsDocument.serializer(), document)
 
         assertTrue(encoded.contains("\"schema\":\"bikeyard.sensor-metrics\""))
@@ -31,10 +31,25 @@ class BikeyardSensorMetricsTest {
         assertFalse(encoded.contains("\"accel\""))
     }
 
+    @Test fun `jumps are sent validated so BIKEYARD counts them, short air stays a candidate`() {
+        val evidence = SensorMetricsEvidence(
+            coverage = 0.9,
+            sampleRateHz = 200.0,
+            events = listOf(AirtimeWindow(1_000, 180, 4.0, null), AirtimeWindow(5_000, 420, 11.0, null)),
+        )
+        val document = buildBikeyardMetricsDocument(evidence, BikeyardMounting.POCKET,
+            "gps-bounded-0.17", "0.1.0", 2_000, isJump = { it >= 250 }, jumpMinAirtimeMs = 250)
+
+        assertEquals(listOf("airtime", "jump"), document.events.map { it.kind })
+        assertEquals(listOf("candidate", "validated"), document.events.map { it.status })
+        assertEquals("gps-bounded-0.17+jump250", document.generator.algorithmVersion)
+    }
+
     @Test fun `low coverage cannot assert an empty measured ride`() {
         val evidence = SensorMetricsEvidence(0.5, 100.0, emptyList())
         val result = runCatching {
-            buildBikeyardMetricsDocument(evidence, BikeyardMounting.UNKNOWN, "v1", null, 2_000)
+            buildBikeyardMetricsDocument(evidence, BikeyardMounting.UNKNOWN, "v1", null, 2_000,
+                isJump = { false }, jumpMinAirtimeMs = 250)
         }
         assertTrue(result.isFailure)
     }

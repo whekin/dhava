@@ -1,87 +1,53 @@
 # Nakvali — Vision
 
-Strava is route-first and does downhill badly. Nakvali is **segment-first, downhill-first**.
+Nakvali is an offline-first downhill ride recorder and **personal timing tool**.
+It should be valuable to one rider: reliable raw capture, private timed sections,
+repeated-run comparison and sensor analysis on the phone. BIKEYARD is the home
+for public trails, shared results and the riding community.
 
-## Core differentiators
+## What the rider gets
 
-- **Smart start/finish gates.** A run starts when the rider moves *through* the start
-  gate in the segment's direction (not when hanging at the start line within a GPS
-  radius), and ends at the finish-gate crossing. Stops right after the finish don't
-  pollute the time. Gate crossing time is interpolated between GPS fixes and refined
-  with IMU (Kalman fusion: GPS 1 Hz + IMU 100–400 Hz + barometer).
-- **Honest timing.** Every result carries an uncertainty estimate ("55 s ± 2 s")
-  derived from GPS accuracy and sample density at the gates.
-- **Combo segments.** A parent segment made of child trails (e.g. Right Side → Twin →
-  Bonsai → Pontius). Combo time = sum of child segment times, transits excluded.
-  Separate stat from full top-to-bottom time — two distinct riding modes.
-- **Segmented trails** (a trail split into parts) and **short segments** allowed
-  (< ~300 m, configurable; some features like leaderboards may be off there).
-- **Segment quality via multiple recordings.** New segments require several
-  recordings/GPX files, including a *slow registration ride* (dense points).
-  Trajectories are averaged (DTW + median) for a precise reference line.
-- **Leaderboard resets on trail changes.** When a trail is confirmed changed, its
-  leaderboard resets; old boards are archived as history/reference. This removes the
-  "can't ever beat the old line" pain and lets builders make trails *funnier*, not
-  just faster.
-- **Memories.** "You were the KOM here from X to Y" is preserved forever, even after
-  being beaten.
-- **Segment-only tracking.** After the last trail, the app stops caring: transits,
-  city riding, lifts are gray/ignored (user-configurable). Results = trails hit, PRs,
-  KOMs — not a giant route line.
+- **Reliable capture.** Record GPS, IMU and barometer data through a long ride,
+  pauses, shuttles and loss of connectivity. Keep the raw recording on the
+  phone so later algorithms can recompute the result.
+- **My segments.** Define private, directed start and finish gates for a whole
+  descent, a technical section or a combination of trails. Segment definitions
+  and timing stay local; a segment does not claim to be a BIKEYARD trail.
+- **Honest timing.** Crossing a gate matters more than lingering near a GPS
+  radius. Show uncertainty, incomplete attempts and reasons a run did not
+  count rather than silently awarding a record.
+- **Personal progress.** Compare each countable attempt with the rider's own
+  previous runs and personal record. Live feedback may show progress and a PR
+  delta without needing other riders or a network connection.
+- **Riding-first totals.** Descents lead. Shuttles, lifts, transport and pauses
+  explain the day but are not credited as ridden distance or climb. Short and
+  overlapping personal segments can be useful without a public catalogue.
+- **Sensor context.** Show airtime and likely-jump estimates with their quality
+  and phone-specific provenance. Repeated good passes may refine a segment's
+  reference line without moving rider-authored gates.
 
-## Leaderboards
+## Relationship to BIKEYARD
 
-- Default filter = rider's class (bike type: full-sus vs hardtail, etc.), not "all".
-- Separate men/women boards + a combined board.
-- E-bike: v1 treats most DH trails as no-advantage (single board); trails with flat/
-  uphill sections get a separate e-bike board (v2).
-- Per-condition boards (dry/wet/snow/fresh-shaped/broken berms). Condition is set by
-  riders after runs; consensus (most-chosen per time window) wins. General weather can
-  be set globally, but trails may differ (snow on top, dry at the bottom).
+Nakvali can send a processed ride to BIKEYARD when the rider opts in and show
+BIKEYARD's matched trail results beside its own personal timing. BIKEYARD owns
+public trail identity, discovery, community leaderboards, honours, conditions
+and social features. Nakvali attributes those results and links back to BY.
 
-## Recording intelligence
+The two geometries answer different questions. A BIKEYARD trail may contain
+several personal timing segments; a personal segment may span several trails.
+An optional external trail reference adds context, never authoritative gates
+or an automatic one-to-one mapping.
 
-- Live data while riding: current speed, delta to KOM/PR, "you took the KOM" right
-  after the trail — not at upload time. Requires offline segment + leaderboard cache.
-- IMU extras: airtime (|accel| → ~0 in freefall), G-forces, landing impacts.
-- IMU-aided speed profile for run comparison (where exactly I lost/gained vs rival) —
-  GPS alone is too jumpy in forests.
-- On-bike detection; car detection (never count); lift/cable-car detection for
-  snowboarding stats (v2); power-save mode far from trails; "stop recording?" nudge
-  when leaving segment areas.
-- Bad GPS handling: auto-adjustment against trusted segment geometry; graceful
-  handling of trails that run close to each other (prompt the user if ambiguous).
-- **Danger alerts.** A fallen tree, a washed-out lip, a broken bridge. The rider stops
-  mid-segment, and the app already knows that: a stop *inside* a segment is unusual and
-  nothing else in the app cares about it. So it offers, right there, "what happened?" —
-  and if the answer is a hazard the rider cannot clear alone, it is marked on the spot,
-  with position and photo, while standing next to it.
-  - Trails carrying a live hazard are flagged on the map, readable before dropping in.
-  - Approaching a marked hazard mid-run, the phone warns by *haptics* — a long, hard
-    buzz. Nobody reads a screen at speed; the wrist and the bars are the only channel.
-  - Must work with zero connectivity, like everything else on the trail: hazards ride
-    along in the offline segment cache.
-  - Open questions, not decided: who clears a hazard and how it expires; how to avoid
-    crying wolf on a stale mark; whether the warning fires on approach or on entering
-    the segment. A warning that distracts a rider mid-descent is itself a hazard, so
-    this needs real care before it is built.
-- Anti-cheat: raw IMU stream is the natural signature — forging a GPX is easy,
-  forging a consistent IMU stream is not.
-
-## Social
-
-- Kudos + comments on activities; dedicated recent-achievements page (PRs, KOMs),
-  also commentable.
-- Segment discussion pages + trail state/status.
-- Trailbuilding: log building activity on trails, kudos for builders; crypto tips (v3).
-- Betting (virtual points, not money): "I'll take this KOM in 2 days", "I'll beat X".
-- Race mode: organized events tracked in-app (v2).
+Public Nakvali segment publishing, a second KOM system, public leaderboards
+and a parallel trail/social catalogue are outside the product path. A private
+segment stays local even if the ride that traverses it is uploaded; the ride's
+track is still shared with BIKEYARD under the chosen visibility.
 
 ## Look & feel
 
 Beautiful and simple. Material 3 Expressive, dark-first, oversized live-timing
-typography. Bike selection is interactive/visual (cards with images; 3D maybe later),
-not a dropdown.
+typography. The map and current ride are working surfaces, not a dashboard of
+social rankings.
 
 ## Reference
 

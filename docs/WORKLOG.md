@@ -4354,3 +4354,173 @@ Coolify briefly returned 503 during the push deployment, then recovered to
 updated privacy page describes separate airtime consent. No authenticated
 sensor-metrics PUT has been run yet: the released feature is available for the
 owner's first private field test, with automatic metrics off by default.
+
+## 2026-09-25 — Activities, Profile and BIKEYARD results UI pass
+
+**Profile sync bug.** "Profile sync is temporarily unavailable" was a stale
+build property: `~/.gradle/gradle.properties` still pointed Android at
+`https://dhava-api.whekin.dev`, which now answers 503 `no available server`
+from the proxy. The live API is `https://nakvali.whekin.dev` (the alpha key is
+accepted there; `/api/v1/me` then asks for the Firebase token). The local
+property was updated; the next owner build syncs. Public builds (blank alpha
+key) no longer attempt sync or advertise Google sign-in; errors now name the
+HTTP status or "can't reach Nakvali".
+
+**Activities.** Cards now carry a map thumbnail, four headline numbers
+(descent first, distance, moving time, Rust run count), month groups with ride
+count and descent, and header totals. The "Local" pill is gone (every ride is
+local). A footer appears only when there is something to say: unfinished save,
+or the BIKEYARD state — uploading, failed/needs reconnect, or uploaded with
+honours ("1 KOM · 2 medals", "matching trails…") and a one-tap BIKEYARD link to
+the exact ride page when read access exists (profile page otherwise).
+Summaries are written whenever the corrected canonical artifact is loaded and
+backfilled newest-first while the list is visible, paused during recording.
+Thumbnails use MapLibre's snapshotter with a label-free preview style on the
+same OpenFreeMap vector source; the offline canvas sketch uses the same
+projection and margin. Riding is drawn in primary, transport dashed/muted.
+
+**BIKEYARD.** `/v1/me` now also stores username, profile URL, REP level and
+lifetime totals. New connections request `rides:read_all`; existing ones get
+an *Allow* prompt that re-authorizes the same rider (different rider refused,
+their grant revoked, original kept). `GET /v1/rides/{id}` results (URL, trails,
+honours, likes/comments) are cached per upload, throttled (20 s while BIKEYARD
+matches, 6 h once ready, 1 h after a refusal) and never disconnect. Activity
+detail gains an "On BIKEYARD" section; the export action opens the ride page.
+
+**Profile.** Sections tightened. Account card: Sign out and sync retry moved
+into an overflow menu, status is one quiet line. BIKEYARD card: rider, totals,
+Allow prompt, collapsible upload settings (segmented visibility, switches).
+Disconnect is no longer a green text button: it lives in the card's overflow
+menu in error colour, still behind the confirmation dialog.
+
+Verification: 244 Android unit tests (7 new engine tests for upgrade/read
+paths, 4 preview-geometry tests), debug lint (warnings only), debug and signed
+release assembly. Visual QA on a new `Nakvali_QA` emulator (10 GB data, same
+system image) with the local shuttle-day raw recording from `tmp/`: fresh
+Rust processing in ~25 s, online snapshot, light and dark themes. Connected
+BIKEYARD and uploaded-with-results states were checked by a temporary fake UI
+state that was removed before the final build. Not verified: a real
+re-authorization against BIKEYARD and a real `GET /v1/rides/{id}` (needs the
+owner's release build and browser consent), and the device S25 (not attached).
+The old `Pixel_9_Pro` emulator ran out of internal storage during reinstall;
+Nakvali there is uninstalled with its data kept (`pm uninstall -k`). Privacy
+page copy updated locally for the read scope; not deployed. No commit or push.
+
+## 2026-09-25 — Activities/Profile fit on a 360 dp phone; airtime band; BIKEYARD descent
+
+Owner feedback from the S25 (1080 px at 480 dpi = 360 dp, font scale 1.0):
+the four-column card row clipped moving time to `1:14:4` and `DISTANC`, the
+BIKEYARD footer cut "7 trails", the Profile totals wrapped `64.4 km`, and
+descent carried a pointless minus sign.
+
+Added `NakvaliFitMetric` (core:ui): value and unit in one auto-sized text, the
+label auto-sized too, so numbers shrink instead of clipping. Cards now show
+three headline metrics (descent, distance, moving) with the run count moved to
+the subtitle; descent, month and header totals are unsigned. A separate
+"Possible air" band appears when the ride has airtime candidates: jumps, total
+air, longest and a tick timeline over the recording (height = share of the
+longest). It uses the same `analysis.airtimeWindows` set as the activity
+screen and keeps the "phone sensor, unverified" caveat. Summary schema is now
+2 and outdated summaries are rebuilt while the list is visible.
+
+BIKEYARD: the card link is a plain "BY" chip, not BIKEYARD's logo — they
+publish no integration mark and their API terms (1.2) forbid implying
+endorsement. `/v1/me` totals contain only climb, so Profile now sums
+`elevation_loss_meters` and achievement counts from `/v1/me/rides` (100 per
+page, at most 20 pages, only with read access, last sums kept on failure).
+Profile shows rides/distance/descent/moving in a 2×2 grid plus a KOM/medal
+line; the rider name auto-fits and the mark is a "BY" monogram.
+
+Verified: 246 Android unit tests (2 new ride-sum tests), debug lint, release
+assembly, and screenshots on the QA emulator resized to the S25's 1080×2340 at
+480 dpi (fake connected/uploaded state used only for screenshots and removed).
+The release APK was installed on the S25 with its screen off and no
+RecordingService running; the installed APK hash matches the build. The
+S25's real BIKEYARD read (the "7 trails" result) confirms `rides:read_all`
+authorization and `GET /v1/rides/{id}` work live. No commit or push.
+
+## 2026-09-26 — Leave the recorder mid-ride; airtime drawn by duration
+
+**Recorder exit.** The recorder hides the bottom navigation while preparing or
+recording, which left no way into the rest of the app. It now shows a labelled
+"Hide" chevron (top-left, away from the ride controls) that goes to Activities
+while the service keeps recording. `RecordingReturnBar` (feature:record) sits
+above the navigation on every other screen while a ride is preparing,
+recording, paused or waiting to be saved — live dot, elapsed time and
+distance, "Back to ride" — and returns to the recorder. It reads
+`RecordingRepository.state` directly and renders nothing when idle. Verified
+on the QA emulator: hide → Activities with bar → back to ride with the timer
+still running; a reinstall mid-ride produced the normal interrupted-ride
+recovery and Continue resumed it. On the slow emulator the outgoing map
+surface lingered for about a second after Hide before the list settled.
+
+**Airtime on the activity map.** Duration now drives the drawing. Airtime got
+its own ink (`ColorScheme.air`, lavender, used by the map and the list's jump
+band): ochre already marks basemap trails and climbing, and flights drawn in
+tertiary read as more trail. Overview discs are sized and made more opaque by
+the summed airtime of each screen-space group and labelled "11.9 s ×39"; zoomed
+in, each candidate's disc and "0.6 s" label follow its own duration, and the
+flight itself is drawn along the fused track from takeoff to landing, wider
+the longer it was. The takeoff icon bitmap was retired. Same
+`analysis.airtimeWindows` candidates and "possible airtime" caveat as before.
+Live recorder descent is unsigned too.
+
+Verified: 247 Android unit tests (flight path through a fix, cluster sums),
+debug lint, release assembly, emulator screenshots at the S25's 360 dp.
+An ANR appeared once on a freshly booted emulator under heavy system load
+(load average 10.8, dialer at 76 % CPU); it did not reproduce on retry. The
+release APK was installed on the S25 with no RecordingService running; hash
+matches the build. No commit or push.
+
+## 2026-09-26 — Count jumps from 250 ms of airtime
+
+BIKEYARD showed "0 jumps · not counted · 23 unconfirmed" for a synced ride.
+That was the documented contract working: its `SensorStats` count only
+`validated` events, and Nakvali sent every event as `airtime`/`candidate`.
+The owner opted to count likely jumps instead. A temporary probe over the
+local shuttle-day raw file (75 candidates; no coordinates printed; probe
+removed afterwards) showed the break described in DECISIONS: short windows
+soft-landing, everything from 250 ms on a descent, none in the shuttle.
+
+Added `is_likely_jump` / `jump_min_airtime_ms` to fusion-core (UniFFI) with a
+threshold test, rebuilt the Android libraries and bindings. Summaries (schema
+3) store jump count and jump airtime and flag timeline marks. Card band is
+now "AIR · phone sensor · +N shorter" with jumps, jump airtime and longest;
+short candidates are grey ticks. The activity screen's section counts jumps
+and labels shorter events "short candidate · not counted". Map clusters count
+and size by jumps only; short candidates are specks without labels. BIKEYARD
+documents send jumps as validated `jump` events; copy in Profile, the export
+sheet and the privacy page (local, undeployed) now says so. Already-synced
+rides keep their old document until "Resend jumps" in the ride's export sheet.
+
+Verified: fusion-core 181 tests and Clippy, 249 Android unit tests, debug
+lint, release assembly; QA emulator shows 47 jumps / 18.7 s / 0.98 s with 28
+shorter for the shuttle day. Release installed on the S25 with no recording
+running; hash matches. No live resend was performed. No commit or push.
+
+## 2026-09-28 — Personal segment timing; BIKEYARD public trails
+
+The owner chose a narrow product boundary: Nakvali keeps private rider-authored
+timing segments, personal attempts, PRs and eventual live comparison with one's
+own record. BIKEYARD owns public trail identity, leaderboards, honours and
+social features. One BY trail may contain several personal segments; one
+personal segment may span several trails. An optional attributed link is
+context, never imported geometry or authoritative gates. Uploading a ride
+shares its processed track with BIKEYARD under the chosen visibility, while
+the local segment definition is not uploaded.
+
+Rewrote VISION around offline recording and personal timing, changed ROADMAP's
+frozen shared competition ideas to an explicit product boundary, updated the
+CONTEXT glossary to remove published Nakvali segments/KOM leaderboard terms,
+and recorded the architectural decision in DECISIONS. The segments library
+now says "My segments" / "Personal timing" and its empty state explains that
+timing stays on the phone. Renamed the name validator's "trail" prompt to
+"segment" without changing the validation rule. BIKEYARD's public OpenAPI
+was checked: trail and leaderboard endpoints are GET-only, with no trail
+geometry or trail creation endpoint. Whether BY offers private trails in its
+own app remains unconfirmed and does not determine this product boundary.
+
+Validation: segment and core-recording unit tests, debug APK assembly and
+`git diff --check` pass. No segment matching or persistence logic changed; no
+commit, push or device install. Existing unrelated work in the shared working
+tree was preserved.

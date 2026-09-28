@@ -650,6 +650,7 @@ private fun ActivityDetailsSheet(
             ) {
                 NakvaliDivider(Modifier.padding(vertical = NakvaliSpacing.large))
                 ActivityMetrics(recording, analysis, ride, quality, rideInsights)
+                BikeyardRideResults(recording, Modifier.padding(top = NakvaliSpacing.xLarge))
                 segmentRuns?.takeIf { it.isNotEmpty() }?.let { runs ->
                     ActivitySegmentRuns(
                         runs = runs,
@@ -884,7 +885,7 @@ private fun MapLegendControl(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     MapLegendSection.Airtime -> Text(
-                        "↑  Possible airtime · zoom in to see",
+                        "●  Jumps · bigger = longer in the air · specks are short candidates",
                         modifier = Modifier.padding(NakvaliSpacing.medium),
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -952,7 +953,8 @@ private fun RecordingStatusPill(status: RecordingStatus) {
         RecordingStatus.FAILED -> "Upload failed" to NakvaliStatusTone.Alert
         // Queued is unsettled rather than wrong, which is what Held is for.
         RecordingStatus.PENDING_UPLOAD -> "Queued" to NakvaliStatusTone.Held
-        RecordingStatus.RECORDED -> "Local" to NakvaliStatusTone.Neutral
+        // Every ride lives on the phone; saying so on each one is noise.
+        RecordingStatus.RECORDED -> return
         RecordingStatus.RECORDING -> "Recording" to NakvaliStatusTone.Live
     }
     NakvaliStatusPill(text = presentation.first, tone = presentation.second)
